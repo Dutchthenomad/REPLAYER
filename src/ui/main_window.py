@@ -13,6 +13,7 @@ from typing import Optional, List, Dict
 import threading
 
 from core import ReplayEngine, TradeManager
+from core.game_queue import GameQueue
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
 from bot import BotInterface, BotController, list_strategies
@@ -34,6 +35,11 @@ class MainWindow:
         # Initialize replay engine and trade manager
         self.replay_engine = ReplayEngine(state)
         self.trade_manager = TradeManager(state)
+
+        # Initialize game queue for multi-game sessions
+        recordings_dir = config.FILES['recordings_dir']
+        self.game_queue = GameQueue(recordings_dir)
+        self.multi_game_mode = False  # Programmatically controlled, not via UI
 
         # Initialize bot
         self.bot_interface = BotInterface(state, self.trade_manager)
@@ -414,6 +420,9 @@ class MainWindow:
     
     def load_game_file(self, filepath: Path):
         """Load game data from file using ReplayEngine"""
+        # Sync multi-game mode to replay engine
+        self.replay_engine.multi_game_mode = self.multi_game_mode
+
         success = self.replay_engine.load_file(filepath)
 
         if success:
@@ -647,15 +656,44 @@ class MainWindow:
 
     def _on_game_end(self, metrics: dict):
         """Callback for game end"""
-        # Stop bot if running
-        if self.bot_enabled:
-            self.bot_executor.stop()
-            self.bot_enabled = False
-            self.bot_toggle_button.config(text="🤖 Enable Bot", bg='#666666')
-            self.bot_status_label.config(text="Bot: Disabled", fg='#666666')
-
         self.log(f"Game ended. Final balance: {metrics.get('current_balance', 0):.4f} SOL")
-        self.play_button.config(text="▶️ Play")
+
+        # Check bankruptcy and reset for continuous testing
+        if self.state.get('balance') < Decimal('0.001'):
+            logger.warning("BANKRUPT - Resetting balance to initial")
+            self.state.update(balance=self.state.get('initial_balance'))
+            self.log("⚠️ Balance reset to initial (bankruptcy)")
+
+        # Multi-game auto-advance (if enabled programmatically)
+        if self.multi_game_mode and self.game_queue.has_next():
+            next_file = self.game_queue.next_game()
+            logger.info(f"Auto-loading next game: {next_file.name}")
+            self.log(f"Auto-loading game {self.game_queue.current_index}/{len(self.game_queue)}")
+            # Instant advance - NO DELAY
+            self._load_next_game(next_file)
+        else:
+            # Stop bot (original behavior when NOT in multi-game mode)
+            if self.bot_enabled:
+                self.bot_executor.stop()
+                self.bot_enabled = False
+                self.bot_toggle_button.config(text="🤖 Enable Bot", bg='#666666')
+                self.bot_status_label.config(text="Bot: Disabled", fg='#666666')
+
+            self.play_button.config(text="▶️ Play")
+
+    def _load_next_game(self, filepath: Path):
+        """Load next game in multi-game session (instant, no delay)"""
+        try:
+            self.load_game_file(filepath)
+            # Keep bot running if it was enabled
+            if self.bot_enabled:
+                # Bot stays enabled across games
+                logger.info("Bot remains enabled for next game")
+        except Exception as e:
+            logger.error(f"Failed to load next game: {e}")
+            self.log(f"❌ Failed to load next game: {e}")
+            # Stop multi-game mode on error
+            self.multi_game_mode = False
 
     # ========================================================================
     # EVENT HANDLERS

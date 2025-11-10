@@ -42,6 +42,7 @@ class ReplayEngine:
         self.is_playing = False
         self.playback_speed = 1.0  # 1.0 = normal speed
         self.playback_thread: Optional[threading.Thread] = None
+        self.multi_game_mode = False  # NEW: Multi-game auto-advance mode
 
         # Thread safety (AUDIT FIX: Added _stop_event for clean shutdown)
         self._lock = threading.RLock()
@@ -338,7 +339,9 @@ class ReplayEngine:
 
     def _handle_game_end(self):
         """Handle reaching end of game"""
-        self.pause()
+        # Only pause if NOT in multi-game mode (instant advance for multi-game)
+        if not self.multi_game_mode:
+            self.pause()
 
         # Calculate final metrics
         metrics = self.state.calculate_metrics()
