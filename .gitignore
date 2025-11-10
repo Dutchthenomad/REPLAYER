@@ -66,3 +66,6 @@ temp/
 
 # Claude Code artifacts
 .claude/
+
+# ML Models (large binary files - commented to track in git for now)
+# models/*.pkl
