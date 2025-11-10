@@ -4,6 +4,17 @@
 
 A professional, modular replay viewer for Rugs.fun trading game with bot automation capabilities. This refactored version transforms the monolithic 2400+ line script into a clean, maintainable, and extensible architecture.
 
+![REPLAYER UI](replayer_ui_screenshot.png)
+
+## ✨ Features
+
+- **Interactive Replay Viewer** - Step through 900+ recorded games with full playback controls
+- **Bot Automation** - 3 trading strategies (conservative, aggressive, sidebet-focused)
+- **Empirical Analysis** - Extract trading patterns for RL bot training
+- **Event-Driven Architecture** - Modular, loosely coupled components
+- **Real-Time Visualization** - Professional chart widget with zoom controls
+- **142 Tests** - Comprehensive test coverage across all modules
+
 ## 📁 Project Structure
 
 ```
