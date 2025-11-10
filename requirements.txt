@@ -1,0 +1,22 @@
+# Core dependencies
+tkinter  # Usually comes with Python
+typing_extensions>=4.0.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=3.0.0
+pytest-mock>=3.6.0
+
+# Code quality
+black>=22.0.0
+flake8>=4.0.0
+mypy>=0.950
+pylint>=2.12.0
+
+# Documentation
+sphinx>=4.0.0
+sphinx-rtd-theme>=1.0.0
+
+# Performance monitoring (optional)
+memory-profiler>=0.60.0
+line-profiler>=3.5.0

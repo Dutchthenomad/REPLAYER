@@ -1,0 +1,101 @@
+"""
+Position data model
+"""
+
+from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import Optional
+from .enums import PositionStatus
+
+
+@dataclass
+class Position:
+    """
+    Represents a trading position
+
+    Attributes:
+        entry_price: Price at entry (multiplier, e.g., 1.0 = 1x)
+        amount: Amount of SOL invested
+        entry_time: Unix timestamp of entry
+        entry_tick: Tick number at entry
+        status: Position status (active/closed)
+        exit_price: Price at exit (if closed)
+        exit_time: Unix timestamp of exit (if closed)
+        exit_tick: Tick number at exit (if closed)
+        pnl_sol: Profit/loss in SOL (if closed)
+        pnl_percent: Profit/loss percentage (if closed)
+    """
+    entry_price: Decimal
+    amount: Decimal
+    entry_time: float
+    entry_tick: int
+    status: str = field(default=PositionStatus.ACTIVE)
+    exit_price: Optional[Decimal] = None
+    exit_time: Optional[float] = None
+    exit_tick: Optional[int] = None
+    pnl_sol: Optional[Decimal] = None
+    pnl_percent: Optional[Decimal] = None
+
+    def calculate_unrealized_pnl(self, current_price: Decimal) -> tuple[Decimal, Decimal]:
+        """
+        Calculate unrealized P&L for active position
+
+        Args:
+            current_price: Current market price
+
+        Returns:
+            Tuple of (pnl_sol, pnl_percent)
+        """
+        price_change = current_price / self.entry_price - 1
+        pnl_sol = self.amount * price_change
+        pnl_percent = price_change * 100
+        return pnl_sol, pnl_percent
+
+    def close(self, exit_price: Decimal, exit_time: float, exit_tick: int):
+        """
+        Close the position and calculate realized P&L
+
+        Args:
+            exit_price: Price at exit
+            exit_time: Unix timestamp of exit
+            exit_tick: Tick number at exit
+        """
+        self.status = PositionStatus.CLOSED
+        self.exit_price = exit_price
+        self.exit_time = exit_time
+        self.exit_tick = exit_tick
+
+        # Calculate realized P&L
+        price_change = exit_price / self.entry_price - 1
+        self.pnl_sol = self.amount * price_change
+        self.pnl_percent = price_change * 100
+
+    def add_to_position(self, additional_amount: Decimal, additional_price: Decimal):
+        """
+        Add to existing position (calculate weighted average entry)
+
+        Args:
+            additional_amount: Additional SOL amount
+            additional_price: Price of additional purchase
+        """
+        total_amount = self.amount + additional_amount
+        weighted_avg_price = (
+            (self.amount * self.entry_price + additional_amount * additional_price) / total_amount
+        )
+        self.amount = total_amount
+        self.entry_price = weighted_avg_price
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary"""
+        return {
+            'entry_price': float(self.entry_price),
+            'amount': float(self.amount),
+            'entry_time': self.entry_time,
+            'entry_tick': self.entry_tick,
+            'status': self.status,
+            'exit_price': float(self.exit_price) if self.exit_price else None,
+            'exit_time': self.exit_time,
+            'exit_tick': self.exit_tick,
+            'pnl_sol': float(self.pnl_sol) if self.pnl_sol else None,
+            'pnl_percent': float(self.pnl_percent) if self.pnl_percent else None
+        }

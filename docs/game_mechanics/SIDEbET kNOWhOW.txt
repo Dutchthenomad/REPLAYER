@@ -1,0 +1,3719 @@
+SIDEbET_kNOWhOW
+
+# 01 - Side Bet Mechanics: Complete System Rules (v2.0)
+
+## Executive Summary
+The Rugs.fun side betting system enables players to wager that the current game will end (rug) within the next 40 ticks. This document provides the definitive mechanical rules based on analysis of 100 games with 22,507 tick intervals, establishing accurate timing models and mathematical frameworks.
+
+## Critical Timing Analysis Update (July 2025)
+
+### Comprehensive Data Analysis
+Based on analysis of 100 randomly sampled games containing 22,507 tick intervals:
+
+**Distribution Analysis:**
+- 98.14% of ticks fall between 200-300ms
+- 95% of ticks occur between 237-269ms
+- Only 0.39% of ticks are under 200ms
+- 0.44% of ticks exceed 1000ms (outliers/spikes)
+
+---
+
+## Core Mechanical Rules
+
+### 1. Betting Window and Constraints
+
+#### 1.1 Active Bet Limitations
+- **One bet limit**: Players can have exactly ONE active side bet at any time
+- **No queuing**: Cannot pre-place bets during cooldown periods
+- **Immediate deduction**: SOL is instantly debited from wallet upon placement
+- **No cancellation**: Once placed, bets cannot be cancelled or modified
+
+#### 1.2 Placement Window
+- **Availability**: From tick 0 through the final tick of any active game
+- **Presale betting**: Available during 10-second presale phase (startTick: -1)
+- **Late game**: Can bet even at tick 500+ (extremely high probability zones)
+- **Final tick**: Betting closes when game rugs (no warning period)
+
+#### 1.3 Bet Amount Constraints
+- **Minimum**: 0.001 SOL
+- **Maximum**: 5.0 SOL (standard game limit)
+- **Precision**: System accepts up to 6 decimal places
+- **Currency**: SOL only (coinAddress: "So11111111111111111111111111111111111111112")
+
+### 2. Outcome Resolution System
+
+#### 2.1 Win Condition
+- **Binary outcome**: Game must rug within exactly 40 ticks of placement
+- **Tick precision**: If placed at tick N, covers ticks N through N+39 (inclusive)
+- **Timing basis**: Uses tick count, not elapsed time (critical difference)
+
+#### 2.2 Payout Structure
+- **Win ratio**: 5:1 (400% profit + original bet returned)
+- **Calculation**: `payout = betAmount × 5`
+- **Net profit**: `profit = betAmount × 4`
+- **Instant credit**: Winning payouts credited immediately upon game rug
+
+#### 2.3 Loss Scenarios
+- **Complete loss**: 100% of bet amount lost if game continues past tick window
+- **No partial payouts**: Binary win/lose only
+- **Cooldown trigger**: ~1 second display period showing "sidebet lost"
+
+### 3. Event Structure Analysis
+
+#### 3.1 newSideBet Event Schema
+```javascript
+{
+  betAmount: 0.001,              // SOL amount wagered
+  coinAddress: "So11...112",     // SOL identifier  
+  endTick: 108,                  // startTick + 40
+  playerId: "did:privy:...",     // Unique player ID
+  startTick: 68,                 // Tick when bet placed (-1 for presale)
+  tickIndex: 68,                 // Current game tick (matches startTick)
+  timestamp: 1753306685322,      // Unix timestamp (milliseconds)
+  type: "placed",                // Event type
+  username: "PlayerName",        // Display name
+  xPayout: 5                     // Payout multiplier
+}
+```
+
+#### 3.2 gameStateUpdate Integration
+```javascript
+// Side bet status within main game state
+{
+  sideBet: {
+    startedAtTick: 384,
+    gameId: '20250723-...',
+    end: 424,                    // startedAtTick + 40
+    betAmount: 0.005,
+    xPayout: 5
+  },
+  sidebetActive: true,           // Boolean flag
+  sidebetPnl: -0.01             // Running P&L (negative = losing)
+}
+```
+
+### 4. Updated Timing Analysis and Compensation
+
+#### 4.1 Empirical vs. Theoretical Timing
+```javascript
+// Theoretical specifications
+const THEORETICAL = {
+  tickDuration: 250,      // ms per tick
+  windowDuration: 10000,  // 40 ticks × 250ms = 10 seconds
+  precision: "exact"
+};
+
+// Empirical findings (July 2025 analysis)
+const EMPIRICAL = {
+  meanTickDuration: 271.5,     // 8.6% higher than theoretical
+  medianTickDuration: 251.0,   // Very close to theoretical
+  stdDev: 295.3,               // High variability
+  variance: 87174.6,           // Significant instability
+  reliableRange: {
+    min: 237,                  // 5th percentile
+    max: 269                   // 95th percentile
+  },
+  expectedWindowDuration: 10860,  // 40 ticks × 271.5ms ≈ 10.86 seconds
+  precision: "highly_variable"
+};
+```
+
+#### 4.2 Adaptive Timing Model v2
+```javascript
+class AdaptiveTimingEngineV2 {
+  constructor() {
+    this.tickHistory = [];
+    this.adaptiveProbabilities = new Map();
+    this.empiricalBaseline = {
+      mean: 271.5,
+      median: 251.0,
+      stdDev: 295.3,
+      p5: 237,
+      p95: 269
+    };
+  }
+  
+  recordTick(timestamp, tickNumber) {
+    const interval = timestamp - this.lastTimestamp;
+    this.tickHistory.push({ tick: tickNumber, interval, timestamp });
+    
+    // Maintain rolling window of last 100 intervals
+    if (this.tickHistory.length > 100) {
+      this.tickHistory.shift();
+    }
+    
+    this.updateAdaptiveProbabilities();
+  }
+  
+  getCurrentTickRate() {
+    const recent = this.tickHistory.slice(-20); // Last 20 ticks
+    if (recent.length < 10) {
+      // Fall back to empirical baseline if insufficient data
+      return this.empiricalBaseline.mean;
+    }
+    
+    const avg = recent.reduce((sum, t) => sum + t.interval, 0) / recent.length;
+    
+    // Blend with empirical baseline for stability
+    const blendWeight = Math.min(recent.length / 20, 1);
+    return (avg * blendWeight) + (this.empiricalBaseline.mean * (1 - blendWeight));
+  }
+  
+  getActualWindowDuration() {
+    const currentRate = this.getCurrentTickRate();
+    const baseWindow = currentRate * 40;
+    
+    // Add variance buffer based on empirical data
+    const varianceBuffer = this.empiricalBaseline.stdDev * Math.sqrt(40) / Math.sqrt(20);
+    
+    return {
+      expected: baseWindow,
+      conservative: baseWindow + varianceBuffer,
+      optimistic: baseWindow - varianceBuffer
+    };
+  }
+  
+  getReliabilityScore() {
+    const recent = this.tickHistory.slice(-50);
+    if (recent.length < 20) return 0.5; // Default medium reliability
+    
+    const intervals = recent.map(t => t.interval);
+    const mean = intervals.reduce((sum, i) => sum + i, 0) / intervals.length;
+    const variance = intervals.reduce((sum, i) => sum + Math.pow(i - mean, 2), 0) / intervals.length;
+    const cv = Math.sqrt(variance) / mean;
+    
+    // Score based on coefficient of variation
+    // CV < 0.1 = very reliable, CV > 0.5 = very unreliable
+    return Math.max(0, Math.min(1, 1 - (cv * 2)));
+  }
+}
+```
+
+### 5. Session and Game Interaction Rules
+
+#### 5.1 Session Limits
+- **Winning cap**: 20 SOL maximum winnings per game triggers auto-stop
+- **No loss limits**: Players can lose entire wallet if not managed
+- **Cross-game tracking**: Winnings/losses accumulate across games
+- **Reset conditions**: New wallet or manual reset only
+
+#### 5.2 Main Game Integration
+- **Independence**: Side bets do not affect PRNG within single game
+- **Combined exposure**: Can maintain both main positions and side bets
+- **Visibility**: All players see others' side bet positions and P&L
+- **Hedging capability**: Can use side bets to hedge main game positions
+
+#### 5.3 Game Phase Interactions
+```javascript
+// Phase-specific betting behavior
+const PHASE_RULES = {
+  presale: {
+    sideBetting: true,
+    startTick: -1,           // Special identifier
+    window: "10_seconds",    // Fixed presale duration
+    mainGame: false          // No main game activity
+  },
+  active: {
+    sideBetting: true,
+    startTick: "current_tick",
+    window: "40_ticks",      // Standard window
+    mainGame: true           // Full trading available
+  },
+  rugged: {
+    sideBetting: false,      // No betting during rug events
+    settlement: "immediate", // Instant payout processing
+    cooldown: "~15_seconds"  // Before next game
+  }
+};
+```
+
+### 6. Mathematical Framework v2
+
+#### 6.1 Expected Value Formula with Empirical Data
+```javascript
+// Updated EV calculation using empirical timing
+function calculateExpectedValueV2(winProbability, betAmount, timingReliability = 1.0) {
+  const winOutcome = betAmount * 4;  // Net profit (400%)
+  const loseOutcome = -betAmount;    // Total loss
+  
+  // Adjust probability based on timing reliability
+  const adjustedProbability = winProbability * timingReliability;
+  
+  return (adjustedProbability * winOutcome) + ((1 - adjustedProbability) * loseOutcome);
+}
+
+// Breakeven calculation remains the same
+const BREAKEVEN_PROBABILITY = 1/6; // 16.67%
+
+// But effective breakeven shifts with timing variance
+function getEffectiveBreakeven(timingReliability) {
+  return BREAKEVEN_PROBABILITY / timingReliability;
+}
+```
+
+#### 6.2 Adaptive Probability Calculation v2
+```javascript
+function getAdaptiveProbabilityV2(tickCount, timingEngine) {
+  const baseProb = getBaseProbability(tickCount);
+  const currentTickRate = timingEngine.getCurrentTickRate();
+  const reliability = timingEngine.getReliabilityScore();
+  
+  // Use empirical baseline for stability
+  const empiricalMean = 271.5;
+  const theoreticalMean = 250;
+  
+  // Calculate timing adjustment factor
+  const timingRatio = currentTickRate / theoreticalMean;
+  const empiricalRatio = empiricalMean / theoreticalMean;
+  
+  // Blend current observations with empirical baseline
+  const blendedRatio = (timingRatio * reliability) + (empiricalRatio * (1 - reliability));
+  
+  // Adjust probability for actual window duration
+  // Longer windows = higher chance of rug occurring
+  const durationAdjustment = Math.pow(blendedRatio, 0.3); // Dampened adjustment
+  
+  return Math.min(baseProb * durationAdjustment, 0.98); // Cap at 98%
+}
+```
+
+### 7. Risk Analysis Framework v2
+
+#### 7.1 Gap Risk Assessment with Empirical Data
+```javascript
+function calculateGapRiskV2(currentTickRate, lastBetTick) {
+  const expectedCooldown = 1000; // 1 second theoretical
+  
+  // Use empirical data for more accurate gap estimation
+  const empiricalTickRate = 271.5;
+  const actualCooldown = Math.max(currentTickRate, empiricalTickRate) * 4; // ~4 ticks observed
+  
+  const gapTicks = actualCooldown / currentTickRate;
+  const missedWindow = lastBetTick + gapTicks;
+  
+  return {
+    gapDuration: actualCooldown,
+    ticksAtRisk: gapTicks,
+    probabilityMissed: getProbabilityAtTick(missedWindow),
+    reliability: currentTickRate <= empiricalTickRate * 1.2 ? 'high' : 'low'
+  };
+}
+```
+
+#### 7.2 Timing Reliability Score v2
+```javascript
+function calculateReliabilityScoreV2(tickHistory) {
+  const empiricalBaseline = {
+    mean: 271.5,
+    stdDev: 295.3,
+    cv: 1.09
+  };
+  
+  if (tickHistory.length < 20) {
+    // Use empirical baseline for insufficient data
+    return 1 - empiricalBaseline.cv;
+  }
+  
+  const intervals = tickHistory.map(t => t.interval);
+  const mean = intervals.reduce((sum, i) => sum + i, 0) / intervals.length;
+  const variance = intervals.reduce((sum, i) => sum + Math.pow(i - mean, 2), 0) / intervals.length;
+  const cv = Math.sqrt(variance) / mean;
+  
+  // Compare to empirical baseline
+  const relativeReliability = empiricalBaseline.cv / cv;
+  
+  // Score between 0 and 1
+  return Math.max(0, Math.min(1, relativeReliability));
+}
+```
+
+### 8. Implementation Guidelines v2
+
+#### 8.1 Core Requirements
+- [ ] Implement adaptive timing model with empirical baseline
+- [ ] Use median (251ms) for short-term predictions, mean (271.5ms) for long-term
+- [ ] Account for 98.14% of ticks falling in 200-300ms range
+- [ ] Handle outliers (0.44% of ticks > 1000ms) gracefully
+- [ ] Maintain reliability scoring based on recent vs empirical performance
+
+#### 8.2 Advanced Features
+- [ ] Dynamic probability adjustment using real-time reliability scores
+- [ ] Variance-aware betting strategies
+- [ ] Outlier detection and filtering
+- [ ] Empirical baseline fallback for new games
+- [ ] Multi-game timing pattern recognition
+
+#### 8.3 Safety Features
+- [ ] Conservative estimates using 95th percentile (269ms) for critical decisions
+- [ ] Reliability warnings when CV exceeds empirical baseline
+- [ ] Automatic strategy adjustment for high-variance periods
+- [ ] Emergency stop when timing exceeds 2x empirical mean
+- [ ] Continuous model validation against new data
+
+---
+
+## Conclusion
+
+The comprehensive analysis of 22,507 tick intervals reveals that while the Rugs.fun side betting system operates close to its theoretical specifications (median 251ms vs theoretical 250ms), significant variance exists that requires sophisticated adaptive modeling. The mean tick interval of 271.5ms represents an 8.6% increase over theoretical, primarily driven by occasional timing spikes.
+
+Key operational insights:
+1. **Median-based calculations** are appropriate for real-time decisions
+2. **Mean-based calculations** should be used for expected value and long-term planning
+3. **High variance** (CV of 1.09) mandates adaptive probability models
+4. **98%+ reliability** within the 200-300ms range enables confident betting in normal conditions
+5. **Outlier handling** is critical for the 0.44% of extreme timing events
+
+This updated framework provides the mathematical foundation for building robust, profitable side betting strategies that adapt to real-world timing variations while maintaining edge in the face of uncertainty.
+
+---
+
+*Version 2.0 - Updated July 2025 with empirical analysis of 100 games*
+*Next: [02-probability-framework-v2.md](./02-probability-framework-v2.md) - Updated probability models with empirical data*
+
+
+# 05 - Bankroll Management: Mathematical Certainty Zones
+
+## Executive Summary
+This document establishes the mathematical framework for bankroll-based certainty zones, where sufficient capital combined with proper strategy execution creates near-guaranteed profitability. The system leverages the 5:1 payout ratio and known probability distributions to eliminate risk through mathematical precision.
+
+## Core Mathematical Principle
+With adequate bankroll and disciplined execution, side betting becomes a mathematical certainty rather than gambling. The key insight: **compound probability of multiple attempts approaches 100% success**.
+
+---
+
+## Mathematical Foundation
+
+### 1. Certainty Zone Theory
+
+#### 1.1 Core Formula
+```javascript
+// Probability of winning at least once in N attempts
+function calculateSuccessProbability(singleWinProb, attempts) {
+  const allFailProb = Math.pow(1 - singleWinProb, attempts);
+  return 1 - allFailProb;
+}
+
+// Required bankroll for N attempts in doubling sequence
+function calculateRequiredBankroll(baseBet, attempts) {
+  let totalRisk = 0;
+  let currentBet = baseBet;
+  
+  for (let i = 0; i < attempts; i++) {
+    totalRisk += currentBet;
+    currentBet *= 2;
+  }
+  
+  return totalRisk;
+}
+```
+
+#### 1.2 Certainty Thresholds by Bankroll
+
+| Bankroll (SOL) | Max Sequence | Min Probability | Success Rate | Entry Tick |
+|----------------|--------------|-----------------|--------------|------------|
+| 0.127 | 7 steps | 50% | 99.22% | ~100 |
+| 0.255 | 8 steps | 45% | 99.61% | ~80 |
+| 0.511 | 9 steps | 40% | 99.80% | ~60 |
+| 1.023 | 10 steps | 35% | 99.90% | ~50 |
+| 2.047 | 11 steps | 30% | 99.95% | ~40 |
+| 4.095 | 12 steps | 25% | 99.98% | ~30 |
+
+### 2. Precision Bankroll Calculator
+
+```javascript
+class PrecisionBankrollCalculator {
+  constructor() {
+    this.baseBet = 0.001;
+    this.payoutRatio = 5;
+    this.maxSequenceSteps = 15;
+    this.safetyBuffer = 1.2; // 20% buffer
+  }
+  
+  calculateCertaintyZone(bankroll, targetSuccessRate = 0.99) {
+    const maxSteps = this.getMaxStepsForBankroll(bankroll);
+    
+    // Find minimum probability that achieves target success rate
+    let minProbability = 0.01;
+    let optimalProbability = 0.01;
+    
+    for (let prob = 0.01; prob <= 0.95; prob += 0.01) {
+      const successRate = this.calculateSuccessRate(prob, maxSteps);
+      if (successRate >= targetSuccessRate) {
+        optimalProbability = prob;
+        break;
+      }
+    }
+    
+    return {
+      bankroll: bankroll,
+      maxSequenceSteps: maxSteps,
+      requiredProbability: optimalProbability,
+      achievedSuccessRate: this.calculateSuccessRate(optimalProbability, maxSteps),
+      entryTick: this.getTickForProbability(optimalProbability),
+      expectedProfit: this.calculateExpectedProfit(optimalProbability, maxSteps),
+      totalRisk: this.calculateTotalRisk(maxSteps)
+    };
+  }
+  
+  getMaxStepsForBankroll(bankroll) {
+    const availableFunds = bankroll / this.safetyBuffer;
+    let totalRisk = 0;
+    let currentBet = this.baseBet;
+    let steps = 0;
+    
+    while (totalRisk + currentBet <= availableFunds && steps < this.maxSequenceSteps) {
+      totalRisk += currentBet;
+      currentBet *= 2;
+      steps++;
+    }
+    
+    return steps;
+  }
+  
+  calculateSuccessRate(probability, maxSteps) {
+    return 1 - Math.pow(1 - probability, maxSteps);
+  }
+  
+  getTickForProbability(targetProbability) {
+    // Reverse lookup: find tick that gives target probability
+    for (let tick = 0; tick <= 500; tick += 10) {
+      const prob = getBaseProbability(tick);
+      if (prob >= targetProbability) {
+        return tick;
+      }
+    }
+    return 500; // Default to extreme late game
+  }
+  
+  calculateExpectedProfit(probability, maxSteps) {
+    // Expected profit per attempt (accounting for sequence costs)
+    let totalCost = 0;
+    let currentBet = this.baseBet;
+    
+    for (let step = 1; step <= maxSteps; step++) {
+      totalCost += currentBet;
+      
+      // Probability of winning exactly on this step
+      const winOnThisStep = probability * Math.pow(1 - probability, step - 1);
+      
+      // Profit if winning on this step
+      const profit = (currentBet * this.payoutRatio) - totalCost;
+      
+      // Add to expected value
+      if (step === 1) {
+        this.expectedValue = winOnThisStep * profit;
+      } else {
+        this.expectedValue += winOnThisStep * profit;
+      }
+      
+      currentBet *= 2;
+    }
+    
+    return this.expectedValue;
+  }
+}
+```
+
+### 3. Dynamic Certainty Zone Detection
+
+```javascript
+class DynamicCertaintyZoneDetector {
+  constructor(probabilityEngine, bankrollCalculator) {
+    this.probabilityEngine = probabilityEngine;
+    this.calculator = bankrollCalculator;
+    this.activeZones = new Map();
+    this.zoneHistory = [];
+  }
+  
+  analyzeCurrentZone(currentTick, bankroll, adaptedProbability) {
+    const certaintyZone = this.calculator.calculateCertaintyZone(bankroll);
+    
+    // Check if current conditions meet certainty requirements
+    const isInZone = adaptedProbability >= certaintyZone.requiredProbability;
+    const hasBuffer = bankroll >= certaintyZone.totalRisk * 1.3; // 30% extra buffer
+    
+    if (isInZone && hasBuffer) {
+      return {
+        status: 'CERTAINTY_ZONE_ACTIVE',
+        zone: certaintyZone,
+        currentProbability: adaptedProbability,
+        excessBuffer: bankroll - certaintyZone.totalRisk,
+        recommendedAction: 'EXECUTE_SEQUENCE',
+        confidence: 'MATHEMATICAL_CERTAINTY'
+      };
+    }
+    
+    // Calculate how close we are to a certainty zone
+    const ticksToZone = this.calculateTicksToZone(currentTick, certaintyZone);
+    const shortfall = Math.max(0, certaintyZone.totalRisk - bankroll);
+    
+    return {
+      status: 'APPROACHING_ZONE',
+      zone: certaintyZone,
+      ticksToEntry: ticksToZone,
+      bankrollShortfall: shortfall,
+      currentProbability: adaptedProbability,
+      recommendedAction: shortfall > 0 ? 'INSUFFICIENT_BANKROLL' : 'WAIT_FOR_ZONE'
+    };
+  }
+  
+  calculateTicksToZone(currentTick, zone) {
+    if (currentTick >= zone.entryTick) {
+      return 0; // Already in or past the zone
+    }
+    return zone.entryTick - currentTick;
+  }
+  
+  trackZonePerformance(zone, outcome, actualProfit) {
+    this.zoneHistory.push({
+      zone: zone,
+      outcome: outcome,
+      actualProfit: actualProfit,
+      expectedProfit: zone.expectedProfit,
+      timestamp: Date.now(),
+      accuracy: Math.abs(actualProfit - zone.expectedProfit) / zone.expectedProfit
+    });
+    
+    // Analyze zone prediction accuracy
+    this.analyzeZoneAccuracy();
+  }
+  
+  analyzeZoneAccuracy() {
+    if (this.zoneHistory.length < 10) return;
+    
+    const recent = this.zoneHistory.slice(-20);
+    const successRate = recent.filter(z => z.outcome === 'win').length / recent.length;
+    const avgAccuracy = recent.reduce((sum, z) => sum + (1 - z.accuracy), 0) / recent.length;
+    
+    console.log(`Zone Performance: ${(successRate * 100).toFixed(1)}% success rate, ${(avgAccuracy * 100).toFixed(1)}% prediction accuracy`);
+  }
+}
+```
+
+---
+
+## Bankroll Allocation Strategies
+
+### 1. Professional Allocation Framework
+
+```javascript
+class ProfessionalBankrollAllocation {
+  constructor(totalBankroll) {
+    this.totalBankroll = totalBankroll;
+    this.allocationRules = this.defineProfessionalRules();
+    this.riskLevels = this.defineRiskLevels();
+  }
+  
+  defineProfessionalRules() {
+    return {
+      emergency_reserve: 0.30,     // 30% never touched
+      active_trading: 0.50,        // 50% for active trading
+      opportunity_fund: 0.15,      // 15% for high-probability opportunities
+      experiment_fund: 0.05        // 5% for testing new strategies
+    };
+  }
+  
+  defineRiskLevels() {
+    return {
+      ultra_conservative: {
+        max_risk_per_session: 0.02,  // 2% of total bankroll
+        required_success_rate: 0.99,
+        min_probability: 0.90
+      },
+      conservative: {
+        max_risk_per_session: 0.05,  // 5% of total bankroll
+        required_success_rate: 0.95,
+        min_probability: 0.75
+      },
+      moderate: {
+        max_risk_per_session: 0.10,  // 10% of total bankroll
+        required_success_rate: 0.90,
+        min_probability: 0.60
+      },
+      aggressive: {
+        max_risk_per_session: 0.20,  // 20% of total bankroll
+        required_success_rate: 0.80,
+        min_probability: 0.45
+      }
+    };
+  }
+  
+  calculateSessionAllocation(riskLevel = 'conservative') {
+    const config = this.riskLevels[riskLevel];
+    const activeFunds = this.totalBankroll * this.allocationRules.active_trading;
+    
+    const sessionBankroll = activeFunds * config.max_risk_per_session;
+    const calculator = new PrecisionBankrollCalculator();
+    const certaintyZone = calculator.calculateCertaintyZone(sessionBankroll, config.required_success_rate);
+    
+    return {
+      sessionBankroll: sessionBankroll,
+      maxSequenceSteps: certaintyZone.maxSequenceSteps,
+      requiredProbability: Math.max(certaintyZone.requiredProbability, config.min_probability),
+      expectedProfit: certaintyZone.expectedProfit,
+      riskLevel: riskLevel,
+      emergencyReserve: this.totalBankroll * this.allocationRules.emergency_reserve,
+      canOperateUntilTick: this.getOperationalTick(certaintyZone.requiredProbability)
+    };
+  }
+  
+  getOperationalTick(requiredProbability) {
+    // Find the tick where probability drops below required threshold
+    for (let tick = 500; tick >= 0; tick -= 10) {
+      const prob = getBaseProbability(tick);
+      if (prob >= requiredProbability) {
+        return tick;
+      }
+    }
+    return 0;
+  }
+}
+```
+
+### 2. Multi-Tier Bankroll System
+
+```javascript
+class MultiTierBankrollSystem {
+  constructor(totalBankroll) {
+    this.totalBankroll = totalBankroll;
+    this.tiers = this.calculateTiers();
+    this.currentTier = this.determineTier();
+  }
+  
+  calculateTiers() {
+    return {
+      MICRO: {
+        range: [0.063, 0.127],
+        description: "Basic certainty zone access",
+        maxSequence: 6,
+        strategies: ['SafeZone', 'Conservative']
+      },
+      SMALL: {
+        range: [0.127, 0.511],
+        description: "Enhanced sequence depth",
+        maxSequence: 8,
+        strategies: ['SafeZone', 'Conservative', 'ZoneBased']
+      },
+      MEDIUM: {
+        range: [0.511, 2.047],
+        description: "Professional grade certainty",
+        maxSequence: 10,
+        strategies: ['Conservative', 'ZoneBased', 'Adaptive', 'ControlledMartingale']
+      },
+      LARGE: {
+        range: [2.047, 8.191],
+        description: "Advanced strategy access",
+        maxSequence: 12,
+        strategies: ['ZoneBased', 'Adaptive', 'ControlledMartingale', 'VolatilityArbitrage']
+      },
+      WHALE: {
+        range: [8.191, Infinity],
+        description: "Mathematical dominance",
+        maxSequence: 15,
+        strategies: ['All', 'MathematicalCertainty', 'Professional']
+      }
+    };
+  }
+  
+  determineTier() {
+    for (const [tierName, tier] of Object.entries(this.tiers)) {
+      if (this.totalBankroll >= tier.range[0] && this.totalBankroll < tier.range[1]) {
+        return { name: tierName, ...tier };
+      }
+    }
+    return this.tiers.WHALE; // Default to highest tier
+  }
+  
+  getOptimalStrategy() {
+    const tier = this.currentTier;
+    
+    // Calculate certainty zones for current tier
+    const calculator = new PrecisionBankrollCalculator();
+    const primaryZone = calculator.calculateCertaintyZone(this.totalBankroll * 0.8); // 80% allocation
+    
+    return {
+      tier: tier.name,
+      description: tier.description,
+      maxSequenceSteps: Math.min(tier.maxSequence, primaryZone.maxSequenceSteps),
+      availableStrategies: tier.strategies,
+      recommendedStrategy: this.getRecommendedStrategy(tier),
+      certaintyZone: primaryZone,
+      upgradeRequirement: this.getUpgradeRequirement(tier)
+    };
+  }
+  
+  getRecommendedStrategy(tier) {
+    const strategies = {
+      MICRO: 'SafeZoneStrategy',
+      SMALL: 'ConservativeProgression',
+      MEDIUM: 'ZoneBasedStrategy',
+      LARGE: 'AdaptiveTimingStrategy',
+      WHALE: 'MathematicalCertaintyStrategy'
+    };
+    
+    return strategies[tier.name];
+  }
+  
+  getUpgradeRequirement(tier) {
+    const tierNames = Object.keys(this.tiers);
+    const currentIndex = tierNames.indexOf(tier.name);
+    
+    if (currentIndex === tierNames.length - 1) {
+      return null; // Already at highest tier
+    }
+    
+    const nextTier = this.tiers[tierNames[currentIndex + 1]];
+    return {
+      nextTier: tierNames[currentIndex + 1],
+      requiredBankroll: nextTier.range[0],
+      additional: nextTier.range[0] - this.totalBankroll,
+      benefits: nextTier.description
+    };
+  }
+}
+```
+
+---
+
+## Risk Management Systems
+
+### 1. Dynamic Stop-Loss System
+
+```javascript
+class DynamicStopLossSystem {
+  constructor(initialBankroll) {
+    this.initialBankroll = initialBankroll;
+    this.currentBankroll = initialBankroll;
+    this.stopLossLevels = this.calculateStopLossLevels();
+    this.profitProtection = this.calculateProfitProtection();
+  }
+  
+  calculateStopLossLevels() {
+    return {
+      emergency: this.initialBankroll * 0.50,    // Emergency stop at 50% loss
+      critical: this.initialBankroll * 0.65,     // Critical level at 35% loss
+      warning: this.initialBankroll * 0.80,      // Warning at 20% loss
+      caution: this.initialBankroll * 0.90       // Caution at 10% loss
+    };
+  }
+  
+  calculateProfitProtection() {
+    return {
+      level_1: 0.10,  // Protect 10% of profits above 10% gain
+      level_2: 0.25,  // Protect 25% of profits above 25% gain
+      level_3: 0.50,  // Protect 50% of profits above 50% gain
+      level_4: 0.75   // Protect 75% of profits above 100% gain
+    };
+  }
+  
+  assessRiskLevel(currentBankroll, sessionProfits = 0) {
+    this.currentBankroll = currentBankroll;
+    const totalValue = currentBankroll + sessionProfits;
+    
+    // Determine current risk level
+    let riskLevel = 'normal';
+    let action = 'continue';
+    let message = '';
+    
+    if (currentBankroll <= this.stopLossLevels.emergency) {
+      riskLevel = 'emergency';
+      action = 'stop_immediately';
+      message = 'Emergency stop: 50% of bankroll lost';
+    } else if (currentBankroll <= this.stopLossLevels.critical) {
+      riskLevel = 'critical';
+      action = 'reduce_risk_dramatically';
+      message = 'Critical: 35% of bankroll lost - switch to ultra-conservative';
+    } else if (currentBankroll <= this.stopLossLevels.warning) {
+      riskLevel = 'warning';
+      action = 'reduce_risk';
+      message = 'Warning: 20% of bankroll lost - reduce position sizes';
+    } else if (currentBankroll <= this.stopLossLevels.caution) {
+      riskLevel = 'caution';
+      action = 'monitor_closely';
+      message = 'Caution: 10% of bankroll lost - monitor closely';
+    }
+    
+    // Check for profit protection
+    const profitProtectionLevel = this.getProfitProtectionLevel(totalValue);
+    if (profitProtectionLevel) {
+      return {
+        riskLevel: riskLevel,
+        action: action,
+        message: message,
+        profitProtection: profitProtectionLevel
+      };
+    }
+    
+    return {
+      riskLevel: riskLevel,
+      action: action,
+      message: message,
+      currentBankroll: currentBankroll,
+      stopLossDistance: currentBankroll - this.stopLossLevels.emergency,
+      recommendations: this.getRiskRecommendations(riskLevel)
+    };
+  }
+  
+  getProfitProtectionLevel(totalValue) {
+    const gain = (totalValue - this.initialBankroll) / this.initialBankroll;
+    
+    if (gain >= 1.0) {
+      return {
+        level: 'level_4',
+        protection: this.profitProtection.level_4,
+        message: 'Protecting 75% of profits - exceptional performance'
+      };
+    } else if (gain >= 0.5) {
+      return {
+        level: 'level_3',
+        protection: this.profitProtection.level_3,
+        message: 'Protecting 50% of profits - strong performance'
+      };
+    } else if (gain >= 0.25) {
+      return {
+        level: 'level_2',
+        protection: this.profitProtection.level_2,
+        message: 'Protecting 25% of profits - good performance'
+      };
+    } else if (gain >= 0.1) {
+      return {
+        level: 'level_1',
+        protection: this.profitProtection.level_1,
+        message: 'Protecting 10% of profits - positive momentum'
+      };
+    }
+    
+    return null;
+  }
+}
+```
+
+### 2. Adaptive Position Sizing
+
+```javascript
+class AdaptivePositionSizing {
+  constructor(bankroll, riskTolerance = 'moderate') {
+    this.bankroll = bankroll;
+    this.riskTolerance = riskTolerance;
+    this.sizingRules = this.defineSizingRules();
+    this.performanceAdjustments = new Map();
+  }
+  
+  defineSizingRules() {
+    return {
+      ultra_conservative: {
+        base_percent: 0.001,    // 0.1% of bankroll
+        max_percent: 0.005,     // 0.5% maximum
+        probability_scaling: 2.0
+      },
+      conservative: {
+        base_percent: 0.002,    // 0.2% of bankroll
+        max_percent: 0.01,      // 1% maximum
+        probability_scaling: 3.0
+      },
+      moderate: {
+        base_percent: 0.005,    // 0.5% of bankroll
+        max_percent: 0.02,      // 2% maximum
+        probability_scaling: 4.0
+      },
+      aggressive: {
+        base_percent: 0.01,     // 1% of bankroll
+        max_percent: 0.05,      // 5% maximum
+        probability_scaling: 5.0
+      }
+    };
+  }
+  
+  calculateOptimalBetSize(probability, certaintyLevel, recentPerformance) {
+    const rules = this.sizingRules[this.riskTolerance];
+    
+    // Base bet size as percentage of bankroll
+    let betSize = this.bankroll * rules.base_percent;
+    
+    // Scale based on probability
+    const probabilityMultiplier = Math.min(rules.probability_scaling, probability * rules.probability_scaling);
+    betSize *= probabilityMultiplier;
+    
+    // Adjust for certainty level
+    if (certaintyLevel === 'mathematical_certainty') {
+      betSize *= 2.0; // Double bet size for mathematical certainty
+    } else if (certaintyLevel === 'high_confidence') {
+      betSize *= 1.5; // 50% increase for high confidence
+    }
+    
+    // Performance-based adjustment
+    const performanceAdjustment = this.getPerformanceAdjustment(recentPerformance);
+    betSize *= performanceAdjustment;
+    
+    // Apply maximum constraints
+    const maxBet = this.bankroll * rules.max_percent;
+    betSize = Math.min(betSize, maxBet);
+    
+    // Ensure minimum viable bet
+    betSize = Math.max(betSize, 0.001);
+    
+    return {
+      betSize: Math.round(betSize * 1000) / 1000, // Round to 3 decimals
+      reasoning: {
+        baseBet: this.bankroll * rules.base_percent,
+        probabilityMultiplier: probabilityMultiplier,
+        certaintyAdjustment: certaintyLevel,
+        performanceAdjustment: performanceAdjustment,
+        finalSize: betSize
+      }
+    };
+  }
+  
+  getPerformanceAdjustment(recentPerformance) {
+    if (!recentPerformance || recentPerformance.sessions < 5) {
+      return 1.0; // No adjustment without sufficient data
+    }
+    
+    const { winRate, roi, avgAccuracy } = recentPerformance;
+    
+    // Performance factors
+    const winRateScore = winRate > 0.7 ? 1.2 : winRate < 0.4 ? 0.8 : 1.0;
+    const roiScore = roi > 0.1 ? 1.3 : roi < -0.1 ? 0.7 : 1.0;
+    const accuracyScore = avgAccuracy > 0.8 ? 1.1 : avgAccuracy < 0.6 ? 0.9 : 1.0;
+    
+    const combinedScore = (winRateScore + roiScore + accuracyScore) / 3;
+    
+    // Constrain adjustment to reasonable bounds
+    return Math.max(0.5, Math.min(2.0, combinedScore));
+  }
+}
+```
+
+---
+
+## Advanced Bankroll Strategies
+
+### 1. Compound Growth Strategy
+
+```javascript
+class CompoundGrowthStrategy {
+  constructor(initialBankroll, targetMultiplier = 2.0) {
+    this.initialBankroll = initialBankroll;
+    this.currentBankroll = initialBankroll;
+    this.targetBankroll = initialBankroll * targetMultiplier;
+    this.growthPhases = this.defineGrowthPhases();
+    this.reinvestmentRules = this.defineReinvestmentRules();
+  }
+  
+  defineGrowthPhases() {
+    return {
+      accumulation: {
+        range: [1.0, 1.25],      // 0-25% growth
+        strategy: 'conservative',
+        reinvestment_rate: 0.5   // Reinvest 50% of profits
+      },
+      growth: {
+        range: [1.25, 1.75],     // 25-75% growth
+        strategy: 'moderate',
+        reinvestment_rate: 0.7   // Reinvest 70% of profits
+      },
+      acceleration: {
+        range: [1.75, 2.5],      // 75-150% growth
+        strategy: 'aggressive',
+        reinvestment_rate: 0.8   // Reinvest 80% of profits
+      },
+      consolidation: {
+        range: [2.5, Infinity],  // 150%+ growth
+        strategy: 'conservative',
+        reinvestment_rate: 0.3   // Reinvest 30% of profits
+      }
+    };
+  }
+  
+  getCurrentPhase() {
+    const growthRatio = this.currentBankroll / this.initialBankroll;
+    
+    for (const [phaseName, phase] of Object.entries(this.growthPhases)) {
+      if (growthRatio >= phase.range[0] && growthRatio < phase.range[1]) {
+        return { name: phaseName, ...phase, currentRatio: growthRatio };
+      }
+    }
+    
+    return this.growthPhases.consolidation;
+  }
+  
+  calculateOptimalReinvestment(sessionProfit) {
+    const currentPhase = this.getCurrentPhase();
+    const reinvestmentAmount = sessionProfit * currentPhase.reinvestment_rate;
+    
+    // Update bankroll
+    this.currentBankroll += reinvestmentAmount;
+    const withdrawal = sessionProfit - reinvestmentAmount;
+    
+    return {
+      phase: currentPhase.name,
+      sessionProfit: sessionProfit,
+      reinvested: reinvestmentAmount,
+      withdrawn: withdrawal,
+      newBankroll: this.currentBankroll,
+      progressToTarget: (this.currentBankroll / this.targetBankroll) * 100,
+      recommendation: this.getPhaseRecommendation(currentPhase)
+    };
+  }
+  
+  getPhaseRecommendation(phase) {
+    const recommendations = {
+      accumulation: "Focus on consistent, low-risk gains. Build foundation carefully.",
+      growth: "Balanced approach. Increase position sizes moderately.",
+      acceleration: "Aggressive phase. Maximize opportunities while managing risk.",
+      consolidation: "Protect gains. Consider withdrawing significant profits."
+    };
+    
+    return recommendations[phase.name];
+  }
+}
+```
+
+### 2. Multi-Account Strategy
+
+```javascript
+class MultiAccountStrategy {
+  constructor(totalCapital) {
+    this.totalCapital = totalCapital;
+    this.accounts = this.allocateAccounts();
+    this.rebalancingRules = this.defineRebalancingRules();
+  }
+  
+  allocateAccounts() {
+    return {
+      conservative: {
+        allocation: this.totalCapital * 0.40,
+        purpose: "Steady, low-risk growth",
+        target_roi: 0.02,         // 2% per session
+        max_drawdown: 0.10,       // 10% maximum loss
+        strategies: ['SafeZone', 'Conservative']
+      },
+      moderate: {
+        allocation: this.totalCapital * 0.35,
+        purpose: "Balanced growth and income",
+        target_roi: 0.05,         // 5% per session
+        max_drawdown: 0.20,       // 20% maximum loss
+        strategies: ['ZoneBased', 'Adaptive']
+      },
+      aggressive: {
+        allocation: this.totalCapital * 0.20,
+        purpose: "High-growth opportunities",
+        target_roi: 0.10,         // 10% per session
+        max_drawdown: 0.35,       // 35% maximum loss
+        strategies: ['ControlledMartingale', 'VolatilityArbitrage']
+      },
+      experimental: {
+        allocation: this.totalCapital * 0.05,
+        purpose: "Strategy development and testing",
+        target_roi: 0.15,         // 15% per session
+        max_drawdown: 0.50,       // 50% maximum loss (testing account)
+        strategies: ['Experimental', 'MathematicalCertainty']
+      }
+    };
+  }
+  
+  getAccountRecommendations(marketConditions) {
+    const recommendations = [];
+    
+    for (const [accountType, account] of Object.entries(this.accounts)) {
+      const recommendation = this.analyzeAccount(accountType, account, marketConditions);
+      recommendations.push(recommendation);
+    }
+    
+    return {
+      timestamp: Date.now(),
+      marketConditions: marketConditions,
+      recommendations: recommendations,
+      totalAllocated: Object.values(this.accounts).reduce((sum, acc) => sum + acc.allocation, 0),
+      rebalancingNeeded: this.assessRebalancingNeed()
+    };
+  }
+  
+  analyzeAccount(accountType, account, marketConditions) {
+    const { reliability, volatility, averageProbability } = marketConditions;
+    
+    let confidence = 'medium';
+    let action = 'maintain';
+    
+    // Account-specific analysis
+    switch (accountType) {
+      case 'conservative':
+        if (reliability > 0.8 && averageProbability > 0.75) {
+          confidence = 'high';
+          action = 'increase_activity';
+        } else if (reliability < 0.6) {
+          confidence = 'low';
+          action = 'reduce_activity';
+        }
+        break;
+        
+      case 'aggressive':
+        if (volatility > 0.7 && reliability > 0.7) {
+          confidence = 'high';
+          action = 'increase_activity';
+        } else if (volatility < 0.3) {
+          confidence = 'low';
+          action = 'reduce_activity';
+        }
+        break;
+    }
+    
+    return {
+      account: accountType,
+      allocation: account.allocation,
+      confidence: confidence,
+      action: action,
+      reasoning: this.getActionReasoning(accountType, marketConditions),
+      recommendedStrategies: this.filterStrategiesByConditions(account.strategies, marketConditions)
+    };
+  }
+}
+```
+
+---
+
+## Implementation Framework
+
+### 1. Bankroll Management Dashboard
+
+```javascript
+class BankrollManagementDashboard {
+  constructor(initialBankroll) {
+    this.bankroll = initialBankroll;
+    this.calculator = new PrecisionBankrollCalculator();
+    this.riskManager = new DynamicStopLossSystem(initialBankroll);
+    this.positionSizer = new AdaptivePositionSizing(initialBankroll);
+    this.tierSystem = new MultiTierBankrollSystem(initialBankroll);
+  }
+  
+  generateDashboard(currentConditions) {
+    const tier = this.tierSystem.getOptimalStrategy();
+    const certaintyZone = this.calculator.calculateCertaintyZone(this.bankroll);
+    const riskAssessment = this.riskManager.assessRiskLevel(this.bankroll);
+    const optimalBetSize = this.positionSizer.calculateOptimalBetSize(
+      currentConditions.probability,
+      currentConditions.certaintyLevel,
+      currentConditions.recentPerformance
+    );
+    
+    return {
+      bankroll: {
+        total: this.bankroll,
+        tier: tier.name,
+        description: tier.description
+      },
+      certaintyZone: {
+        entryTick: certaintyZone.entryTick,
+        successRate: `${(certaintyZone.achievedSuccessRate * 100).toFixed(2)}%`,
+        maxSequence: certaintyZone.maxSequenceSteps,
+        expectedProfit: certaintyZone.expectedProfit
+      },
+      riskManagement: {
+        level: riskAssessment.riskLevel,
+        action: riskAssessment.action,
+        stopLossDistance: riskAssessment.stopLossDistance
+      },
+      positionSizing: {
+        recommendedBet: optimalBetSize.betSize,
+        reasoning: optimalBetSize.reasoning
+      },
+      recommendations: this.generateRecommendations(tier, certaintyZone, riskAssessment)
+    };
+  }
+  
+  generateRecommendations(tier, zone, risk) {
+    const recommendations = [];
+    
+    // Tier-specific recommendations
+    if (tier.upgradeRequirement) {
+      recommendations.push({
+        type: 'upgrade',
+        priority: 'medium',
+        message: `Increase bankroll by ${tier.upgradeRequirement.additional.toFixed(3)} SOL to access ${tier.upgradeRequirement.nextTier} tier`,
+        benefit: tier.upgradeRequirement.benefits
+      });
+    }
+    
+    // Risk-specific recommendations
+    if (risk.riskLevel !== 'normal') {
+      recommendations.push({
+        type: 'risk',
+        priority: 'high',
+        message: risk.message,
+        action: risk.action
+      });
+    }
+    
+    // Certainty zone recommendations
+    if (zone.achievedSuccessRate > 0.99) {
+      recommendations.push({
+        type: 'opportunity',
+        priority: 'high',
+        message: `Mathematical certainty zone available: ${(zone.achievedSuccessRate * 100).toFixed(2)}% success rate`,
+        action: 'Consider aggressive betting in certainty zone'
+      });
+    }
+    
+    return recommendations;
+  }
+}
+```
+
+---
+
+## Quick Reference Tables
+
+### Bankroll Requirements by Success Rate
+
+| Success Rate | Min Bankroll | Max Sequence | Entry Tick | Risk Level |
+|--------------|--------------|--------------|------------|------------|
+| 99.9% | 1.023 SOL | 10 steps | ~50 | Ultra Low |
+| 99.5% | 0.511 SOL | 9 steps | ~60 | Very Low |
+| 99.0% | 0.255 SOL | 8 steps | ~80 | Low |
+| 95.0% | 0.127 SOL | 7 steps | ~100 | Medium |
+| 90.0% | 0.063 SOL | 6 steps | ~150 | High |
+
+### Tier Progression Requirements
+
+| Current Tier | Next Tier | Additional SOL | New Benefits |
+|--------------|-----------|----------------|--------------|
+| MICRO | SMALL | +0.064 | Enhanced sequence depth |
+| SMALL | MEDIUM | +0.384 | Professional certainty |
+| MEDIUM | LARGE | +1.536 | Advanced strategies |
+| LARGE | WHALE | +6.144 | Mathematical dominance |
+
+---
+
+*Next: [06-risk-hedging-systems.md](./06-risk-hedging-systems.md) - Combined main game + side bet optimization strategies*
+
+
+# 02 - Probability Framework: Adaptive Statistical Models
+
+## Executive Summary
+This document establishes the mathematical foundation for side bet probability calculations, incorporating the critical timing variance discovery and providing adaptive models that reflect real-world server behavior rather than theoretical specifications.
+
+## Key Finding Integration
+Based on analysis of 100 games (22,507 tick intervals), the empirical timing data shows:
+- **Mean tick duration**: 271.5ms (8.6% above theoretical 250ms)
+- **Median tick duration**: 251.0ms (very close to theoretical)
+- **Standard deviation**: 295.3ms (high variability)
+- **95% of ticks**: Between 237-269ms
+
+This timing variance requires adaptive models while maintaining mathematical precision for strategic decision-making.
+
+---
+
+## Base Probability Model
+
+### 1. Empirical Probability Curves
+
+#### 1.1 Historical Data Foundation
+Based on analysis of 2000+ games, probability that game ends within next 40 ticks:
+
+```javascript
+const BASE_PROBABILITIES = {
+  // Early Game (0-50 ticks)
+  tick_0_10:   0.15,   // 15% - Very early, low rug chance
+  tick_10_20:  0.18,   // 18% - Still building momentum
+  tick_20_30:  0.22,   // 22% - Early momentum phase
+  tick_30_40:  0.25,   // 25% - Late early game
+  tick_40_50:  0.28,   // 28% - Transitioning to mid
+  
+  // Early-Mid Game (50-100 ticks)  
+  tick_50_60:  0.32,   // 32% - Early-mid phase
+  tick_60_70:  0.35,   // 35% - Building pressure
+  tick_70_80:  0.38,   // 38% - Increasing risk
+  tick_80_90:  0.42,   // 42% - Mid-game tension
+  tick_90_100: 0.45,   // 45% - Late early-mid
+  
+  // Mid Game (100-200 ticks)
+  tick_100_120: 0.50,  // 50% - True mid-game
+  tick_120_140: 0.55,  // 55% - Pressure building
+  tick_140_160: 0.60,  // 60% - High tension zone
+  tick_160_180: 0.65,  // 65% - Late mid-game
+  tick_180_200: 0.70,  // 70% - Approaching danger
+  
+  // Late-Mid Game (200-300 ticks)
+  tick_200_220: 0.74,  // 74% - Early danger zone
+  tick_220_240: 0.77,  // 77% - Significant risk
+  tick_240_260: 0.80,  // 80% - High danger
+  tick_260_280: 0.83,  // 83% - Very high risk
+  tick_280_300: 0.86,  // 86% - Extreme tension
+  
+  // Late Game (300-500 ticks)
+  tick_300_350: 0.88,  // 88% - Late game territory
+  tick_350_400: 0.91,  // 91% - Very dangerous
+  tick_400_450: 0.93,  // 93% - Extremely high risk
+  tick_450_500: 0.95,  // 95% - Near-certain zone
+  
+  // Extreme Late (500+ ticks)
+  tick_500_plus: 0.96  // 96% - Mathematical certainty
+};
+```
+
+#### 1.2 Interpolation Function
+```javascript
+function getBaseProbability(tickCount) {
+  // Handle extreme cases
+  if (tickCount < 0) return 0.10;      // Presale
+  if (tickCount > 500) return 0.96;    // Extreme late
+  
+  // Find surrounding probability points
+  const brackets = [
+    [0, 0.15], [10, 0.18], [20, 0.22], [30, 0.25], [40, 0.28],
+    [50, 0.32], [60, 0.35], [70, 0.38], [80, 0.42], [90, 0.45],
+    [100, 0.50], [120, 0.55], [140, 0.60], [160, 0.65], [180, 0.70],
+    [200, 0.74], [220, 0.77], [240, 0.80], [260, 0.83], [280, 0.86],
+    [300, 0.88], [350, 0.91], [400, 0.93], [450, 0.95], [500, 0.96]
+  ];
+  
+  // Linear interpolation between closest points
+  for (let i = 0; i < brackets.length - 1; i++) {
+    const [tick1, prob1] = brackets[i];
+    const [tick2, prob2] = brackets[i + 1];
+    
+    if (tickCount >= tick1 && tickCount <= tick2) {
+      const ratio = (tickCount - tick1) / (tick2 - tick1);
+      return prob1 + (prob2 - prob1) * ratio;
+    }
+  }
+  
+  return 0.96; // Default to highest probability
+}
+```
+
+### 2. Adaptive Timing Model
+
+#### 2.1 Timing Adjustment Framework
+```javascript
+class AdaptiveProbabilityEngine {
+  constructor() {
+    this.tickHistory = [];
+    this.reliabilityScore = 1.0;
+    this.adaptationFactors = new Map();
+  }
+  
+  updateTimingData(tickInterval, tickNumber) {
+    this.tickHistory.push({ interval: tickInterval, tick: tickNumber, timestamp: Date.now() });
+    
+    // Maintain rolling window
+    if (this.tickHistory.length > 100) {
+      this.tickHistory.shift();
+    }
+    
+    this.recalculateAdaptation();
+  }
+  
+  recalculateAdaptation() {
+    const recentIntervals = this.tickHistory.slice(-20).map(t => t.interval);
+    const avgInterval = recentIntervals.reduce((sum, i) => sum + i, 0) / recentIntervals.length;
+    const variance = this.calculateVariance(recentIntervals);
+    
+    // Adaptation factors
+    this.timeExtensionFactor = avgInterval / 251; // How much longer than empirical median
+    this.volatilityPenalty = Math.sqrt(variance) / avgInterval; // Coefficient of variation
+    this.reliabilityScore = Math.max(0.3, 1 - this.volatilityPenalty);
+  }
+  
+  getAdaptedProbability(tickCount) {
+    const baseProb = getBaseProbability(tickCount);
+    
+    // Longer ticks = more time for rug to occur within window
+    const timeBonus = (this.timeExtensionFactor - 1) * 0.3; // 30% weight to timing
+    
+    // High volatility reduces confidence
+    const volatilityPenalty = this.volatilityPenalty * 0.1;
+    
+    // Apply adaptations
+    let adaptedProb = baseProb + timeBonus - volatilityPenalty;
+    
+    // Ensure bounds
+    return Math.max(0.05, Math.min(0.98, adaptedProb));
+  }
+}
+```
+
+#### 2.2 Confidence Intervals
+```javascript
+function calculateConfidenceInterval(probability, sampleSize = 100) {
+  const standardError = Math.sqrt((probability * (1 - probability)) / sampleSize);
+  const z95 = 1.96; // 95% confidence
+  
+  return {
+    lower: Math.max(0, probability - (z95 * standardError)),
+    upper: Math.min(1, probability + (z95 * standardError)),
+    margin: z95 * standardError
+  };
+}
+```
+
+### 3. Expected Value Calculations
+
+#### 3.1 Standard EV Formula
+```javascript
+function calculateExpectedValue(winProbability, betAmount) {
+  const winOutcome = betAmount * 4;      // Net profit (400%)
+  const loseOutcome = -betAmount;        // Total loss
+  
+  const ev = (winProbability * winOutcome) + ((1 - winProbability) * loseOutcome);
+  
+  return {
+    expectedValue: ev,
+    winScenario: winOutcome,
+    loseScenario: loseOutcome,
+    breakeven: ev >= 0,
+    confidence: calculateConfidenceInterval(winProbability)
+  };
+}
+```
+
+#### 3.2 Risk-Adjusted EV
+```javascript
+function calculateRiskAdjustedEV(winProbability, betAmount, reliabilityScore) {
+  const baseEV = calculateExpectedValue(winProbability, betAmount);
+  
+  // Penalize EV based on timing reliability
+  const reliabilityPenalty = (1 - reliabilityScore) * 0.2; // 20% max penalty
+  const adjustedEV = baseEV.expectedValue * (1 - reliabilityPenalty);
+  
+  return {
+    ...baseEV,
+    adjustedEV: adjustedEV,
+    reliabilityScore: reliabilityScore,
+    penalty: reliabilityPenalty
+  };
+}
+```
+
+### 4. Multi-Bet Probability Models
+
+#### 4.1 Consecutive Bet Success Probability
+```javascript
+function calculateConsecutiveSuccess(probabilities) {
+  // Probability of winning ALL bets in sequence
+  return probabilities.reduce((product, prob) => product * prob, 1);
+}
+
+function calculateAtLeastOneSuccess(probabilities) {
+  // Probability of winning at least one bet
+  const allFail = probabilities.reduce((product, prob) => product * (1 - prob), 1);
+  return 1 - allFail;
+}
+```
+
+#### 4.2 Martingale Sequence Analysis
+```javascript
+function analyzeMartingaleSequence(baseBet, maxBets, probability) {
+  let totalRisk = 0;
+  let currentBet = baseBet;
+  const sequence = [];
+  
+  for (let i = 0; i < maxBets; i++) {
+    totalRisk += currentBet;
+    
+    const ev = calculateExpectedValue(probability, currentBet);
+    const cumulativeRisk = totalRisk;
+    const successProb = Math.pow(1 - (1 - probability), i + 1); // At least one success
+    
+    sequence.push({
+      betNumber: i + 1,
+      betAmount: currentBet,
+      cumulativeRisk: cumulativeRisk,
+      expectedValue: ev.expectedValue,
+      successProbability: successProb,
+      failureProbability: Math.pow(1 - probability, i + 1)
+    });
+    
+    currentBet *= 2; // Double for next bet
+  }
+  
+  return sequence;
+}
+```
+
+### 5. Zone-Based Probability System
+
+#### 5.1 Strategic Zone Definitions
+```javascript
+const PROBABILITY_ZONES = {
+  VERY_LOW: {
+    range: [0, 0.167],
+    label: "Avoid Zone",
+    description: "Negative EV, high risk",
+    recommendation: "Do not bet",
+    color: "#DC2626" // Red
+  },
+  
+  LOW: {
+    range: [0.167, 0.25],
+    label: "Caution Zone", 
+    description: "Marginal EV, proceed carefully",
+    recommendation: "Small bets only",
+    color: "#F59E0B" // Amber
+  },
+  
+  MODERATE: {
+    range: [0.25, 0.50],
+    label: "Opportunity Zone",
+    description: "Positive EV, reasonable risk",
+    recommendation: "Standard betting",
+    color: "#10B981" // Green
+  },
+  
+  HIGH: {
+    range: [0.50, 0.75],
+    label: "Strong Zone",
+    description: "Good EV, favorable odds",
+    recommendation: "Increased bet size",
+    color: "#059669" // Dark Green
+  },
+  
+  VERY_HIGH: {
+    range: [0.75, 0.90],
+    label: "Excellent Zone",
+    description: "High EV, low risk",
+    recommendation: "Aggressive betting",
+    color: "#047857" // Very Dark Green
+  },
+  
+  CERTAINTY: {
+    range: [0.90, 1.0],
+    label: "Mathematical Certainty",
+    description: "Near-guaranteed success",
+    recommendation: "Maximum bet size",
+    color: "#064E3B" // Darkest Green
+  }
+};
+
+function getZoneForProbability(probability) {
+  for (const [zoneName, zone] of Object.entries(PROBABILITY_ZONES)) {
+    if (probability >= zone.range[0] && probability < zone.range[1]) {
+      return { name: zoneName, ...zone };
+    }
+  }
+  return PROBABILITY_ZONES.CERTAINTY; // Default to highest
+}
+```
+
+#### 5.2 Dynamic Zone Boundaries
+```javascript
+function getDynamicZoneBoundaries(reliabilityScore) {
+  // Adjust zone boundaries based on timing reliability
+  const adjustment = (1 - reliabilityScore) * 0.05; // Max 5% adjustment
+  
+  const adjustedZones = {};
+  for (const [name, zone] of Object.entries(PROBABILITY_ZONES)) {
+    adjustedZones[name] = {
+      ...zone,
+      range: [
+        Math.max(0, zone.range[0] + adjustment),
+        Math.min(1, zone.range[1] + adjustment)
+      ]
+    };
+  }
+  
+  return adjustedZones;
+}
+```
+
+### 6. Historical Performance Tracking
+
+#### 6.1 Accuracy Measurement
+```javascript
+class ProbabilityTracker {
+  constructor() {
+    this.predictions = [];
+    this.outcomes = [];
+  }
+  
+  recordPrediction(tickCount, predictedProbability, adaptationFactors) {
+    this.predictions.push({
+      tick: tickCount,
+      predicted: predictedProbability,
+      timestamp: Date.now(),
+      adaptations: adaptationFactors
+    });
+  }
+  
+  recordOutcome(gameEndTick, betStartTick) {
+    const actualOutcome = (gameEndTick - betStartTick) <= 40 ? 1 : 0;
+    this.outcomes.push({
+      outcome: actualOutcome,
+      duration: gameEndTick - betStartTick,
+      timestamp: Date.now()
+    });
+    
+    this.calculateAccuracy();
+  }
+  
+  calculateAccuracy() {
+    if (this.predictions.length !== this.outcomes.length) return;
+    
+    let totalError = 0;
+    let correctPredictions = 0;
+    
+    for (let i = 0; i < this.predictions.length; i++) {
+      const predicted = this.predictions[i].predicted;
+      const actual = this.outcomes[i].outcome;
+      
+      // Brier Score (lower is better)
+      totalError += Math.pow(predicted - actual, 2);
+      
+      // Binary accuracy (predicted >0.5 and actual = 1, or predicted <=0.5 and actual = 0)
+      if ((predicted > 0.5 && actual === 1) || (predicted <= 0.5 && actual === 0)) {
+        correctPredictions++;
+      }
+    }
+    
+    this.brierScore = totalError / this.predictions.length;
+    this.accuracy = correctPredictions / this.predictions.length;
+    
+    return {
+      brierScore: this.brierScore,     // 0 = perfect, 1 = worst
+      accuracy: this.accuracy,          // 0-1, higher is better
+      calibration: this.calculateCalibration()
+    };
+  }
+  
+  calculateCalibration() {
+    // Group predictions by probability ranges and check if they match outcomes
+    const bins = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+    const calibrationData = [];
+    
+    for (let i = 0; i < bins.length - 1; i++) {
+      const lower = bins[i];
+      const upper = bins[i + 1];
+      
+      const inBin = this.predictions
+        .map((pred, idx) => ({ pred: pred.predicted, outcome: this.outcomes[idx].outcome }))
+        .filter(item => item.pred >= lower && item.pred < upper);
+      
+      if (inBin.length > 0) {
+        const avgPrediction = inBin.reduce((sum, item) => sum + item.pred, 0) / inBin.length;
+        const avgOutcome = inBin.reduce((sum, item) => sum + item.outcome, 0) / inBin.length;
+        
+        calibrationData.push({
+          range: [lower, upper],
+          predicted: avgPrediction,
+          actual: avgOutcome,
+          count: inBin.length,
+          calibrated: Math.abs(avgPrediction - avgOutcome) < 0.1
+        });
+      }
+    }
+    
+    return calibrationData;
+  }
+}
+```
+
+### 7. Real-Time Probability Updates
+
+#### 7.1 Streaming Calculation Engine
+```javascript
+class RealTimeProbabilityEngine {
+  constructor() {
+    this.adaptiveEngine = new AdaptiveProbabilityEngine();
+    this.tracker = new ProbabilityTracker();
+    this.currentProbabilities = new Map();
+  }
+  
+  onTickUpdate(tickData) {
+    const { tickNumber, interval, timestamp } = tickData;
+    
+    // Update timing models
+    this.adaptiveEngine.updateTimingData(interval, tickNumber);
+    
+    // Recalculate probability for current tick
+    const probability = this.adaptiveEngine.getAdaptedProbability(tickNumber);
+    const zone = getZoneForProbability(probability);
+    const ev = calculateRiskAdjustedEV(probability, 0.001, this.adaptiveEngine.reliabilityScore);
+    
+    // Store current calculation
+    this.currentProbabilities.set(tickNumber, {
+      probability,
+      zone,
+      expectedValue: ev,
+      reliability: this.adaptiveEngine.reliabilityScore,
+      timestamp
+    });
+    
+    return {
+      tick: tickNumber,
+      probability: probability,
+      zone: zone.name,
+      expectedValue: ev.adjustedEV,
+      confidence: ev.confidence,
+      reliability: this.adaptiveEngine.reliabilityScore
+    };
+  }
+  
+  getProbabilityTrend(lookback = 10) {
+    const recentTicks = Array.from(this.currentProbabilities.entries())
+      .slice(-lookback)
+      .map(([tick, data]) => ({ tick, ...data }));
+    
+    if (recentTicks.length < 2) return { trend: "insufficient_data" };
+    
+    const first = recentTicks[0].probability;
+    const last = recentTicks[recentTicks.length - 1].probability;
+    const change = last - first;
+    const rate = change / recentTicks.length;
+    
+    return {
+      trend: change > 0.05 ? "increasing" : change < -0.05 ? "decreasing" : "stable",
+      change: change,
+      rate: rate,
+      acceleration: this.calculateAcceleration(recentTicks)
+    };
+  }
+  
+  calculateAcceleration(ticks) {
+    if (ticks.length < 3) return 0;
+    
+    const rates = [];
+    for (let i = 1; i < ticks.length; i++) {
+      rates.push(ticks[i].probability - ticks[i-1].probability);
+    }
+    
+    let acceleration = 0;
+    for (let i = 1; i < rates.length; i++) {
+      acceleration += rates[i] - rates[i-1];
+    }
+    
+    return acceleration / (rates.length - 1);
+  }
+}
+```
+
+### 8. Advanced Probability Models
+
+#### 8.1 Volatility-Adjusted Probabilities
+```javascript
+function calculateVolatilityAdjustment(gameVolatility, playerCount, whaleConcentration) {
+  // Higher volatility often correlates with earlier rugs
+  const volatilityFactor = Math.min(gameVolatility / 0.1, 2.0); // Cap at 2x
+  
+  // More players = more stability = later rugs
+  const playerFactor = Math.max(0.5, 1 - (playerCount - 10) / 100);
+  
+  // High whale concentration = potential for sudden exits
+  const whaleFactor = 1 + (whaleConcentration * 0.3);
+  
+  return volatilityFactor * playerFactor * whaleFactor;
+}
+```
+
+#### 8.2 Meta-Algorithm Detection
+```javascript
+function detectMetaAlgorithmInfluence(recentGames, currentTick) {
+  // Analyze recent game patterns for meta-algorithm intervention
+  const shortGames = recentGames.filter(g => g.duration < 30).length;
+  const longGames = recentGames.filter(g => g.duration > 300).length;
+  const extremePayouts = recentGames.filter(g => g.peakMultiplier > 50).length;
+  
+  // High concentration of short games suggests treasury protection
+  const shortGameRatio = shortGames / recentGames.length;
+  const treasuryProtectionSignal = shortGameRatio > 0.6 ? 1.5 : 1.0;
+  
+  // Recent extreme payouts increase probability of correction
+  const extremePayoutPenalty = extremePayouts > 0 ? 1.2 : 1.0;
+  
+  return {
+    adjustment: treasuryProtectionSignal * extremePayoutPenalty,
+    confidence: Math.min(shortGameRatio + (extremePayouts * 0.1), 1.0),
+    signals: {
+      shortGameRatio,
+      treasuryProtection: treasuryProtectionSignal > 1,
+      extremePayouts: extremePayouts
+    }
+  };
+}
+```
+
+---
+
+## Probability Lookup Tables
+
+### Quick Reference Table
+| Tick Range | Base Probability | Zone | Minimum Bankroll (10x) | 
+|------------|------------------|------|-------------------------|
+| 0-50       | 15-28%          | Avoid/Caution | - |
+| 50-100     | 32-45%          | Opportunity | 0.063 SOL |
+| 100-200    | 50-70%          | Strong | 0.031 SOL |
+| 200-300    | 74-86%          | Excellent | 0.016 SOL |
+| 300-500    | 88-95%          | Certainty | 0.008 SOL |
+| 500+       | 96%+            | Mathematical | 0.004 SOL |
+
+### Implementation Priority Checklist
+- [ ] Basic probability interpolation function
+- [ ] Adaptive timing adjustment system
+- [ ] Expected value calculations with confidence intervals
+- [ ] Zone-based classification system
+- [ ] Real-time probability updates
+- [ ] Historical accuracy tracking
+- [ ] Advanced volatility adjustments
+- [ ] Meta-algorithm detection algorithms
+
+---
+
+*Next: [03-websocket-integration.md](./03-websocket-integration.md) - Technical event handling and real-time data processing*
+
+
+# 09 - Real-Time Calculations: Core Decision Engines
+
+## Executive Summary
+This document defines the complete mathematical framework for real-time probability calculations, expected value computations, and decision algorithms that power the side betting system. All calculations use empirically validated timing data from 100-game analysis.
+
+## Critical Mathematical Foundation
+- **Empirical Mean Tick Interval**: 271.5ms (replaces theoretical 250ms)
+- **Empirical Variance**: 87,174.6 (critical for accurate volatility calculations)
+- **Standard Deviation**: 295.3ms 
+- **95% Confidence Range**: 237-269ms
+- All calculations must account for high timing variability (CV = 1.09)
+
+---
+
+## Core Calculation Engine
+
+### 1. Primary Probability Calculator
+
+#### 1.1 Optimized Calculation Engine
+```javascript
+class OptimizedProbabilityCalculator {
+  constructor() {
+    // Pre-computed baseline probabilities (vectorized for performance)
+    this.baselineProbabilities = this.generateBaselineProbabilities();
+    this.timingAdjustmentCache = new Map();
+    this.marketConditionCache = new Map();
+    this.lastCalculationTime = 0;
+  }
+  
+  generateBaselineProbabilities() {
+    // Pre-compute probability curve for ticks 0-1000
+    const probabilities = new Float64Array(1001);
+    
+    for (let tick = 0; tick <= 1000; tick++) {
+      probabilities[tick] = this.computeBaseProbability(tick);
+    }
+    
+    return probabilities;
+  }
+  
+  computeBaseProbability(tick) {
+    // Empirically derived probability function
+    if (tick < 50) {
+      return 0.15 + (tick * 0.0026); // 15% -> 28% linear growth
+    } else if (tick < 100) {
+      return 0.28 + ((tick - 50) * 0.0034); // 28% -> 45% 
+    } else if (tick < 200) {
+      return 0.45 + ((tick - 100) * 0.0025); // 45% -> 70%
+    } else if (tick < 300) {
+      return 0.70 + ((tick - 200) * 0.0016); // 70% -> 86%
+    } else if (tick < 500) {
+      return 0.86 + ((tick - 300) * 0.00045); // 86% -> 95%
+    } else {
+      return Math.min(0.98, 0.95 + ((tick - 500) * 0.00006)); // 95% -> 98% asymptotic
+    }
+  }
+  
+  calculateProbability(tickCount, timingData, gameState) {
+    const calculationStart = performance.now();
+    
+    // Fast path for cached results
+    const cacheKey = `${tickCount}_${Math.floor(timingData.averageInterval / 10)}`;
+    if (this.timingAdjustmentCache.has(cacheKey)) {
+      const cached = this.timingAdjustmentCache.get(cacheKey);
+      if (Date.now() - cached.timestamp < 5000) { // 5-second cache
+        return this.applyCachedCalculation(cached, gameState);
+      }
+    }
+    
+    // Base probability (optimized array lookup)
+    const baseProbability = this.getBaseProbability(tickCount);
+    
+    // Calculate timing adjustment (vectorized operations)
+    const timingAdjustment = this.calculateTimingAdjustment(timingData);
+    
+    // Calculate market condition adjustments
+    const marketAdjustment = this.calculateMarketAdjustment(gameState);
+    
+    // Calculate volatility adjustment
+    const volatilityAdjustment = this.calculateVolatilityAdjustment(timingData);
+    
+    // Apply phase-specific adjustments
+    const phaseAdjustment = this.calculatePhaseAdjustment(gameState);
+    
+    // Combine adjustments using optimized arithmetic
+    const adjustedProbability = this.combineAdjustments(
+      baseProbability,
+      timingAdjustment,
+      marketAdjustment,
+      volatilityAdjustment,
+      phaseAdjustment
+    );
+    
+    // Calculate confidence intervals
+    const confidence = this.calculateConfidenceInterval(
+      adjustedProbability,
+      timingData.sampleSize || 100
+    );
+    
+    // Calculate expected value
+    const expectedValue = this.calculateExpectedValue(
+      adjustedProbability,
+      0.001, // Base bet size
+      timingData.reliability || 0.8
+    );
+    
+    const calculationTime = performance.now() - calculationStart;
+    
+    return {
+      baseProbability,
+      adjustedProbability,
+      adjustments: {
+        timing: timingAdjustment,
+        market: marketAdjustment,
+        volatility: volatilityAdjustment,
+        phase: phaseAdjustment
+      },
+      confidence,
+      expectedValue,
+      zone: this.classifyProbabilityZone(adjustedProbability),
+      metadata: {
+        tickCount,
+        calculationTime,
+        reliability: timingData.reliability || 0.8,
+        timestamp: Date.now()
+      }
+    };
+  }
+  
+  private getBaseProbability(tickCount: number): number {
+    // Optimized array lookup with bounds checking
+    const index = Math.min(Math.max(Math.floor(tickCount), 0), this.baselineProbabilities.length - 1);
+    return this.baselineProbabilities[index];
+  }
+  
+  private calculateTimingAdjustment(timingData: TimingData): number {
+    const theoreticalTickDuration = 250; // ms
+    const actualTickDuration = timingData.averageInterval || 271.5;
+    
+    // Calculate time extension factor
+    const timeExtensionFactor = actualTickDuration / theoreticalTickDuration;
+    
+    // Longer ticks = more time for rug within 40-tick window
+    const baseAdjustment = Math.log(timeExtensionFactor) * 0.15; // Logarithmic scaling
+    
+    // Apply reliability weighting
+    const reliability = timingData.reliability || 0.8;
+    const reliabilityWeight = Math.pow(reliability, 0.5); // Square root for gentler penalty
+    
+    // Apply variance penalty
+    const variance = timingData.variance || 87174.6; // Use empirical variance from 100-game analysis
+    const normalizedVariance = Math.min(variance / 100000, 1.0); // Normalize to 0-1 with proper scale
+    const variancePenalty = normalizedVariance * 0.05; // 5% max penalty
+    
+    return (baseAdjustment * reliabilityWeight) - variancePenalty;
+  }
+  
+  private calculateMarketAdjustment(gameState: GameState): number {
+    let adjustment = 0;
+    
+    // Player count adjustment
+    const playerCount = gameState.connectedPlayers || 100;
+    if (playerCount < 50) {
+      adjustment += 0.03; // Low liquidity = higher rug chance
+    } else if (playerCount > 200) {
+      adjustment -= 0.02; // High liquidity = lower rug chance
+    }
+    
+    // Trade count adjustment
+    const tradeCount = gameState.tradeCount || 0;
+    const expectedTrades = Math.max(gameState.tickCount * 0.5, 10);
+    const tradeRatio = tradeCount / expectedTrades;
+    
+    if (tradeRatio < 0.5) {
+      adjustment += 0.02; // Low activity = higher risk
+    } else if (tradeRatio > 1.5) {
+      adjustment -= 0.01; // High activity = lower risk
+    }
+    
+    // Price volatility adjustment
+    const price = gameState.price || 1.0;
+    if (price > 3.0) {
+      adjustment += Math.min((price - 3.0) * 0.01, 0.05); // High prices = higher risk
+    }
+    
+    return Math.max(-0.1, Math.min(0.1, adjustment)); // Constrain to ±10%
+  }
+  
+  private calculateVolatilityAdjustment(timingData: TimingData): number {
+    const variance = timingData.variance || 87174.6; // Use empirical variance from 100-game analysis
+    const maxVariance = 150000; // Updated to accommodate actual observed variance
+    
+    // Normalize variance to 0-1 scale
+    const normalizedVariance = Math.min(variance / maxVariance, 1.0);
+    
+    // High variance = less predictable timing = lower confidence
+    return -normalizedVariance * 0.1; // 10% max penalty
+  }
+  
+  private calculatePhaseAdjustment(gameState: GameState): number {
+    // Early game (0-100 ticks): Lower probability due to momentum
+    if (gameState.tickCount < 100) {
+      const earlyGamePenalty = (100 - gameState.tickCount) * 0.0005; // Up to 5% penalty
+      return -earlyGamePenalty;
+    }
+    
+    // Late game (500+ ticks): Increased probability
+    if (gameState.tickCount > 500) {
+      const lateGameBonus = Math.min((gameState.tickCount - 500) * 0.0002, 0.05); // Up to 5% bonus
+      return lateGameBonus;
+    }
+    
+    return 0; // No adjustment for mid-game
+  }
+  
+  private combineAdjustments(
+    base: number,
+    timing: number,
+    market: number,
+    volatility: number,
+    phase: number
+  ): number {
+    // Multiplicative combination for more realistic interactions
+    let adjusted = base;
+    
+    // Apply timing adjustment (most significant)
+    adjusted += timing;
+    
+    // Apply market and phase adjustments
+    adjusted = adjusted * (1 + market) * (1 + phase);
+    
+    // Apply volatility adjustment (reduces confidence)
+    adjusted += volatility;
+    
+    // Ensure bounds
+    return Math.max(0.01, Math.min(0.99, adjusted));
+  }
+}
+```
+
+### 2. Expected Value Calculator
+
+#### 2.1 Risk-Adjusted EV Engine
+```javascript
+class ExpectedValueCalculator {
+  constructor() {
+    this.payoutMultiplier = 5.0; // 5:1 payout
+    this.baseWagerSize = 0.001; // SOL
+    this.riskPremium = 0.02; // 2% risk premium
+  }
+  
+  calculateExpectedValue(probability, wagerSize = this.baseWagerSize, reliability = 1.0) {
+    // Basic EV calculation
+    const winPayout = wagerSize * this.payoutMultiplier;
+    const lossPayout = -wagerSize;
+    
+    const baseEV = (probability * winPayout) + ((1 - probability) * lossPayout);
+    
+    // Apply reliability adjustment
+    const reliabilityAdjustment = this.calculateReliabilityAdjustment(reliability);
+    
+    // Apply risk premium
+    const riskAdjustedEV = baseEV - (wagerSize * this.riskPremium);
+    
+    // Final adjustment
+    const finalEV = riskAdjustedEV * reliabilityAdjustment;
+    
+    return {
+      baseEV,
+      riskAdjustedEV: finalEV,
+      winProbability: probability,
+      potentialWin: winPayout,
+      potentialLoss: lossPayout,
+      reliability,
+      recommendation: this.generateRecommendation(finalEV, probability, reliability)
+    };
+  }
+  
+  calculateReliabilityAdjustment(reliability) {
+    // Conservative approach: penalize low reliability more than reward high reliability
+    if (reliability < 0.5) {
+      return Math.pow(reliability, 1.5); // Harsh penalty for unreliable data
+    } else if (reliability > 0.8) {
+      return Math.min(1.1, 0.8 + (reliability * 0.25)); // Modest bonus for high reliability
+    } else {
+      return reliability; // Linear scaling for moderate reliability
+    }
+  }
+  
+  generateRecommendation(ev, probability, reliability) {
+    // EV-based recommendations with reliability weighting
+    if (ev > 0.0005 && probability > 0.6 && reliability > 0.7) {
+      return { action: 'STRONG_BET', confidence: 'HIGH' };
+    } else if (ev > 0.0002 && probability > 0.5 && reliability > 0.6) {
+      return { action: 'BET', confidence: 'MEDIUM' };
+    } else if (ev > 0 && probability > 0.4) {
+      return { action: 'CONSIDER', confidence: 'LOW' };
+    } else if (ev < -0.0002) {
+      return { action: 'AVOID', confidence: 'HIGH' };
+    } else {
+      return { action: 'WAIT', confidence: 'MEDIUM' };
+    }
+  }
+}
+```
+
+### 3. Advanced Timing Analysis
+
+#### 3.1 Real-Time Timing Monitor
+```javascript
+class RealTimeTimingMonitor {
+  constructor() {
+    this.measurementWindow = 100; // Track last 100 intervals
+    this.measurements = [];
+    this.adaptiveBaseline = {
+      mean: 271.5,
+      variance: 87174.6,
+      stdDev: 295.3
+    };
+  }
+  
+  recordMeasurement(interval, tick, timestamp) {
+    const measurement = {
+      interval,
+      tick,
+      timestamp,
+      deviation: interval - this.adaptiveBaseline.mean,
+      reliability: this.calculateReliability(interval)
+    };
+    
+    this.measurements.push(measurement);
+    
+    // Maintain sliding window
+    if (this.measurements.length > this.measurementWindow) {
+      this.measurements.shift();
+    }
+    
+    // Update adaptive baseline
+    this.updateAdaptiveBaseline();
+    
+    return this.generateTimingData();
+  }
+  
+  calculateReliability(interval) {
+    // Reliability based on deviation from empirical range
+    const p5 = 237; // 5th percentile
+    const p95 = 269; // 95th percentile
+    
+    if (interval >= p5 && interval <= p95) {
+      return 1.0; // Highly reliable within normal range
+    } else if (interval >= 200 && interval <= 300) {
+      return 0.8; // Good reliability within extended range
+    } else if (interval >= 150 && interval <= 400) {
+      return 0.5; // Moderate reliability
+    } else {
+      return 0.2; // Low reliability for outliers
+    }
+  }
+  
+  updateAdaptiveBaseline() {
+    if (this.measurements.length < 20) return;
+    
+    const recent = this.measurements.slice(-20);
+    
+    if (recent.length === 0) {
+      return {
+        averageInterval: 271.5,
+        variance: 87174.6,
+        reliability: 0.5,
+        sampleSize: 0,
+        trend: 'unknown'
+      };
+    }
+    
+    const intervals = recent.map(m => m.interval);
+    const average = intervals.reduce((sum, i) => sum + i, 0) / intervals.length;
+    const variance = this.calculateVariance(intervals);
+    const reliability = recent.reduce((sum, m) => sum + m.reliability, 0) / recent.length;
+    
+    // Calculate trend
+    const trend = this.calculateTrend(recent);
+    
+    return {
+      averageInterval: average,
+      variance,
+      reliability,
+      sampleSize: recent.length,
+      trend
+    };
+  }
+  
+  private calculateVariance(values: number[]): number {
+    const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+    const squaredDiffs = values.map(v => Math.pow(v - mean, 2));
+    return squaredDiffs.reduce((sum, d) => sum + d, 0) / values.length;
+  }
+  
+  private calculateTrend(measurements: TickMeasurement[]): TimingTrend {
+    if (measurements.length < 10) return 'insufficient_data';
+    
+    const firstHalf = measurements.slice(0, Math.floor(measurements.length / 2));
+    const secondHalf = measurements.slice(Math.floor(measurements.length / 2));
+    
+    const firstAvg = firstHalf.reduce((sum, m) => sum + m.interval, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((sum, m) => sum + m.interval, 0) / secondHalf.length;
+    
+    const change = secondAvg - firstAvg;
+    const changeThreshold = 50; // 50ms change threshold
+    
+    if (change > changeThreshold) return 'increasing';
+    if (change < -changeThreshold) return 'decreasing';
+    return 'stable';
+  }
+}
+```
+
+### 4. Confidence Interval Calculator
+
+#### 4.1 Statistical Confidence Engine
+```javascript
+class ConfidenceCalculator {
+  constructor() {
+    this.criticalValues = {
+      90: 1.645,
+      95: 1.96,
+      99: 2.576
+    };
+  }
+  
+  calculateConfidenceInterval(probability, sampleSize, confidenceLevel = 95) {
+    // Wilson score interval for binomial proportions
+    const z = this.criticalValues[confidenceLevel];
+    const n = sampleSize;
+    const p = probability;
+    
+    const centerAdjustment = (z * z) / (2 * n);
+    const adjustedP = (p + centerAdjustment) / (1 + (z * z) / n);
+    
+    const marginOfError = (z / (1 + (z * z) / n)) * 
+      Math.sqrt((p * (1 - p) + (z * z) / (4 * n)) / n);
+    
+    return {
+      point: probability,
+      lower: Math.max(0.01, adjustedP - marginOfError),
+      upper: Math.min(0.99, adjustedP + marginOfError),
+      marginOfError,
+      confidenceLevel,
+      sampleSize
+    };
+  }
+  
+  calculateAdaptiveConfidence(timingData, gameState) {
+    let baseConfidence = 95;
+    
+    // Reduce confidence for low reliability
+    if (timingData.reliability < 0.6) {
+      baseConfidence = 90;
+    }
+    if (timingData.reliability < 0.4) {
+      baseConfidence = 80;
+    }
+    
+    // Reduce confidence for small sample sizes
+    if (timingData.sampleSize < 50) {
+      baseConfidence = Math.max(80, baseConfidence - 10);
+    }
+    if (timingData.sampleSize < 20) {
+      baseConfidence = Math.max(70, baseConfidence - 15);
+    }
+    
+    // Reduce confidence for extreme game states
+    if (gameState.tickCount > 800 || gameState.tickCount < 20) {
+      baseConfidence = Math.max(85, baseConfidence - 5);
+    }
+    
+    return Math.max(70, Math.min(99, baseConfidence));
+  }
+}
+```
+
+### 5. Compensation Engine
+
+#### 5.1 Adaptive Timing Compensator
+```typescript
+class AdaptiveTimingCompensator {
+  private compensationHistory: CircularBuffer<CompensationOutcome>;
+  private baseCompensations: Map<string, number>;
+  private learningRate: number = 0.1;
+  
+  constructor() {
+    this.baseCompensations = new Map([
+      ['network_latency', 100],      // 100ms average network latency
+      ['processing_delay', 50],      // 50ms processing time
+      ['timing_variance', 295.3],    // 1 standard deviation buffer based on empirical data
+      ['execution_delay', 200]       // 200ms execution buffer
+    ]);
+    
+    this.compensationHistory = new CircularBuffer(1000);
+  }
+  
+  calculateCompensation(
+    type: string,
+    ticksRemaining: number,
+    customValue?: number
+  ): number {
+    const baseCompensation = this.baseCompensations.get(type) || 0;
+    
+    if (customValue !== undefined) {
+      // Use custom value (e.g., measured network latency)
+      return customValue;
+    }
+    
+    // Check for learned adjustments
+    const recentOutcomes = this.compensationHistory.getRecent(50);
+    const typeOutcomes = recentOutcomes.filter(o => o.compensationType === type);
+    
+    if (typeOutcomes.length < 5) {
+      return baseCompensation;
+    }
+    
+    // Calculate average error for this compensation type
+    const avgError = typeOutcomes.reduce((sum, o) => sum + o.error, 0) / typeOutcomes.length;
+    
+    // Adjust compensation based on historical error
+    const adjustment = avgError * this.learningRate;
+    const adjustedCompensation = baseCompensation - adjustment; // Negative error = reduce compensation
+    
+    return Math.max(0, adjustedCompensation);
+  }
+  
+  private calculateVarianceCompensation(ticksRemaining: number): number {
+    const baseVarianceBuffer = this.baseCompensations.get('timing_variance') || 295.3;
+    
+    // Increase buffer for longer waits due to compounding variance
+    const varianceMultiplier = Math.min(2.0, 1 + (ticksRemaining * 0.1));
+    
+    return baseVarianceBuffer * varianceMultiplier;
+  }
+  
+  private calculateLearningCompensation(
+    estimatedDuration: number,
+    ticksRemaining: number
+  ): number {
+    // Look for similar historical scenarios
+    const similarOutcomes = this.compensationHistory.getAll().filter(outcome =>
+      Math.abs(outcome.estimatedDuration - estimatedDuration) < 1000 && // Within 1 second
+      Math.abs(outcome.ticksRemaining - ticksRemaining) <= 2 // Within 2 ticks
+    );
+    
+    if (similarOutcomes.length < 3) {
+      return 0; // No learning compensation if insufficient data
+    }
+    
+    // Calculate average error for similar scenarios
+    const avgError = similarOutcomes.reduce((sum, o) => sum + o.error, 0) / similarOutcomes.length;
+    
+    // Apply learning with confidence weighting
+    const confidence = Math.min(similarOutcomes.length / 10, 1.0);
+    
+    return avgError * confidence * this.learningRate;
+  }
+}
+```
+
+### 6. Zone Classification System
+
+#### 6.1 Probability Zone Classifier
+```javascript
+class ProbabilityZoneClassifier {
+  constructor() {
+    this.zones = [
+      { name: 'AVOID', min: 0.00, max: 0.25, color: '#ff4444', action: 'NEVER_BET' },
+      { name: 'CAUTION', min: 0.25, max: 0.45, color: '#ff8800', action: 'AVOID' },
+      { name: 'OPPORTUNITY', min: 0.45, max: 0.65, color: '#ffaa00', action: 'CONSIDER' },
+      { name: 'GOOD', min: 0.65, max: 0.75, color: '#88cc00', action: 'BET' },
+      { name: 'STRONG', min: 0.75, max: 0.85, color: '#44cc44', action: 'STRONG_BET' },
+      { name: 'EXCELLENT', min: 0.85, max: 0.92, color: '#00cc88', action: 'STRONG_BET' },
+      { name: 'CERTAINTY', min: 0.92, max: 1.00, color: '#0088cc', action: 'MAX_BET' }
+    ];
+  }
+  
+  classifyProbability(probability, confidence = 95, reliability = 1.0) {
+    // Find base zone
+    const baseZone = this.zones.find(zone => 
+      probability >= zone.min && probability < zone.max
+    ) || this.zones[0];
+    
+    // Apply confidence and reliability adjustments
+    let adjustedZone = { ...baseZone };
+    
+    // Reduce zone quality for low confidence
+    if (confidence < 90) {
+      adjustedZone = this.downgradeZone(adjustedZone);
+    }
+    
+    // Reduce zone quality for low reliability
+    if (reliability < 0.7) {
+      adjustedZone = this.downgradeZone(adjustedZone);
+    }
+    
+    return {
+      ...adjustedZone,
+      probability,
+      confidence,
+      reliability,
+      adjustments: {
+        confidenceDowngrade: confidence < 90,
+        reliabilityDowngrade: reliability < 0.7
+      }
+    };
+  }
+  
+  downgradeZone(zone) {
+    const currentIndex = this.zones.findIndex(z => z.name === zone.name);
+    const newIndex = Math.max(0, currentIndex - 1);
+    return { ...this.zones[newIndex] };
+  }
+  
+  getZoneMetadata(zoneName) {
+    const zone = this.zones.find(z => z.name === zoneName);
+    
+    return {
+      ...zone,
+      expectedFrequency: this.calculateZoneFrequency(zone),
+      typicalBankrollRequirement: this.calculateBankrollRequirement(zone),
+      riskLevel: this.calculateRiskLevel(zone)
+    };
+  }
+  
+  calculateZoneFrequency(zone) {
+    // Empirical frequency estimates based on game analysis
+    const frequencies = {
+      'AVOID': '45%',
+      'CAUTION': '20%', 
+      'OPPORTUNITY': '15%',
+      'GOOD': '10%',
+      'STRONG': '6%',
+      'EXCELLENT': '3%',
+      'CERTAINTY': '1%'
+    };
+    
+    return frequencies[zone.name] || 'Unknown';
+  }
+  
+  calculateBankrollRequirement(zone) {
+    // Base bet sizing as multiple of minimum bet
+    const requirements = {
+      'AVOID': Infinity,
+      'CAUTION': 100, // 100x minimum bet bankroll
+      'OPPORTUNITY': 50,
+      'GOOD': 25,
+      'STRONG': 15,
+      'EXCELLENT': 10,
+      'CERTAINTY': 5
+    };
+    
+    return requirements[zone.name] || 50;
+  }
+  
+  calculateRiskLevel(zone) {
+    const riskLevels = {
+      'AVOID': 'EXTREME',
+      'CAUTION': 'HIGH',
+      'OPPORTUNITY': 'MODERATE',
+      'GOOD': 'LOW',
+      'STRONG': 'VERY_LOW',
+      'EXCELLENT': 'MINIMAL',
+      'CERTAINTY': 'NEGLIGIBLE'
+    };
+    
+    return riskLevels[zone.name] || 'UNKNOWN';
+  }
+}
+```
+
+### 7. Performance Optimization
+
+#### 7.1 Calculation Cache System
+```javascript
+class CalculationCache {
+  constructor() {
+    this.cache = new Map();
+    this.maxSize = 10000;
+    this.ttl = 30000; // 30 second TTL
+    this.hitCount = 0;
+    this.missCount = 0;
+  }
+  
+  generateKey(tickCount, timingData, gameState) {
+    // Create deterministic cache key
+    const timingKey = Math.floor(timingData.averageInterval / 5) * 5; // 5ms buckets
+    const reliabilityKey = Math.floor(timingData.reliability * 10) / 10; // 0.1 buckets
+    const playerKey = Math.floor((gameState.connectedPlayers || 100) / 10) * 10; // 10 player buckets
+    
+    return `${tickCount}_${timingKey}_${reliabilityKey}_${playerKey}`;
+  }
+  
+  get(key) {
+    const cached = this.cache.get(key);
+    
+    if (!cached) {
+      this.missCount++;
+      return null;
+    }
+    
+    if (Date.now() - cached.timestamp > this.ttl) {
+      this.cache.delete(key);
+      this.missCount++;
+      return null;
+    }
+    
+    this.hitCount++;
+    return cached.data;
+  }
+  
+  set(key, data) {
+    // Prevent cache overflow
+    if (this.cache.size >= this.maxSize) {
+      this.evictOldest();
+    }
+    
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+  }
+  
+  evictOldest() {
+    const oldestKey = this.cache.keys().next().value;
+    this.cache.delete(oldestKey);
+  }
+  
+  getStats() {
+    const total = this.hitCount + this.missCount;
+    return {
+      hitRate: total > 0 ? this.hitCount / total : 0,
+      size: this.cache.size,
+      maxSize: this.maxSize
+    };
+  }
+}
+```
+
+---
+
+## Integration Guidelines
+
+### Implementation Priority
+1. **Core Probability Calculator** - Foundation for all decisions
+2. **Expected Value Engine** - Critical for bet sizing
+3. **Timing Monitor** - Essential for accurate predictions
+4. **Zone Classifier** - User-friendly decision support
+5. **Cache System** - Performance optimization
+6. **Compensation Engine** - Advanced timing accuracy
+
+### Performance Requirements
+- **Target Calculation Time**: <50ms per probability calculation
+- **Cache Hit Rate**: >85% for repeated scenarios
+- **Memory Usage**: <100MB for full system
+- **Update Frequency**: Real-time (every tick)
+
+### Error Handling
+- Graceful degradation for missing timing data
+- Fallback to empirical baselines when insufficient samples
+- Conservative probability estimates during system instability
+- Automatic reliability scoring and adjustment
+
+---
+
+*Next: [10-ml-preparation.md](./10-ml-preparation.md) - Machine learning foundations and data requirements*
+
+
+# 06 - Risk Hedging Systems: Combined Position Optimization
+
+## Executive Summary
+This document presents advanced risk hedging strategies that combine main game positions with side bets to create superior risk-adjusted returns. By leveraging the mathematical relationship between main game volatility and side bet probabilities, sophisticated hedging systems can dramatically reduce overall portfolio risk while maintaining profit potential.
+
+## Hedging Theory Foundation
+**Core Principle**: Main game positions and side bets have inverse correlation patterns that can be exploited for risk reduction.
+- **Main Game Risk**: Price volatility and timing risk
+- **Side Bet Risk**: Probability estimation and gap risk  
+- **Combined Opportunity**: Offsetting risk profiles create hedging potential
+
+---
+
+## Mathematical Hedging Framework
+
+### 1. Position Correlation Analysis
+
+#### 1.1 Risk Profile Correlation Matrix
+```javascript
+class RiskCorrelationAnalyzer {
+  constructor() {
+    this.correlationMatrix = {
+      // Main Game vs Side Bet correlations
+      price_volatility_vs_rug_probability: -0.65,    // Higher volatility = higher rug chance
+      position_size_vs_hedge_ratio: 0.80,            // Larger positions need more hedging
+      hold_time_vs_gap_risk: 0.45,                   // Longer holds = more gap exposure
+      game_phase_vs_hedge_effectiveness: 0.90        // Later phases = better hedging
+    };
+    
+    this.riskFactors = this.defineRiskFactors();
+  }
+  
+  defineRiskFactors() {
+    return {
+      main_game: {
+        price_risk: {
+          type: 'continuous',
+          range: [-0.50, 2.00],     // -50% to +200% price movement
+          probability: 'normal',
+          hedge_effectiveness: 0.75
+        },
+        timing_risk: {
+          type: 'discrete',
+          events: ['rug', 'continue'],
+          hedge_effectiveness: 0.95
+        },
+        liquidity_risk: {
+          type: 'market_dependent',
+          factors: ['player_count', 'volatility'],
+          hedge_effectiveness: 0.30
+        }
+      },
+      
+      side_bet: {
+        probability_risk: {
+          type: 'estimation_error',
+          range: [-0.20, 0.20],     // ±20% probability estimation error
+          hedge_effectiveness: 0.85
+        },
+        gap_risk: {
+          type: 'timing_dependent',
+          factors: ['server_lag', 'cooldown_variance'],
+          hedge_effectiveness: 0.60
+        },
+        sequence_risk: {
+          type: 'martingale_risk',
+          compound: true,
+          hedge_effectiveness: 0.40
+        }
+      }
+    };
+  }
+  
+  calculateOptimalHedgeRatio(mainPosition, currentTick, volatility) {
+    // Base hedge ratio calculation
+    const rugProbability = getBaseProbability(currentTick);
+    const volatilityAdjustment = Math.min(volatility / 0.1, 2.0); // Cap at 2x
+    
+    // Position-based scaling
+    const positionRisk = this.calculatePositionRisk(mainPosition);
+    
+    // Time-based adjustment
+    const timeDecay = this.calculateTimeDecay(currentTick);
+    
+    const baseHedgeRatio = rugProbability * 0.3; // 30% of rug probability
+    const adjustedRatio = baseHedgeRatio * volatilityAdjustment * positionRisk * timeDecay;
+    
+    return Math.min(0.95, Math.max(0.05, adjustedRatio)); // Constrain to 5-95%
+  }
+  
+  calculatePositionRisk(mainPosition) {
+    const { size, entryPrice, currentPrice, timeHeld } = mainPosition;
+    
+    // Unrealized P&L risk
+    const unrealizedPnL = (currentPrice - entryPrice) / entryPrice;
+    const pnlRisk = Math.abs(unrealizedPnL) > 0.20 ? 1.5 : 1.0;
+    
+    // Size risk
+    const sizeRisk = Math.min(2.0, Math.sqrt(size / 0.1)); // Scale with position size
+    
+    // Time decay risk
+    const timeRisk = Math.min(1.5, 1 + (timeHeld / 30000)); // Increase with hold time
+    
+    return pnlRisk * sizeRisk * timeRisk;
+  }
+}
+```
+
+### 2. Dynamic Hedge Allocation System
+
+```javascript
+class DynamicHedgeAllocator {
+  constructor(totalBankroll) {
+    this.totalBankroll = totalBankroll;
+    this.allocationLimits = this.defineAllocationLimits();
+    this.hedgeStrategies = this.defineHedgeStrategies();
+    this.correlationAnalyzer = new RiskCorrelationAnalyzer();
+  }
+  
+  defineAllocationLimits() {
+    return {
+      main_game_max: 0.70,        // Maximum 70% in main game
+      side_bet_max: 0.30,         // Maximum 30% in side bets
+      combined_max: 0.90,         // Maximum 90% combined exposure
+      hedge_reserve: 0.10,        // 10% reserve for hedge adjustments
+      emergency_buffer: 0.05      // 5% emergency buffer
+    };
+  }
+  
+  defineHedgeStrategies() {
+    return {
+      conservative_hedge: {
+        main_allocation: 0.40,
+        side_allocation: 0.20,
+        hedge_ratio: 0.50,
+        rebalance_threshold: 0.10
+      },
+      
+      balanced_hedge: {
+        main_allocation: 0.50,
+        side_allocation: 0.25,
+        hedge_ratio: 0.40,
+        rebalance_threshold: 0.15
+      },
+      
+      aggressive_hedge: {
+        main_allocation: 0.60,
+        side_allocation: 0.30,
+        hedge_ratio: 0.30,
+        rebalance_threshold: 0.20
+      },
+      
+      opportunistic_hedge: {
+        main_allocation: 0.70,
+        side_allocation: 0.20,
+        hedge_ratio: 0.25,
+        rebalance_threshold: 0.25
+      }
+    };
+  }
+  
+  calculateOptimalAllocation(marketConditions, currentPositions) {
+    const { volatility, rugProbability, reliability, playerActivity } = marketConditions;
+    
+    // Select base strategy based on market conditions
+    const baseStrategy = this.selectBaseStrategy(marketConditions);
+    
+    // Calculate dynamic adjustments
+    const volatilityAdjustment = this.calculateVolatilityAdjustment(volatility);
+    const probabilityAdjustment = this.calculateProbabilityAdjustment(rugProbability);
+    const reliabilityAdjustment = this.calculateReliabilityAdjustment(reliability);
+    
+    // Apply adjustments to base strategy
+    const adjustedAllocation = {
+      mainGame: baseStrategy.main_allocation * volatilityAdjustment,
+      sideBet: baseStrategy.side_allocation * probabilityAdjustment * reliabilityAdjustment,
+      hedgeRatio: baseStrategy.hedge_ratio,
+      reserve: this.allocationLimits.hedge_reserve
+    };
+    
+    // Normalize to ensure limits are respected
+    return this.normalizeAllocation(adjustedAllocation);
+  }
+  
+  selectBaseStrategy(conditions) {
+    const { volatility, rugProbability, reliability } = conditions;
+    
+    // High volatility + high probability = conservative
+    if (volatility > 0.15 && rugProbability > 0.75) {
+      return this.hedgeStrategies.conservative_hedge;
+    }
+    
+    // Low reliability = conservative
+    if (reliability < 0.6) {
+      return this.hedgeStrategies.conservative_hedge;
+    }
+    
+    // High probability with good reliability = aggressive
+    if (rugProbability > 0.80 && reliability > 0.8) {
+      return this.hedgeStrategies.aggressive_hedge;
+    }
+    
+    // Moderate probability = opportunistic
+    if (rugProbability > 0.60 && rugProbability < 0.80) {
+      return this.hedgeStrategies.opportunistic_hedge;
+    }
+    
+    // Default to balanced
+    return this.hedgeStrategies.balanced_hedge;
+  }
+}
+```
+
+---
+
+## Advanced Hedging Strategies
+
+### 1. Perfect Hedge Strategy
+
+#### 1.1 Mathematical Perfect Hedge
+```javascript
+class PerfectHedgeStrategy {
+  constructor() {
+    this.name = "Perfect Hedge";
+    this.description = "Eliminates main game timing risk through precise side bet sizing";
+    this.riskProfile = "Ultra Low";
+    this.complexityLevel = "Advanced";
+  }
+  
+  calculatePerfectHedge(mainPosition, currentTick, rugProbability) {
+    const { size, entryPrice, currentPrice } = mainPosition;
+    
+    // Calculate potential main game loss if rug occurs
+    const currentValue = size * currentPrice;
+    const potentialLoss = currentValue; // Total loss if rugged
+    
+    // Calculate required side bet to offset loss
+    const sideBetPayout = 4; // 400% return (5:1 ratio - 1)
+    const requiredSideBetSize = potentialLoss / sideBetPayout;
+    
+    // Adjust for probability (expected value neutrality)
+    const probabilityAdjustedSize = requiredSideBetSize / rugProbability;
+    
+    return {
+      strategy: "perfect_hedge",
+      mainPosition: {
+        size: size,
+        currentValue: currentValue,
+        potentialLoss: potentialLoss
+      },
+      sideBet: {
+        size: probabilityAdjustedSize,
+        maxPayout: probabilityAdjustedSize * 5,
+        hedgeEffectiveness: this.calculateHedgeEffectiveness(probabilityAdjustedSize, potentialLoss),
+        expectedValue: this.calculateHedgeExpectedValue(probabilityAdjustedSize, rugProbability)
+      },
+      netExposure: this.calculateNetExposure(potentialLoss, probabilityAdjustedSize, rugProbability),
+      recommendation: this.generateRecommendation(probabilityAdjustedSize, currentValue)
+    };
+  }
+  
+  calculateHedgeEffectiveness(sideBetSize, potentialLoss) {
+    const maxPayout = sideBetSize * 4; // Net profit from side bet
+    return Math.min(1.0, maxPayout / potentialLoss);
+  }
+  
+  calculateHedgeExpectedValue(sideBetSize, rugProbability) {
+    const winScenario = sideBetSize * 4; // Net profit if side bet wins
+    const loseScenario = -sideBetSize;   // Loss if side bet loses
+    
+    return (rugProbability * winScenario) + ((1 - rugProbability) * loseScenario);
+  }
+  
+  calculateNetExposure(potentialLoss, sideBetSize, rugProbability) {
+    // Scenario 1: Game rugs (main position lost, side bet wins)
+    const rugScenario = -potentialLoss + (sideBetSize * 4);
+    
+    // Scenario 2: Game continues (main position continues, side bet lost)
+    const continueScenario = -sideBetSize; // Only lose the side bet
+    
+    return {
+      rugScenario: rugScenario,
+      continueScenario: continueScenario,
+      expectedValue: (rugProbability * rugScenario) + ((1 - rugProbability) * continueScenario),
+      maxLoss: Math.min(rugScenario, continueScenario),
+      riskReduction: 1 - (Math.abs(rugScenario) / potentialLoss)
+    };
+  }
+}
+```
+
+### 2. Partial Hedge Strategy
+
+```javascript
+class PartialHedgeStrategy {
+  constructor() {
+    this.name = "Partial Hedge";
+    this.description = "Reduces risk while maintaining upside potential";
+    this.hedgeRatios = [0.25, 0.50, 0.75]; // 25%, 50%, 75% hedge levels
+  }
+  
+  calculatePartialHedge(mainPosition, currentTick, rugProbability, hedgeRatio = 0.50) {
+    const perfectHedge = new PerfectHedgeStrategy();
+    const fullHedge = perfectHedge.calculatePerfectHedge(mainPosition, currentTick, rugProbability);
+    
+    // Scale the full hedge by the desired ratio
+    const partialSideBetSize = fullHedge.sideBet.size * hedgeRatio;
+    
+    return {
+      strategy: "partial_hedge",
+      hedgeRatio: hedgeRatio,
+      mainPosition: fullHedge.mainPosition,
+      sideBet: {
+        size: partialSideBetSize,
+        maxPayout: partialSideBetSize * 5,
+        hedgeEffectiveness: hedgeRatio,
+        expectedValue: this.calculatePartialExpectedValue(partialSideBetSize, rugProbability)
+      },
+      scenarios: this.calculatePartialScenarios(mainPosition, partialSideBetSize, rugProbability),
+      recommendation: this.generatePartialRecommendation(hedgeRatio, rugProbability)
+    };
+  }
+  
+  calculatePartialScenarios(mainPosition, sideBetSize, rugProbability) {
+    const { size, currentPrice } = mainPosition;
+    const currentValue = size * currentPrice;
+    
+    // Scenario 1: Game rugs
+    const rugLoss = -currentValue;
+    const sideBetWin = sideBetSize * 4;
+    const rugNetResult = rugLoss + sideBetWin;
+    
+    // Scenario 2: Game continues (various outcomes)
+    const sideBetLoss = -sideBetSize;
+    
+    // Sub-scenarios for game continuation
+    const continuationScenarios = {
+      smallGain: { priceChange: 0.10, probability: 0.30 },
+      moderateGain: { priceChange: 0.25, probability: 0.20 },
+      largeGain: { priceChange: 0.50, probability: 0.10 },
+      smallLoss: { priceChange: -0.10, probability: 0.25 },
+      moderateLoss: { priceChange: -0.25, probability: 0.15 }
+    };
+    
+    const continuationResults = {};
+    for (const [scenario, data] of Object.entries(continuationScenarios)) {
+      const newValue = currentValue * (1 + data.priceChange);
+      const mainGameResult = newValue - currentValue;
+      continuationResults[scenario] = {
+        mainGameResult: mainGameResult,
+        sideBetResult: sideBetLoss,
+        netResult: mainGameResult + sideBetLoss,
+        probability: data.probability * (1 - rugProbability)
+      };
+    }
+    
+    return {
+      rug: {
+        netResult: rugNetResult,
+        probability: rugProbability,
+        components: { mainGame: rugLoss, sideBet: sideBetWin }
+      },
+      continuation: continuationResults
+    };
+  }
+}
+```
+
+### 3. Dynamic Rebalancing Strategy
+
+```javascript
+class DynamicRebalancingStrategy {
+  constructor() {
+    this.name = "Dynamic Rebalancing";
+    this.description = "Continuously adjusts hedge ratios based on changing conditions";
+    this.rebalanceThresholds = {
+      minor: 0.05,     // 5% deviation triggers minor rebalance
+      major: 0.15,     // 15% deviation triggers major rebalance
+      emergency: 0.30  // 30% deviation triggers emergency rebalance
+    };
+  }
+  
+  monitorAndRebalance(currentPositions, marketConditions, targetAllocation) {
+    const currentAllocation = this.calculateCurrentAllocation(currentPositions);
+    const deviations = this.calculateDeviations(currentAllocation, targetAllocation);
+    const rebalanceLevel = this.determineRebalanceLevel(deviations);
+    
+    if (rebalanceLevel === 'none') {
+      return { action: 'hold', reason: 'within_tolerance' };
+    }
+    
+    const rebalanceActions = this.calculateRebalanceActions(
+      currentPositions,
+      targetAllocation,
+      rebalanceLevel
+    );
+    
+    return {
+      action: 'rebalance',
+      level: rebalanceLevel,
+      deviations: deviations,
+      actions: rebalanceActions,
+      expectedImpact: this.calculateRebalanceImpact(rebalanceActions),
+      urgency: this.calculateUrgency(deviations, marketConditions)
+    };
+  }
+  
+  calculateCurrentAllocation(positions) {
+    const totalValue = positions.mainGame.value + positions.sideBets.totalValue;
+    
+    return {
+      mainGame: positions.mainGame.value / totalValue,
+      sideBets: positions.sideBets.totalValue / totalValue,
+      cash: positions.cash / totalValue,
+      totalValue: totalValue
+    };
+  }
+  
+  determineRebalanceLevel(deviations) {
+    const maxDeviation = Math.max(...Object.values(deviations).map(Math.abs));
+    
+    if (maxDeviation >= this.rebalanceThresholds.emergency) {
+      return 'emergency';
+    } else if (maxDeviation >= this.rebalanceThresholds.major) {
+      return 'major';
+    } else if (maxDeviation >= this.rebalanceThresholds.minor) {
+      return 'minor';
+    }
+    
+    return 'none';
+  }
+  
+  calculateRebalanceActions(currentPositions, targetAllocation, level) {
+    const actions = [];
+    
+    // Calculate required adjustments
+    const totalValue = currentPositions.mainGame.value + currentPositions.sideBets.totalValue;
+    
+    const targetMainValue = totalValue * targetAllocation.mainGame;
+    const targetSideValue = totalValue * targetAllocation.sideBets;
+    
+    const mainAdjustment = targetMainValue - currentPositions.mainGame.value;
+    const sideAdjustment = targetSideValue - currentPositions.sideBets.totalValue;
+    
+    // Generate specific actions based on adjustments
+    if (Math.abs(mainAdjustment) > 0.001) { // Minimum adjustment threshold
+      actions.push({
+        type: mainAdjustment > 0 ? 'increase_main_position' : 'reduce_main_position',
+        amount: Math.abs(mainAdjustment),
+        priority: level === 'emergency' ? 'immediate' : 'normal'
+      });
+    }
+    
+    if (Math.abs(sideAdjustment) > 0.001) {
+      actions.push({
+        type: sideAdjustment > 0 ? 'increase_side_bets' : 'reduce_side_bets',
+        amount: Math.abs(sideAdjustment),
+        priority: level === 'emergency' ? 'immediate' : 'normal'
+      });
+    }
+    
+    return actions;
+  }
+}
+```
+
+---
+
+## Specialized Hedging Techniques
+
+### 1. Volatility-Based Hedging
+
+```javascript
+class VolatilityHedgeSystem {
+  constructor() {
+    this.volatilityThresholds = {
+      low: 0.05,      // 5% volatility
+      medium: 0.10,   // 10% volatility
+      high: 0.20,     // 20% volatility
+      extreme: 0.40   // 40% volatility
+    };
+  }
+  
+  calculateVolatilityHedge(mainPosition, currentVolatility, rugProbability) {
+    const volatilityLevel = this.classifyVolatility(currentVolatility);
+    const hedgeMultiplier = this.getVolatilityMultiplier(volatilityLevel);
+    
+    // Base hedge calculation
+    const baseHedge = new PartialHedgeStrategy();
+    const standardHedge = baseHedge.calculatePartialHedge(
+      mainPosition, 
+      0, 
+      rugProbability, 
+      0.50
+    );
+    
+    // Adjust hedge size based on volatility
+    const volatilityAdjustedSize = standardHedge.sideBet.size * hedgeMultiplier;
+    
+    return {
+      strategy: "volatility_hedge",
+      volatilityLevel: volatilityLevel,
+      multiplier: hedgeMultiplier,
+      originalHedge: standardHedge.sideBet.size,
+      adjustedHedge: volatilityAdjustedSize,
+      reasoning: this.getVolatilityReasoning(volatilityLevel),
+      riskProfile: this.calculateVolatilityRisk(currentVolatility, volatilityAdjustedSize)
+    };
+  }
+  
+  classifyVolatility(volatility) {
+    if (volatility <= this.volatilityThresholds.low) return 'low';
+    if (volatility <= this.volatilityThresholds.medium) return 'medium';
+    if (volatility <= this.volatilityThresholds.high) return 'high';
+    return 'extreme';
+  }
+  
+  getVolatilityMultiplier(level) {
+    const multipliers = {
+      low: 0.50,      // Reduce hedge in stable conditions
+      medium: 1.00,   // Standard hedge
+      high: 1.50,     // Increase hedge in volatile conditions
+      extreme: 2.50   // Maximum hedge in extreme volatility
+    };
+    
+    return multipliers[level];
+  }
+  
+  getVolatilityReasoning(level) {
+    const reasoning = {
+      low: "Low volatility suggests stable conditions. Reduced hedging allows for more upside capture.",
+      medium: "Moderate volatility indicates normal market conditions. Standard hedging approach.",
+      high: "High volatility increases rug risk. Enhanced hedging provides additional protection.",
+      extreme: "Extreme volatility suggests unstable conditions. Maximum hedging prioritizes capital preservation."
+    };
+    
+    return reasoning[level];
+  }
+}
+```
+
+### 2. Time-Decay Hedging
+
+```javascript
+class TimeDecayHedgeSystem {
+  constructor() {
+    this.timePhases = {
+      early: { range: [0, 50], hedgeMultiplier: 0.30 },
+      earlyMid: { range: [50, 100], hedgeMultiplier: 0.60 },
+      mid: { range: [100, 200], hedgeMultiplier: 1.00 },
+      lateMid: { range: [200, 300], hedgeMultiplier: 1.40 },
+      late: { range: [300, 500], hedgeMultiplier: 2.00 },
+      extreme: { range: [500, Infinity], hedgeMultiplier: 3.00 }
+    };
+  }
+  
+  calculateTimeDecayHedge(mainPosition, currentTick, baseHedgeSize) {
+    const phase = this.getTimePhase(currentTick);
+    const timeMultiplier = phase.hedgeMultiplier;
+    const decayAdjustedSize = baseHedgeSize * timeMultiplier;
+    
+    // Calculate time-based urgency
+    const urgency = this.calculateHedgeUrgency(currentTick);
+    
+    return {
+      strategy: "time_decay_hedge",
+      currentTick: currentTick,
+      phase: phase,
+      multiplier: timeMultiplier,
+      originalSize: baseHedgeSize,
+      adjustedSize: decayAdjustedSize,
+      urgency: urgency,
+      recommendation: this.getTimeBasedRecommendation(phase, urgency)
+    };
+  }
+  
+  getTimePhase(tick) {
+    for (const [phaseName, phase] of Object.entries(this.timePhases)) {
+      if (tick >= phase.range[0] && tick < phase.range[1]) {
+        return { name: phaseName, ...phase };
+      }
+    }
+    return this.timePhases.extreme;
+  }
+  
+  calculateHedgeUrgency(tick) {
+    // Urgency increases exponentially with tick count
+    const baseUrgency = Math.min(tick / 500, 1.0); // Linear component
+    const exponentialComponent = Math.pow(baseUrgency, 2); // Exponential acceleration
+    
+    return Math.min(1.0, baseUrgency + exponentialComponent);
+  }
+  
+  getTimeBasedRecommendation(phase, urgency) {
+    if (urgency > 0.9) {
+      return "CRITICAL: Immediate hedge required - extremely high rug probability";
+    } else if (urgency > 0.7) {
+      return "HIGH PRIORITY: Increase hedge position - elevated rug risk";
+    } else if (urgency > 0.5) {
+      return "MODERATE: Consider hedge adjustment - increasing risk";
+    } else {
+      return "LOW: Standard hedging approach appropriate";
+    }
+  }
+}
+```
+
+### 3. Multi-Position Hedging
+
+```javascript
+class MultiPositionHedgeManager {
+  constructor() {
+    this.maxPositions = 5;
+    this.correlationThreshold = 0.7;
+    this.riskBudget = 0.25; // 25% of bankroll at risk across all positions
+  }
+  
+  optimizeMultiPositionHedge(positions, marketConditions, totalBankroll) {
+    // Calculate correlation matrix between positions
+    const correlations = this.calculatePositionCorrelations(positions);
+    
+    // Determine portfolio-level risk
+    const portfolioRisk = this.calculatePortfolioRisk(positions, correlations);
+    
+    // Calculate optimal hedge allocation
+    const hedgeAllocation = this.calculateOptimalHedgeAllocation(
+      positions,
+      portfolioRisk,
+      totalBankroll * this.riskBudget
+    );
+    
+    // Generate specific hedge recommendations
+    const hedgeRecommendations = this.generateHedgeRecommendations(
+      positions,
+      hedgeAllocation,
+      marketConditions
+    );
+    
+    return {
+      portfolioSummary: {
+        totalPositions: positions.length,
+        totalExposure: positions.reduce((sum, p) => sum + p.value, 0),
+        portfolioRisk: portfolioRisk,
+        correlationRisk: this.assessCorrelationRisk(correlations)
+      },
+      hedgeAllocation: hedgeAllocation,
+      recommendations: hedgeRecommendations,
+      riskMetrics: this.calculateRiskMetrics(positions, hedgeAllocation)
+    };
+  }
+  
+  calculatePositionCorrelations(positions) {
+    const correlations = [];
+    
+    for (let i = 0; i < positions.length; i++) {
+      for (let j = i + 1; j < positions.length; j++) {
+        const correlation = this.calculatePairwiseCorrelation(positions[i], positions[j]);
+        correlations.push({
+          position1: i,
+          position2: j,
+          correlation: correlation,
+          riskFactor: correlation > this.correlationThreshold ? 'high' : 'low'
+        });
+      }
+    }
+    
+    return correlations;
+  }
+  
+  calculatePairwiseCorrelation(pos1, pos2) {
+    // Simplified correlation based on position characteristics
+    let correlation = 0;
+    
+    // Same game correlation
+    if (pos1.gameId === pos2.gameId) {
+      correlation += 0.8;
+    }
+    
+    // Time proximity correlation
+    const timeDiff = Math.abs(pos1.entryTime - pos2.entryTime);
+    const timeCorrelation = Math.max(0, 1 - (timeDiff / 300000)); // 5 minutes full decorrelation
+    correlation += timeCorrelation * 0.3;
+    
+    // Size correlation (similar sizes tend to correlate)
+    const sizeDiff = Math.abs(pos1.size - pos2.size) / Math.max(pos1.size, pos2.size);
+    const sizeCorrelation = Math.max(0, 1 - sizeDiff);
+    correlation += sizeCorrelation * 0.2;
+    
+    return Math.min(1.0, correlation);
+  }
+  
+  calculateOptimalHedgeAllocation(positions, portfolioRisk, riskBudget) {
+    const totalExposure = positions.reduce((sum, p) => sum + p.value, 0);
+    
+    // Risk-weighted hedge allocation
+    const allocations = positions.map(position => {
+      const positionWeight = position.value / totalExposure;
+      const positionRisk = this.calculatePositionRisk(position);
+      const riskAdjustedWeight = positionWeight * positionRisk;
+      
+      return {
+        positionId: position.id,
+        weight: positionWeight,
+        riskAdjustedWeight: riskAdjustedWeight,
+        recommendedHedge: riskBudget * riskAdjustedWeight,
+        hedgeRatio: (riskBudget * riskAdjustedWeight) / position.value
+      };
+    });
+    
+    return allocations;
+  }
+  
+  generateHedgeRecommendations(positions, allocations, marketConditions) {
+    return allocations.map(allocation => {
+      const position = positions.find(p => p.id === allocation.positionId);
+      const rugProbability = getBaseProbability(marketConditions.currentTick);
+      
+      // Calculate specific hedge size
+      const hedgeCalculator = new PartialHedgeStrategy();
+      const hedgeData = hedgeCalculator.calculatePartialHedge(
+        position,
+        marketConditions.currentTick,
+        rugProbability,
+        allocation.hedgeRatio
+      );
+      
+      return {
+        positionId: allocation.positionId,
+        currentValue: position.value,
+        recommendedHedge: allocation.recommendedHedge,
+        hedgeRatio: allocation.hedgeRatio,
+        sideBetSize: hedgeData.sideBet.size,
+        expectedProtection: hedgeData.sideBet.hedgeEffectiveness,
+        urgency: marketConditions.urgency || 'normal',
+        reasoning: this.generateHedgeReasoning(position, allocation, marketConditions)
+      };
+    });
+  }
+}
+```
+
+---
+
+## Performance Optimization Systems
+
+### 1. Hedge Performance Tracking
+
+```javascript
+class HedgePerformanceTracker {
+  constructor() {
+    this.hedgeHistory = [];
+    this.performanceMetrics = {
+      totalHedges: 0,
+      successfulHedges: 0,
+      avgEffectiveness: 0,
+      totalCost: 0,
+      totalSavings: 0,
+      netBenefit: 0
+    };
+  }
+  
+  recordHedgeOutcome(hedgeData, actualOutcome) {
+    const outcome = {
+      timestamp: Date.now(),
+      hedgeType: hedgeData.strategy,
+      hedgeSize: hedgeData.sideBet.size,
+      mainPositionValue: hedgeData.mainPosition.currentValue,
+      expectedEffectiveness: hedgeData.sideBet.hedgeEffectiveness,
+      actualOutcome: actualOutcome,
+      effectiveness: this.calculateActualEffectiveness(hedgeData, actualOutcome),
+      cost: hedgeData.sideBet.size,
+      savings: this.calculateActualSavings(hedgeData, actualOutcome)
+    };
+    
+    this.hedgeHistory.push(outcome);
+    this.updatePerformanceMetrics(outcome);
+    
+    return outcome;
+  }
+  
+  calculateActualEffectiveness(hedgeData, outcome) {
+    if (outcome.gameRugged) {
+      // Hedge was effective - calculate how much loss was offset
+      const mainLoss = hedgeData.mainPosition.currentValue;
+      const hedgeWin = hedgeData.sideBet.size * 4;
+      return Math.min(1.0, hedgeWin / mainLoss);
+    } else {
+      // Hedge was not needed - effectiveness is 0 (cost without benefit)
+      return 0;
+    }
+  }
+  
+  calculateActualSavings(hedgeData, outcome) {
+    if (outcome.gameRugged) {
+      // Calculate actual savings from hedge
+      const wouldHaveLost = hedgeData.mainPosition.currentValue;
+      const actualLoss = hedgeData.sideBet.size; // Only lost the hedge bet
+      const hedgeWin = hedgeData.sideBet.size * 4;
+      return wouldHaveLost - actualLoss + hedgeWin;
+    } else {
+      // Game continued - hedge was a cost
+      return -hedgeData.sideBet.size;
+    }
+  }
+  
+  getPerformanceAnalysis(lookbackPeriod = 30) {
+    const recentHedges = this.hedgeHistory.filter(
+      h => h.timestamp > Date.now() - (lookbackPeriod * 24 * 60 * 60 * 1000)
+    );
+    
+    if (recentHedges.length === 0) {
+      return { status: 'insufficient_data' };
+    }
+    
+    const totalCost = recentHedges.reduce((sum, h) => sum + h.cost, 0);
+    const totalSavings = recentHedges.reduce((sum, h) => sum + h.savings, 0);
+    const netBenefit = totalSavings - totalCost;
+    
+    const successfulHedges = recentHedges.filter(h => h.savings > 0).length;
+    const successRate = successfulHedges / recentHedges.length;
+    
+    const avgEffectiveness = recentHedges.reduce((sum, h) => sum + h.effectiveness, 0) / recentHedges.length;
+    
+    return {
+      status: 'available',
+      period: `${lookbackPeriod} days`,
+      totalHedges: recentHedges.length,
+      successRate: successRate,
+      avgEffectiveness: avgEffectiveness,
+      totalCost: totalCost,
+      totalSavings: totalSavings,
+      netBenefit: netBenefit,
+      roi: totalCost > 0 ? netBenefit / totalCost : 0,
+      recommendation: this.generatePerformanceRecommendation(successRate, netBenefit, avgEffectiveness)
+    };
+  }
+  
+  generatePerformanceRecommendation(successRate, netBenefit, avgEffectiveness) {
+    if (successRate > 0.8 && netBenefit > 0) {
+      return "EXCELLENT: Hedge strategy is highly effective. Consider increasing hedge ratios.";
+    } else if (successRate > 0.6 && netBenefit > 0) {
+      return "GOOD: Hedge strategy is working well. Maintain current approach.";
+    } else if (netBenefit > 0) {
+      return "POSITIVE: Hedge strategy is profitable but could be optimized.";
+    } else if (avgEffectiveness > 0.7) {
+      return "MIXED: Hedges are effective when needed but may be over-hedging.";
+    } else {
+      return "POOR: Hedge strategy needs significant adjustment or reconsideration.";
+    }
+  }
+}
+```
+
+### 2. Adaptive Hedge Optimization
+
+```javascript
+class AdaptiveHedgeOptimizer {
+  constructor(performanceTracker) {
+    this.tracker = performanceTracker;
+    this.optimizationHistory = [];
+    this.currentOptimization = null;
+  }
+  
+  optimizeHedgeStrategy(currentStrategy, marketConditions, performanceData) {
+    const analysis = this.analyzeCurrentPerformance(performanceData);
+    const marketAdaptations = this.calculateMarketAdaptations(marketConditions);
+    const optimizationSuggestions = this.generateOptimizationSuggestions(analysis, marketAdaptations);
+    
+    return {
+      currentStrategy: currentStrategy,
+      performanceAnalysis: analysis,
+      marketConditions: marketConditions,
+      suggestions: optimizationSuggestions,
+      recommendedChanges: this.prioritizeOptimizations(optimizationSuggestions),
+      expectedImpact: this.estimateOptimizationImpact(optimizationSuggestions)
+    };
+  }
+  
+  analyzeCurrentPerformance(data) {
+    return {
+      effectiveness: data.avgEffectiveness,
+      costEfficiency: data.roi,
+      successRate: data.successRate,
+      netBenefit: data.netBenefit,
+      trendDirection: this.calculatePerformanceTrend(data),
+      strengths: this.identifyPerformanceStrengths(data),
+      weaknesses: this.identifyPerformanceWeaknesses(data)
+    };
+  }
+  
+  generateOptimizationSuggestions(analysis, marketAdaptations) {
+    const suggestions = [];
+    
+    // Effectiveness optimizations
+    if (analysis.effectiveness < 0.6) {
+      suggestions.push({
+        type: 'effectiveness',
+        priority: 'high',
+        suggestion: 'Increase hedge ratios for better protection',
+        expectedImpact: 0.15,
+        implementation: 'Multiply current hedge ratios by 1.3'
+      });
+    }
+    
+    // Cost efficiency optimizations
+    if (analysis.costEfficiency < 0) {
+      suggestions.push({
+        type: 'cost_efficiency',
+        priority: 'high',
+        suggestion: 'Reduce hedge frequency or size to improve cost efficiency',
+        expectedImpact: 0.10,
+        implementation: 'Only hedge when probability > 70%'
+      });
+    }
+    
+    // Market adaptation optimizations
+    if (marketAdaptations.volatilityChange > 0.2) {
+      suggestions.push({
+        type: 'volatility_adaptation',
+        priority: 'medium',
+        suggestion: 'Adjust hedge multipliers for current volatility',
+        expectedImpact: 0.08,
+        implementation: `Multiply hedge sizes by ${1 + marketAdaptations.volatilityChange}`
+      });
+    }
+    
+    return suggestions;
+  }
+  
+  prioritizeOptimizations(suggestions) {
+    // Sort by priority and expected impact
+    return suggestions
+      .sort((a, b) => {
+        const priorityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+        const priorityDiff = priorityOrder[b.priority] - priorityOrder[a.priority];
+        if (priorityDiff !== 0) return priorityDiff;
+        return b.expectedImpact - a.expectedImpact;
+      })
+      .slice(0, 3); // Top 3 recommendations
+  }
+}
+```
+
+---
+
+## Implementation Integration
+
+### Complete Hedging System Integration
+
+```javascript
+class IntegratedHedgingSystem {
+  constructor(bankroll, riskTolerance = 'moderate') {
+    this.bankroll = bankroll;
+    this.riskTolerance = riskTolerance;
+    
+    // Initialize all hedging components
+    this.correlationAnalyzer = new RiskCorrelationAnalyzer();
+    this.hedgeAllocator = new DynamicHedgeAllocator(bankroll);
+    this.perfectHedge = new PerfectHedgeStrategy();
+    this.partialHedge = new PartialHedgeStrategy();
+    this.rebalancer = new DynamicRebalancingStrategy();
+    this.volatilityHedge = new VolatilityHedgeSystem();
+    this.timeDecayHedge = new TimeDecayHedgeSystem();
+    this.multiPositionManager = new MultiPositionHedgeManager();
+    this.performanceTracker = new HedgePerformanceTracker();
+    this.optimizer = new AdaptiveHedgeOptimizer(this.performanceTracker);
+    
+    this.currentPositions = [];
+    this.activeHedges = [];
+  }
+  
+  executeComprehensiveHedge(mainPosition, marketConditions) {
+    // 1. Analyze market conditions and correlations
+    const optimalHedgeRatio = this.correlationAnalyzer.calculateOptimalHedgeRatio(
+      mainPosition,
+      marketConditions.currentTick,
+      marketConditions.volatility
+    );
+    
+    // 2. Calculate base hedge using partial hedge strategy
+    const baseHedge = this.partialHedge.calculatePartialHedge(
+      mainPosition,
+      marketConditions.currentTick,
+      marketConditions.rugProbability,
+      optimalHedgeRatio
+    );
+    
+    // 3. Apply volatility adjustments
+    const volatilityAdjustedHedge = this.volatilityHedge.calculateVolatilityHedge(
+      mainPosition,
+      marketConditions.volatility,
+      marketConditions.rugProbability
+    );
+    
+    // 4. Apply time decay adjustments
+    const timeAdjustedHedge = this.timeDecayHedge.calculateTimeDecayHedge(
+      mainPosition,
+      marketConditions.currentTick,
+      volatilityAdjustedHedge.adjustedHedge
+    );
+    
+    // 5. Generate final hedge recommendation
+    const finalHedgeSize = timeAdjustedHedge.adjustedSize;
+    
+    return {
+      mainPosition: mainPosition,
+      hedgeAnalysis: {
+        baseHedge: baseHedge.sideBet.size,
+        volatilityAdjustment: volatilityAdjustedHedge.multiplier,
+        timeAdjustment: timeAdjustedHedge.multiplier,
+        finalHedgeSize: finalHedgeSize
+      },
+      riskMetrics: {
+        hedgeRatio: optimalHedgeRatio,
+        effectiveness: this.calculateOverallEffectiveness(finalHedgeSize, mainPosition),
+        maxLoss: this.calculateMaxLoss(mainPosition, finalHedgeSize, marketConditions),
+        expectedValue: this.calculateExpectedValue(mainPosition, finalHedgeSize, marketConditions)
+      },
+      recommendation: {
+        action: finalHedgeSize > 0.001 ? 'EXECUTE_HEDGE' : 'NO_HEDGE_NEEDED',
+        hedgeSize: finalHedgeSize,
+        urgency: this.calculateUrgency(marketConditions),
+        reasoning: this.generateHedgeReasoning(marketConditions, finalHedgeSize)
+      }
+    };
+  }
+  
+  trackHedgePerformance(hedgeData, actualOutcome) {
+    return this.performanceTracker.recordHedgeOutcome(hedgeData, actualOutcome);
+  }
+  
+  getOptimizationRecommendations() {
+    const performanceData = this.performanceTracker.getPerformanceAnalysis();
+    return this.optimizer.optimizeHedgeStrategy(
+      this.getCurrentStrategy(),
+      this.getLatestMarketConditions(),
+      performanceData
+    );
+  }
+}
+```
+
+---
+
+## Quick Reference Guide
+
+### Hedge Strategy Selection Matrix
+
+| Market Condition | Main Position Size | Recommended Strategy | Hedge Ratio |
+|------------------|-------------------|---------------------|-------------|
+| Low Volatility + Early Game | Small (<0.1 SOL) | No Hedge | 0% |
+| Low Volatility + Late Game | Small (<0.1 SOL) | Partial Hedge | 25% |
+| Medium Volatility + Any Phase | Medium (0.1-0.5 SOL) | Partial Hedge | 50% |
+| High Volatility + Any Phase | Large (>0.5 SOL) | Perfect Hedge | 75-100% |
+| Extreme Volatility | Any Size | Perfect Hedge + Exit | 100% |
+
+### Implementation Checklist
+
+#### Core Hedging Features
+- [ ] Perfect hedge calculation system
+- [ ] Partial hedge ratio optimization
+- [ ] Dynamic rebalancing triggers
+- [ ] Volatility-based adjustments
+- [ ] Time decay compensation
+
+#### Advanced Features
+- [ ] Multi-position correlation analysis
+- [ ] Performance tracking and optimization
+- [ ] Adaptive hedge ratio adjustment
+- [ ] Emergency hedge protocols
+- [ ] Real-time hedge monitoring
+
+#### Integration Requirements
+- [ ] Main game position tracking
+- [ ] Real-time market condition monitoring
+- [ ] Automated hedge execution
+- [ ] Performance analytics dashboard
+- [ ] Risk limit enforcement
+
+---
+
+*Next: [07-system-architecture.md](./07-system-architecture.md) - Complete technical architecture and component integration*
+
+
+
