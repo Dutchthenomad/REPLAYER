@@ -5,23 +5,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 **REPLAYER** is a modular replay viewer and empirical analysis system for Rugs.fun trading game recordings. It serves dual purposes:
-1. **Interactive Replay Viewer**: Professional PyQt5/Tkinter UI for viewing recorded games with bot automation
+
+1. **Interactive Replay Viewer**: Professional Tkinter UI for viewing recorded games with bot automation
 2. **Empirical Analysis Engine**: Statistical analysis of 900+ game recordings to extract trading patterns for RL bot training
 
 This is part of a larger quantitative trading ecosystem including:
-- **CV-BOILER-PLATE-FORK**: Computer vision training system for live gameplay detection
-- **rugs-rl-bot**: Reinforcement learning trading bot (consumes REPLAYER analysis outputs)
+- **CV-BOILER-PLATE-FORK** (`~/Desktop/CV-BOILER-PLATE-FORK/`): YOLOv8 computer vision system for live gameplay detection
+- **rugs-rl-bot** (`~/Desktop/rugs-rl-bot/`): Reinforcement learning trading bot (consumes REPLAYER analysis outputs)
 
-**Key Architecture**: Event-driven modular design with centralized state management, transforming 2400+ line monolith into clean, maintainable components.
+**Key Architecture**: Event-driven modular design with centralized state management, transforming 2400+ line monolith into ~13,365 lines of clean, maintainable components across 141 tests.
 
 ## Quick Start Commands
 
 ### Running the Replay Viewer
 ```bash
-# Launch GUI replay viewer
+# Launch GUI replay viewer (uses rugs-rl-bot venv for ML dependencies)
 ./run.sh
 
-# Or directly:
+# Or directly with system Python:
 cd src && python3 main.py
 ```
 
@@ -45,7 +46,7 @@ cat position_duration_analysis.json | jq .
 
 ### Testing
 ```bash
-# Run all tests (142 tests total)
+# Run all tests (141 tests total)
 cd src
 python3 -m pytest tests/ -v
 
@@ -53,11 +54,14 @@ python3 -m pytest tests/ -v
 python3 -m pytest tests/test_core/test_game_state.py -v
 python3 -m pytest tests/test_bot/ -v
 
+# Run with coverage
+python3 -m pytest tests/ --cov=. --cov-report=html
+
 # Run with detailed errors
 python3 -m pytest tests/ -vv --tb=long
 
 # Run specific test
-python3 -m pytest tests/test_core/test_game_state.py::TestGameStateInitialization::test_gamestate_creation -v
+python3 -m pytest tests/test_core/test_game_state.py::test_gamestate_creation -v
 ```
 
 ## Architecture Overview
@@ -65,48 +69,65 @@ python3 -m pytest tests/test_core/test_game_state.py::TestGameStateInitializatio
 ### Modular Structure
 ```
 REPLAYER/
-├── src/                          # Production code
+├── run.sh                        # Launch script (uses rugs-rl-bot venv)
+├── requirements.txt              # Python dependencies
+├── analyze_trading_patterns.py  # Empirical analysis Phase 1-4 (870 lines)
+├── analyze_position_duration.py # Duration analysis Phase 5 (600 lines)
+├── analyze_game_durations.py    # Game lifespan analysis
+│
+├── src/                          # Production code (~8,000 lines)
 │   ├── main.py                   # Application entry point
-│   ├── config.py                 # Centralized configuration (financial, game rules, UI, playback)
+│   ├── config.py                 # Centralized configuration
+│   │
 │   ├── models/                   # Data models
 │   │   ├── game_tick.py          # GameTick data model
 │   │   ├── position.py           # Position tracking
 │   │   ├── side_bet.py           # Side bet mechanics
 │   │   └── enums.py              # Game phase enums
+│   │
 │   ├── core/                     # Core business logic
-│   │   ├── game_state.py         # Centralized state management (observer pattern, 24KB)
-│   │   ├── replay_engine.py     # Playback control (pause, speed, skip)
-│   │   ├── trade_manager.py     # Trade execution logic
+│   │   ├── game_state.py         # Centralized state management (~600 lines)
+│   │   ├── replay_engine.py      # Playback control
+│   │   ├── trade_manager.py      # Trade execution logic
 │   │   └── validators.py         # Input validation
+│   │
 │   ├── bot/                      # Bot automation system
 │   │   ├── interface.py          # BotInterface abstract base
-│   │   ├── controller.py         # BotController (strategy selection, execution)
-│   │   ├── async_executor.py    # Async bot execution
+│   │   ├── controller.py         # BotController (strategy selection)
+│   │   ├── async_executor.py     # Async bot execution
 │   │   └── strategies/           # Trading strategies
 │   │       ├── base.py           # TradingStrategy base class
 │   │       ├── conservative.py   # Conservative strategy
 │   │       ├── aggressive.py     # Aggressive strategy
 │   │       └── sidebet.py        # Sidebet-focused strategy
+│   │
+│   ├── ml/                       # ML Integration (symlinks to rugs-rl-bot)
+│   │   ├── predictor.py          # SidebetPredictor (rug probability)
+│   │   ├── feature_extractor.py  # Feature engineering
+│   │   ├── data_processor.py     # Data processing
+│   │   └── model.py              # ML model wrapper
+│   │
 │   ├── services/                 # Shared services
-│   │   ├── event_bus.py          # Event-driven communication (pub/sub)
+│   │   ├── event_bus.py          # Event-driven pub/sub system
 │   │   └── logger.py             # Logging configuration
+│   │
 │   ├── ui/                       # User interface
 │   │   ├── main_window.py        # Main application window
-│   │   ├── layout_manager.py    # Panel positioning and organization
-│   │   ├── panels.py             # UI panel classes (Status, Chart, Trading, Bot, Controls)
+│   │   ├── layout_manager.py     # Panel positioning
+│   │   ├── panels.py             # UI panels (Status, Chart, Trading, Bot)
 │   │   └── widgets/              # Reusable UI components
 │   │       ├── chart.py          # Price chart widget
-│   │       └── toast_notification.py  # Toast notifications
-│   └── tests/                    # Test suite (142 tests)
+│   │       └── toast_notification.py
+│   │
+│   ├── utils/                    # Utilities
+│   │
+│   └── tests/                    # Test suite (141 tests, ~3,500 lines)
 │       ├── conftest.py           # Shared pytest fixtures
-│       ├── test_models/          # Data model tests
-│       ├── test_core/            # Core logic tests
-│       ├── test_services/        # Service tests
-│       └── test_bot/             # Bot system tests
+│       ├── test_models/          # Data model tests (12 tests)
+│       ├── test_core/            # Core logic tests (63 tests)
+│       ├── test_bot/             # Bot system tests (54 tests)
+│       └── test_services/        # Service tests (12 tests)
 │
-├── analyze_trading_patterns.py   # Empirical analysis (870 lines, Phase 1-4)
-├── analyze_position_duration.py  # Duration analysis (600 lines, Phase 5)
-├── analyze_game_durations.py     # Game lifespan analysis
 ├── docs/                         # Documentation
 │   ├── game_mechanics/           # Game rules knowledge base
 │   │   ├── GAME_MECHANICS.md     # Comprehensive game rules
@@ -203,6 +224,17 @@ class CustomStrategy(TradingStrategy):
         )
 ```
 
+### ML Integration (ml/)
+Integration with rugs-rl-bot's ML predictor for rug probability prediction.
+
+**SidebetPredictor** (symlinked from rugs-rl-bot):
+- Real-time rug probability predictions
+- 14-dimensional feature vector (z-score, volatility, sweet spot timing)
+- 5 prediction outputs per tick: `probability`, `confidence`, `ticks_to_rug_norm`, `is_critical`, `should_exit`
+- Gradient Boosting Classifier (v3): 38.1% win rate, 754% ROI
+
+**Note**: The `ml/` directory contains symlinks to `/home/nomad/Desktop/rugs-rl-bot/rugs_bot/sidebet/`. This allows REPLAYER to use the trained ML models without duplicating code.
+
 ### Configuration (config.py)
 Centralized configuration with environment variable support.
 
@@ -212,6 +244,7 @@ Centralized configuration with environment variable support.
 - `PLAYBACK` - Replay speed, auto-play settings
 - `UI` - Window dimensions, theme, layout
 - `PATHS` - Recordings directory (`/home/nomad/rugs_recordings/`)
+- `BOT` - Bot decision delay, risk per trade, confidence threshold
 
 ## Game Mechanics (Critical Knowledge)
 
@@ -223,7 +256,7 @@ Centralized configuration with environment variable support.
 
 ### Sidebet Mechanics
 - **Payout**: 5x multiplier (400% profit) if rug occurs
-- **Duration**: 40 ticks (10 seconds)
+- **Duration**: 40 ticks (10 seconds at 4 ticks/second)
 - **Cooldown**: 5 ticks between bets
 - **Example**: Bet 0.001 SOL → Win 0.005 SOL if rug occurs within 40 ticks
 - **Constraint**: Only one active sidebet at a time
@@ -245,7 +278,9 @@ Analyze 900+ game recordings to generate empirical data for RL bot reward functi
 
 ### Key Findings (From Analysis Scripts)
 **Sweet Spot**: 25-50x entry (75% success, 186-427% median returns)
+
 **Median Game Lifespan**: 138 ticks (50% of games rug by this point)
+
 **Temporal Risk**:
 - 23.4% rug by tick 50
 - 38.6% rug by tick 100
@@ -284,6 +319,21 @@ Analyze 900+ game recordings to generate empirical data for RL bot reward functi
 
 ## Development Workflow
 
+### Dependencies & Environment
+
+**Python Version**: Python 3.12+
+
+**Virtual Environment**: The project uses the rugs-rl-bot virtual environment for ML dependencies:
+```bash
+# Activate rugs-rl-bot venv
+source ~/Desktop/rugs-rl-bot/.venv/bin/activate
+
+# Install REPLAYER dependencies (optional, most are already in rugs-rl-bot venv)
+pip install -r requirements.txt
+```
+
+**Note**: The `run.sh` script automatically uses the rugs-rl-bot venv if available, otherwise falls back to system Python.
+
 ### Adding a New UI Panel
 ```python
 # ui/panels.py
@@ -315,11 +365,11 @@ event_bus.publish(Events.TRADE_BUY, {'price': 1.5, 'amount': 0.001})
 
 ## Testing Strategy
 
-**Test Coverage**: 142 tests across 8 test modules
-- **Data Models**: Model creation, validation, serialization
-- **Core Logic**: GameState, TradeManager, ReplayEngine
-- **Bot System**: Strategy behavior, signal generation
-- **Services**: EventBus pub/sub, logging
+**Test Coverage**: 141 tests across 8 test modules (~3,500 lines)
+- **Data Models** (12 tests): Model creation, validation, serialization
+- **Core Logic** (63 tests): GameState, TradeManager, ReplayEngine, validators
+- **Bot System** (54 tests): Strategy behavior, signal generation, controller
+- **Services** (12 tests): EventBus pub/sub, logging
 
 **Test Structure**:
 - `conftest.py` - Shared fixtures (mock GameState, EventBus, config)
@@ -340,11 +390,25 @@ pytest -m "not slow"    # Exclude slow tests
 - Consumes REPLAYER empirical analysis outputs (JSON files)
 - Uses analysis results to design RL reward functions
 - Trained models can be integrated into REPLAYER for visual validation
+- REPLAYER symlinks to rugs-rl-bot's sidebet predictor (`ml/` directory)
 
 **Integration Points**:
 - `trading_pattern_analysis.json` → Reward function parameters
 - `position_duration_analysis.json` → Temporal risk models
 - REPLAYER bot system → RL model deployment validation
+- `ml/predictor.py` → Real-time rug probability predictions
+
+**Commands (rugs-rl-bot)**:
+```bash
+# Run tests
+cd ~/Desktop/rugs-rl-bot && .venv/bin/python -m pytest tests/ -v
+
+# Train RL model
+.venv/bin/python scripts/train_phase0_model.py --timesteps 250000
+
+# Evaluate model
+.venv/bin/python scripts/evaluate_phase0_model.py --model models/phase0_*/phase0_final.zip
+```
 
 ### CV-BOILER-PLATE-FORK (Vision Training System)
 **Location**: `/home/nomad/Desktop/CV-BOILER-PLATE-FORK/`
@@ -355,6 +419,17 @@ pytest -m "not slow"    # Exclude slow tests
 **Integration Points**:
 - Game recordings used for CV training data annotation
 - Live CV predictions can be replayed in REPLAYER for validation
+
+**Commands (CV Boilerplate)**:
+```bash
+cd ~/Desktop/CV-BOILER-PLATE-FORK
+
+# Run tests
+.venv/bin/python3 -m pytest tests/ -v
+
+# Train YOLO model
+.venv/bin/python3 train_overnight.py
+```
 
 ## Common Patterns
 
@@ -405,11 +480,12 @@ bot_controller.process_tick(state_dict, tick_data)
 
 ## Known Issues & Gotchas
 
-1. **Test API Mismatches**: Some tests expect methods like `load_game()` that don't exist in GameState (tests ported from monolithic version need updating)
-2. **Thread Safety**: Always use `with state._lock:` when accessing state directly (prefer public methods)
-3. **Decimal Precision**: Use `Decimal` for all financial calculations to avoid floating point errors
-4. **Event Ordering**: Events are processed asynchronously - don't assume ordering
-5. **UI Updates**: Marshal UI updates to main thread using `root.after()`
+1. **ML Symlinks**: The `ml/` directory uses symlinks to rugs-rl-bot. If rugs-rl-bot is moved/deleted, these will break.
+2. **Virtual Environment**: Run script expects rugs-rl-bot venv at `~/Desktop/rugs-rl-bot/.venv/`
+3. **Thread Safety**: Always use `with state._lock:` when accessing state directly (prefer public methods)
+4. **Decimal Precision**: Use `Decimal` for all financial calculations to avoid floating point errors
+5. **Event Ordering**: Events are processed asynchronously - don't assume ordering
+6. **UI Updates**: Marshal UI updates to main thread using `root.after()`
 
 ## Performance Considerations
 
@@ -417,6 +493,7 @@ bot_controller.process_tick(state_dict, tick_data)
 - **Event Throttling**: Chart updates throttled to reduce CPU (configurable in config.py)
 - **Memory Bounds**: Collections limited with `maxlen` to prevent unbounded growth
 - **Analysis Scripts**: Process 900+ games in <30 seconds
+- **Weak References**: EventBus uses weak references to prevent memory leaks
 
 ## Version Control & Development Workflow
 
@@ -459,8 +536,10 @@ gh repo view --web
 ## Documentation Locations
 
 - **CLAUDE.md** (this file): Primary development context for Claude Code
-- **README.md**: High-level project overview
+- **README.md**: High-level project overview and features
 - **docs/game_mechanics/**: Game rules knowledge base
+  - `GAME_MECHANICS.md` - Comprehensive game rules
+  - `side_bet_mechanics_v2.md` - Sidebet mechanics details
 - **docs/archive/**: Historical project documentation
 
 ## Related Commands
@@ -483,4 +562,22 @@ ls /home/nomad/rugs_recordings/*.jsonl | wc -l
 
 # Sample recording
 head -5 /home/nomad/rugs_recordings/game_*.jsonl | head -20
+
+# Analyze recordings
+python3 analyze_trading_patterns.py
+python3 analyze_position_duration.py
+python3 analyze_game_durations.py
+```
+
+### Code Quality
+```bash
+# Format code
+black src/
+
+# Lint code
+flake8 src/
+pylint src/
+
+# Type checking
+mypy src/
 ```
