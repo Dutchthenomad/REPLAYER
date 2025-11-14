@@ -196,3 +196,39 @@ class TestGameStateStatistics:
         game_state.close_position(Decimal('1.5'), 1234567900.0, 10)
 
         assert len(game_state.get_position_history()) == 1
+
+
+class TestGameStateResetAndMetrics:
+    """Additional regression tests for state integrity"""
+
+    def test_reset_restores_core_flags(self, game_state):
+        """Reset should rebuild keys like rug_detected"""
+        game_state.update(game_id='abc', rug_detected=True)
+        game_state.reset()
+
+        assert game_state.get('rug_detected') is False
+        assert game_state.get('game_id') is None
+        assert game_state.get('last_sidebet_resolved_tick') is None
+
+    def test_close_position_records_exit_tick(self, game_state, sample_position):
+        """Exit tick should be recorded correctly"""
+        game_state.open_position(sample_position)
+        closed = game_state.close_position(Decimal('1.5'), exit_tick=7)
+
+        assert closed is not None
+        assert closed['exit_tick'] == 7
+
+    def test_metrics_use_realized_pnl(self, game_state, sample_position):
+        """Average win/loss should be derived from P&L"""
+        game_state.open_position(sample_position)
+        game_state.close_position(Decimal('1.5'), exit_tick=5)
+
+        # Second trade (loss)
+        losing_position = Position(Decimal('2.0'), Decimal('0.01'), 1234567891.0, 6)
+        game_state.open_position(losing_position)
+        game_state.close_position(Decimal('1.0'), exit_tick=10)
+
+        metrics = game_state.calculate_metrics()
+
+        assert metrics['average_win'] > Decimal('0')
+        assert metrics['average_loss'] > Decimal('0')

@@ -24,6 +24,7 @@ class Events(Enum):
     GAME_END = "game.end"
     GAME_TICK = "game.tick"
     GAME_RUG = "game.rug"
+    RUG_DETECTED = "game.rug_detected"
     
     # Trading Events
     TRADE_BUY = "trade.buy"
@@ -93,10 +94,23 @@ class EventBus:
     
     def stop(self):
         """Stop event processing"""
-        self._processing = False
+        if not self._processing:
+            return
+
+        try:
+            self._queue.put(None, timeout=1)  # Sentinel to wake thread
+        except queue.Full:
+            # Drain one item to make space, then retry
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            self._queue.put(None)
+
         if self._thread:
-            self._queue.put(None)  # Sentinel to wake thread
             self._thread.join(timeout=2)
+
+        self._processing = False
         logger.info("EventBus stopped")
     
     def subscribe(self, event: Events, callback: Callable, weak: bool = True):

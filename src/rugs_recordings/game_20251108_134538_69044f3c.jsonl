@@ -1,0 +1,2 @@
+{"type": "game_start", "timestamp": "2025-11-08T13:45:39.003130", "game_id": "20251108-b9b6270869044f3c", "session_game_number": 1}
+{"type": "tick", "timestamp": "2025-11-08T13:45:39.005850", "game_id": "20251108-b9b6270869044f3c", "tick": 0, "price": 1.0, "phase": "UNKNOWN", "active": false, "rugged": false, "cooldown_timer": 14800, "trade_count": 0}

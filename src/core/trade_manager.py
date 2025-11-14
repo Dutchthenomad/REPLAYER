@@ -115,7 +115,7 @@ class TradeManager:
         pnl_sol, pnl_percent = position.calculate_unrealized_pnl(tick.price)
 
         # Close position (this will update balance automatically)
-        closed_position = self.state.close_position(tick.price, tick.tick)
+        closed_position = self.state.close_position(tick.price, exit_tick=tick.tick)
 
         if not closed_position:
             return self._error_result("Failed to close position", "SELL")

@@ -111,6 +111,16 @@ class ReplayEngine:
                 self.current_index = 0
                 self.game_id = game_id
 
+            # Reset state for new game session
+            self.state.reset()
+            self.state.update(game_id=self.game_id, game_active=False)
+
+            event_bus.publish(Events.GAME_START, {
+                'game_id': self.game_id,
+                'tick_count': len(self.ticks),
+                'filepath': str(filepath)
+            })
+
             logger.info(f"Loaded {len(self.ticks)} ticks from game {self.game_id}")
 
             # Publish file loaded event
@@ -305,7 +315,8 @@ class ReplayEngine:
             current_price=tick.price,
             current_phase=tick.phase,
             rugged=tick.rugged,
-            game_active=tick.active
+            game_active=tick.active,
+            game_id=tick.game_id
         )
 
         # Store current tick reference
@@ -350,6 +361,7 @@ class ReplayEngine:
             'game_id': self.game_id,
             'metrics': metrics
         })
+        self.state.update(game_active=False)
 
         if self.on_game_end_callback:
             self.on_game_end_callback(metrics)

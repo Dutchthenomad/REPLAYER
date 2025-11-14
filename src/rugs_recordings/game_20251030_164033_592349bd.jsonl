@@ -1,0 +1,6 @@
+{"type": "game_start", "timestamp": "2025-10-30T16:40:33.190249", "game_id": "20251030-5969465c592349bd", "session_game_number": 122}
+{"type": "tick", "timestamp": "2025-10-30T16:40:33.192805", "game_id": "20251030-5969465c592349bd", "tick": 34, "price": 0.7217180520963488, "phase": "ACTIVE_GAMEPLAY", "active": true, "rugged": false, "cooldown_timer": 0, "trade_count": 172}
+{"type": "tick", "timestamp": "2025-10-30T16:40:33.193731", "game_id": "20251030-5969465c592349bd", "tick": 33, "price": 0.7082092504021639, "phase": "ACTIVE_GAMEPLAY", "active": true, "rugged": false, "cooldown_timer": 0, "trade_count": 0}
+{"type": "tick", "timestamp": "2025-10-30T16:40:33.451747", "game_id": "20251030-5969465c592349bd", "tick": 35, "price": 0.01042517779535357, "phase": "ACTIVE_GAMEPLAY", "active": true, "rugged": true, "cooldown_timer": 0, "trade_count": 188}
+{"type": "tick", "timestamp": "2025-10-30T16:40:34.096493", "game_id": "20251030-5969465c592349bd", "tick": 36, "price": 0.01042517779535357, "phase": "RUG_EVENT_1", "active": true, "rugged": true, "cooldown_timer": 0, "trade_count": 0}
+{"type": "game_end", "timestamp": "2025-10-30T16:40:34.096583", "game_id": "20251030-5969465c592349bd", "total_ticks": 4, "tick_range": [33, 36], "price_range": [0.01042517779535357, 0.7217180520963488], "peak_price": 0.7217180520963488, "final_price": 0.01042517779535357}

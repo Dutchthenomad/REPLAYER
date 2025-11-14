@@ -4,6 +4,7 @@ Tests for EventBus
 
 import pytest
 from services import event_bus, Events
+from services.event_bus import EventBus
 
 
 class TestEventBusSubscription:
@@ -186,3 +187,18 @@ class TestEventBusErrorHandling:
 
         # Good handler should have received the event
         assert len(received) == 1
+
+
+class TestEventBusShutdown:
+    """Tests for graceful shutdown logic"""
+
+    def test_stop_handles_full_queue(self):
+        """Stopping should succeed even when queue is full"""
+        local_bus = EventBus(max_queue_size=1)
+        local_bus._processing = True
+        local_bus._thread = None
+        local_bus._queue.put_nowait((Events.GAME_TICK, {}))
+
+        local_bus.stop()
+
+        assert local_bus._processing is False

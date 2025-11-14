@@ -98,7 +98,6 @@ class Application:
     def _handle_game_start(self, event):
         """Handle game start event"""
         self.logger.info(f"Game started: {event.data}")
-        self.state.reset()
     
     def _handle_game_end(self, event):
         """Handle game end event"""
@@ -177,6 +176,9 @@ class Application:
             self.event_bus.stop()
             
             # Destroy UI
+            if self.main_window:
+                self.main_window.shutdown()
+
             if self.root:
                 self.root.quit()
                 self.root.destroy()

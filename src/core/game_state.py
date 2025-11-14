@@ -49,21 +49,7 @@ class GameState:
     
     def __init__(self, initial_balance: Decimal = Decimal('0.100')):
         # Core state
-        self._state = {
-            'balance': initial_balance,
-            'initial_balance': initial_balance,
-            'position': None,
-            'sidebet': None,
-            'current_tick': 0,
-            'current_price': Decimal('1.0'),
-            'current_phase': 'UNKNOWN',
-            'game_id': None,
-            'game_active': False,
-            'rugged': False,
-            'rug_detected': False,
-            'bot_enabled': False,
-            'bot_strategy': None,
-        }
+        self._state = self._build_initial_state(initial_balance)
 
         # Statistics
         self._stats = {
@@ -93,6 +79,30 @@ class GameState:
         self._validators: List[Callable] = []
         
         logger.info(f"GameState initialized with balance: {initial_balance}")
+
+    def _build_initial_state(
+        self,
+        initial_balance: Decimal,
+        bot_enabled: Optional[bool] = None,
+        bot_strategy: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a fresh state dictionary with optional bot flags preserved."""
+        return {
+            'balance': initial_balance,
+            'initial_balance': initial_balance,
+            'position': None,
+            'sidebet': None,
+            'current_tick': 0,
+            'current_price': Decimal('1.0'),
+            'current_phase': 'UNKNOWN',
+            'game_id': None,
+            'game_active': False,
+            'rugged': False,
+            'rug_detected': False,
+            'bot_enabled': False if bot_enabled is None else bot_enabled,
+            'bot_strategy': bot_strategy,
+            'last_sidebet_resolved_tick': None
+        }
     
     # ========== State Access Methods ==========
     
@@ -189,9 +199,10 @@ class GameState:
             if new_balance > self._stats['peak_balance']:
                 self._stats['peak_balance'] = new_balance
             
-            drawdown = (self._stats['peak_balance'] - new_balance) / self._stats['peak_balance']
-            if drawdown > self._stats['max_drawdown']:
-                self._stats['max_drawdown'] = drawdown
+            if self._stats['peak_balance'] > 0:
+                drawdown = (self._stats['peak_balance'] - new_balance) / self._stats['peak_balance']
+                if drawdown > self._stats['max_drawdown']:
+                    self._stats['max_drawdown'] = drawdown
             
             # Notify observers
             self._emit(StateEvents.BALANCE_CHANGED, {
@@ -261,14 +272,17 @@ class GameState:
             self._emit(StateEvents.POSITION_OPENED, self._state['position'])
             return True
     
-    def close_position(self, exit_price: Decimal, exit_time=None, exit_tick: int = 0) -> Optional[Dict]:
-        """Close the active position (exit_time is optional for backwards compatibility)"""
+    def close_position(self, exit_price: Decimal, exit_time=None, exit_tick: Optional[int] = None) -> Optional[Dict]:
+        """Close the active position (exit_time maintained for backwards compatibility)"""
         with self._lock:
             # exit_time is ignored in modular version (kept for test compatibility)
             position = self._state['position']
             if not position or position.get('status') != 'active':
                 logger.warning("No active position to close")
                 return None
+            
+            if exit_tick is None:
+                exit_tick = self._state.get('current_tick', 0)
             
             # Calculate P&L
             entry_value = position['amount'] * position['entry_price']
@@ -378,8 +392,13 @@ class GameState:
                 logger.debug(f"Unsubscribed from {event.value}")
     
     def _emit(self, event: StateEvents, data: Any = None):
-        """Emit an event to all subscribers"""
-        for callback in self._observers[event]:
+        """Emit an event to all subscribers (releases lock before calling callbacks)"""
+        # Get callbacks while holding lock, then release before calling
+        with self._lock:
+            callbacks = list(self._observers[event])  # Copy to avoid mutation during iteration
+
+        # Call callbacks WITHOUT holding lock to prevent deadlocks
+        for callback in callbacks:
             try:
                 callback(data)
             except Exception as e:
@@ -428,29 +447,22 @@ class GameState:
         """Reset state to initial values"""
         with self._lock:
             initial_balance = self._state['initial_balance']
+            bot_enabled = self._state.get('bot_enabled', False)
+            bot_strategy = self._state.get('bot_strategy')
+            game_was_active = self._state.get('game_id') is not None
             
-            self._state = {
-                'balance': initial_balance,
-                'initial_balance': initial_balance,
-                'position': None,
-                'sidebet': None,
-                'current_tick': 0,
-                'current_price': Decimal('1.0'),
-                'current_phase': 'UNKNOWN',
-                'game_id': None,
-                'game_active': False,
-                'rugged': False,
-                'bot_enabled': self._state.get('bot_enabled', False),
-                'bot_strategy': self._state.get('bot_strategy'),
-            }
+            self._state = self._build_initial_state(
+                initial_balance,
+                bot_enabled=bot_enabled,
+                bot_strategy=bot_strategy
+            )
             
-            # Keep cumulative stats but reset per-game stats
-            self._stats['games_played'] += 1
+            if game_was_active:
+                self._stats['games_played'] += 1
 
             self._history.clear()
             self._closed_positions.clear()
 
-            self._emit(StateEvents.GAME_ENDED, None)
             logger.info("Game state reset")
     
     # ========== History and Analytics ==========
@@ -479,15 +491,23 @@ class GameState:
                 avg_loss = Decimal('0')
             else:
                 win_rate = Decimal(self._stats['winning_trades']) / Decimal(total_trades)
+                
+                wins = [
+                    pos['pnl_sol'] for pos in self._closed_positions
+                    if pos.get('pnl_sol') is not None and pos['pnl_sol'] > 0
+                ]
+                losses = [
+                    abs(pos['pnl_sol']) for pos in self._closed_positions
+                    if pos.get('pnl_sol') is not None and pos['pnl_sol'] < 0
+                ]
 
-                # Calculate average win/loss from transaction log
-                wins = [t['amount'] for t in self._transaction_log
-                       if t.get('reason', '').startswith('Position closed') and t['amount'] > 0]
-                losses = [abs(t['amount']) for t in self._transaction_log
-                         if t.get('reason', '').startswith('Position closed') and t['amount'] < 0]
+                avg_win = (sum(wins) / len(wins)) if wins else Decimal('0')
+                avg_loss = (sum(losses) / len(losses)) if losses else Decimal('0')
 
-                avg_win = sum(wins) / len(wins) if wins else Decimal('0')
-                avg_loss = sum(losses) / len(losses) if losses else Decimal('0')
+            initial_balance = self._state['initial_balance']
+            roi = Decimal('0')
+            if initial_balance:
+                roi = (self._state['balance'] - initial_balance) / initial_balance
 
             return {
                 'total_pnl': self._stats['total_pnl'],
@@ -497,7 +517,7 @@ class GameState:
                 'average_win': avg_win,
                 'average_loss': avg_loss,
                 'current_balance': self._state['balance'],
-                'roi': (self._state['balance'] - self._state['initial_balance']) / self._state['initial_balance']
+                'roi': roi
             }
 
     # ========== Bot Interface Compatibility Methods ==========
@@ -557,12 +577,16 @@ class GameState:
 
             # Fallback: create from state data
             from models import GameTick
+            from datetime import datetime
             return GameTick(
+                game_id=self._state.get('game_id', 'unknown'),
                 tick=self._state.get('current_tick', 0),
+                timestamp=datetime.now().isoformat(),
                 price=self._state.get('current_price', Decimal('1.0')),
                 phase=self._state.get('current_phase', 'UNKNOWN'),
                 active=self._state.get('game_active', False),
                 rugged=self._state.get('rugged', False),
+                cooldown_timer=0,
                 trade_count=0
             )
 

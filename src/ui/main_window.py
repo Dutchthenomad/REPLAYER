@@ -16,6 +16,7 @@ from core import ReplayEngine, TradeManager
 from core.game_queue import GameQueue
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
+from ui.tk_dispatcher import TkDispatcher
 from bot import BotInterface, BotController, list_strategies
 from bot.async_executor import AsyncBotExecutor
 
@@ -48,6 +49,10 @@ class MainWindow:
 
         # Initialize async bot executor (prevents deadlock)
         self.bot_executor = AsyncBotExecutor(self.bot_controller)
+
+        # Ensure UI updates happen on Tk main thread
+        self.ui_dispatcher = TkDispatcher(self.root)
+        self.user_paused = True
 
         # Set replay callbacks
         self.replay_engine.on_tick_callback = self._on_tick_update
@@ -444,9 +449,11 @@ class MainWindow:
         """Toggle play/pause using ReplayEngine"""
         if self.replay_engine.is_playing:
             self.replay_engine.pause()
+            self.user_paused = True
             self.play_button.config(text="▶️ Play")
         else:
             self.replay_engine.play()
+            self.user_paused = False
             self.play_button.config(text="⏸️ Pause")
     
     def step_forward(self):
@@ -460,6 +467,7 @@ class MainWindow:
         self.replay_engine.reset()
         self.chart.clear_history()
         self.play_button.config(text="▶️ Play")
+        self.user_paused = True
         self.log("Game reset")
 
     def set_playback_speed(self, speed: float):
@@ -576,7 +584,11 @@ class MainWindow:
     # ========================================================================
 
     def _on_tick_update(self, tick: GameTick, index: int, total: int):
-        """Callback for ReplayEngine tick updates"""
+        """Background callback for ReplayEngine tick updates"""
+        self.ui_dispatcher.submit(self._process_tick_ui, tick, index, total)
+
+    def _process_tick_ui(self, tick: GameTick, index: int, total: int):
+        """Execute tick updates on the Tk main thread"""
         # Update UI labels
         self.tick_label.config(text=f"TICK: {tick.tick}")
         self.price_label.config(text=f"PRICE: {tick.price:.4f}X")
@@ -587,6 +599,10 @@ class MainWindow:
 
         # Update chart
         self.chart.add_tick(tick.tick, tick.price)
+
+        # Maintain trading state lifecycles
+        self.trade_manager.check_and_handle_rug(tick)
+        self.trade_manager.check_sidebet_expiry(tick)
 
         # ========== BOT EXECUTION (ASYNC) ==========
         # Queue bot execution (non-blocking) - prevents deadlock
@@ -671,6 +687,11 @@ class MainWindow:
             self.log(f"Auto-loading game {self.game_queue.current_index}/{len(self.game_queue)}")
             # Instant advance - NO DELAY
             self._load_next_game(next_file)
+            if not self.user_paused:
+                self.replay_engine.play()
+                self.play_button.config(text="⏸️ Pause")
+            else:
+                self.play_button.config(text="▶️ Play")
         else:
             # Stop bot (original behavior when NOT in multi-game mode)
             if self.bot_enabled:
@@ -721,18 +742,29 @@ class MainWindow:
             self.load_game_file(files[0])
     
     def _handle_balance_changed(self, data):
-        """Handle balance change"""
-        new_balance = data.get('new', self.state.get('balance'))
-        self.balance_label.config(text=f"Balance: {new_balance:.4f} SOL")
+        """Handle balance change (thread-safe via TkDispatcher)"""
+        new_balance = data.get('new')
+        if new_balance is not None:
+            # Marshal to UI thread via TkDispatcher
+            self.ui_dispatcher.submit(
+                lambda: self.balance_label.config(text=f"Balance: {new_balance:.4f} SOL")
+            )
     
     def _handle_position_opened(self, data):
-        """Handle position opened"""
-        self.log(f"Position opened at {data.get('entry_price', 0):.4f}")
+        """Handle position opened (thread-safe via TkDispatcher)"""
+        entry_price = data.get('entry_price', 0)
+        # Marshal to UI thread via TkDispatcher
+        self.ui_dispatcher.submit(
+            lambda: self.log(f"Position opened at {entry_price:.4f}")
+        )
     
     def _handle_position_closed(self, data):
-        """Handle position closed"""
+        """Handle position closed (thread-safe via TkDispatcher)"""
         pnl = data.get('pnl_sol', 0)
-        self.log(f"Position closed - P&L: {pnl:+.4f} SOL")
+        # Marshal to UI thread via TkDispatcher
+        self.ui_dispatcher.submit(
+            lambda: self.log(f"Position closed - P&L: {pnl:+.4f} SOL")
+        )
 
     def _check_bot_results(self):
         """
@@ -896,3 +928,10 @@ GAME RULES:
 • All positions are lost when rug occurs
 """
         messagebox.showinfo("Help - Keyboard Shortcuts", help_text)
+
+    def shutdown(self):
+        """Cleanup dispatcher resources during application shutdown."""
+        if self.bot_enabled:
+            self.bot_executor.stop()
+            self.bot_enabled = False
+        self.ui_dispatcher.stop()

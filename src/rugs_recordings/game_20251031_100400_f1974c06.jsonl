@@ -1,0 +1,3 @@
+{"type": "game_start", "timestamp": "2025-10-31T10:04:00.940467", "game_id": "20251031-86c9a81ef1974c06", "session_game_number": 11}
+{"type": "tick", "timestamp": "2025-10-31T10:04:00.940887", "game_id": "20251031-86c9a81ef1974c06", "tick": 0, "price": 1, "phase": "UNKNOWN", "active": false, "rugged": false, "cooldown_timer": 15000, "trade_count": 0}
+{"type": "game_end", "timestamp": "2025-10-31T10:04:01.695346", "game_id": "20251031-86c9a81ef1974c06", "total_ticks": 1, "tick_range": [0, 0], "price_range": [1, 1], "peak_price": 1, "final_price": 1}
