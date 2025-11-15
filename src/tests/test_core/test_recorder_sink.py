@@ -130,10 +130,13 @@ class TestRecorderSinkTickRecording:
             recorder.start_recording(sample_tick.game_id)
             recorder.record_tick(sample_tick)
 
-            # Read back the recorded file
+            # Read back the recorded file (skip metadata header)
             with open(recorder.current_file, 'r') as f:
-                line = f.readline().strip()
-                data = json.loads(line)
+                lines = f.readlines()
+                # First line is metadata header, second line is actual tick
+                assert len(lines) >= 2
+                tick_line = lines[1].strip()
+                data = json.loads(tick_line)
 
             assert data['game_id'] == sample_tick.game_id
             assert data['tick'] == sample_tick.tick
@@ -187,10 +190,10 @@ class TestRecorderSinkBuffering:
                 )
                 recorder.record_tick(tick)
 
-            # File should be empty (not flushed yet)
+            # File should only have metadata header (ticks not flushed yet)
             with open(recorder.current_file, 'r') as f:
                 lines = f.readlines()
-            assert len(lines) == 0
+            assert len(lines) == 1  # Only metadata header
 
     def test_buffer_flushed_when_full(self):
         """Test that buffer flushes when reaching buffer_size"""
@@ -213,10 +216,10 @@ class TestRecorderSinkBuffering:
                 )
                 recorder.record_tick(tick)
 
-            # File should have 3 lines (flushed)
+            # File should have 4 lines (metadata header + 3 ticks)
             with open(recorder.current_file, 'r') as f:
                 lines = f.readlines()
-            assert len(lines) == 3
+            assert len(lines) == 4  # 1 metadata header + 3 ticks
 
     def test_buffer_flushed_on_stop(self):
         """Test that buffer flushes when stopping recording"""
@@ -242,11 +245,11 @@ class TestRecorderSinkBuffering:
             # Stop recording (should flush buffer)
             recorder.stop_recording()
 
-            # File should have 2 lines
+            # File should have 4 lines (start metadata + 2 ticks + end metadata)
             filepath = Path(tmpdir) / [f for f in Path(tmpdir).glob("*.jsonl")][0].name
             with open(filepath, 'r') as f:
                 lines = f.readlines()
-            assert len(lines) == 2
+            assert len(lines) == 4  # Start metadata + 2 ticks + end metadata
 
 
 class TestRecorderSinkStopRecording:
@@ -331,9 +334,9 @@ class TestRecorderSinkStopRecording:
             assert file2.exists()
             assert file1 != file2
 
-            # First file should have 1 tick
+            # First file should have 3 lines (start metadata + 1 tick + end metadata)
             with open(file1, 'r') as f:
-                assert len(f.readlines()) == 1
+                assert len(f.readlines()) == 3
 
 
 class TestRecorderSinkStatus:

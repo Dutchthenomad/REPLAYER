@@ -1,5 +1,5 @@
 """
-Replay Engine - Game playback controller
+Replay Engine - Game playback controller (PRODUCTION READY)
 Loads JSONL files, manages playback, and publishes tick events
 """
 
@@ -7,9 +7,11 @@ import json
 import logging
 import threading
 import time
+import atexit
 from pathlib import Path
 from typing import List, Optional, Callable
 from decimal import Decimal
+from contextlib import contextmanager
 
 from models import GameTick
 from services import event_bus, Events
@@ -22,14 +24,11 @@ logger = logging.getLogger(__name__)
 
 class ReplayEngine:
     """
-    Manages game replay playback
-
-    Responsibilities:
-    - Load game recordings from JSONL files
-    - Step through ticks (manual or auto-play)
-    - Control playback speed
-    - Publish tick events
-    - Track playback state
+    Manages game replay playback with production-ready features:
+    - Proper resource management and cleanup
+    - Thread-safe operations with correct lock ordering
+    - Memory-bounded live feed handling
+    - Graceful error handling and recovery
     """
 
     def __init__(self, game_state: GameState, replay_source=None):
@@ -43,36 +42,102 @@ class ReplayEngine:
             replay_source = FileDirectorySource(config.FILES['recordings_dir'])
         self.replay_source = replay_source
 
-        # Game data
-        self.ticks: List[GameTick] = []
+        # Game data - CRITICAL FIX: Remove unbounded ticks list for live mode
+        self.file_mode_ticks: List[GameTick] = []  # Only used in file playback mode
+        self.is_live_mode = False  # Track current mode
         self.current_index = 0
         self.game_id: Optional[str] = None
 
         # Playback control
         self.is_playing = False
-        self.playback_speed = 1.0  # 1.0 = normal speed
+        self.playback_speed = 1.0
         self.playback_thread: Optional[threading.Thread] = None
-        self.multi_game_mode = False  # NEW: Multi-game auto-advance mode
+        self.multi_game_mode = False
 
-        # Live feed infrastructure (Phase 5)
-        self.live_ring_buffer = LiveRingBuffer(
-            max_size=config.LIVE_FEED['ring_buffer_size']
-        )
+        # Validate configuration before using
+        ring_buffer_size = max(1, config.LIVE_FEED.get('ring_buffer_size', 5000))
+        recording_buffer_size = max(1, config.LIVE_FEED.get('recording_buffer_size', 100))
+        
+        # Live feed infrastructure with validated settings
+        self.live_ring_buffer = LiveRingBuffer(max_size=ring_buffer_size)
         self.recorder_sink = RecorderSink(
             recordings_dir=config.FILES['recordings_dir'],
-            buffer_size=config.LIVE_FEED['recording_buffer_size']
+            buffer_size=recording_buffer_size
         )
-        self.auto_recording = config.LIVE_FEED['auto_recording']
+        self.auto_recording = config.LIVE_FEED.get('auto_recording', True)
 
-        # Thread safety (AUDIT FIX: Added _stop_event for clean shutdown)
+        # Thread safety with proper initialization
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
+        self._cleanup_registered = False
 
         # Callbacks for UI updates
         self.on_tick_callback: Optional[Callable] = None
         self.on_game_end_callback: Optional[Callable] = None
 
-        logger.info("ReplayEngine initialized")
+        # Register cleanup handler
+        self._register_cleanup()
+
+        logger.info(f"ReplayEngine initialized (ring_buffer={ring_buffer_size}, recording_buffer={recording_buffer_size})")
+
+    def _register_cleanup(self):
+        """Register cleanup handler to ensure resources are freed"""
+        if not self._cleanup_registered:
+            atexit.register(self.cleanup)
+            self._cleanup_registered = True
+
+    def cleanup(self):
+        """Clean up resources (called on shutdown)"""
+        try:
+            # Signal threads to stop
+            self._stop_event.set()
+
+            # Stop playback
+            if self.is_playing:
+                self.stop()
+
+            # Wait for playback thread to finish
+            if self.playback_thread and self.playback_thread.is_alive():
+                self.playback_thread.join(timeout=2.0)
+
+            # Stop recording if active
+            if self.recorder_sink.is_recording():
+                summary = self.recorder_sink.stop_recording()
+                try:
+                    logger.info(f"Stopped recording on cleanup: {summary}")
+                except (ValueError, OSError):
+                    pass  # Logging may be shutdown at exit
+
+            # Clear buffers
+            self.live_ring_buffer.clear()
+
+            try:
+                logger.info("ReplayEngine cleanup completed")
+            except (ValueError, OSError):
+                pass  # Logging may be shutdown at exit
+        except Exception as e:
+            try:
+                logger.error(f"Error during cleanup: {e}", exc_info=True)
+            except (ValueError, OSError):
+                pass  # Logging may be shutdown at exit
+
+    @contextmanager
+    def _acquire_lock(self, timeout=5.0):
+        """Context manager for acquiring lock with timeout"""
+        acquired = self._lock.acquire(timeout=timeout)
+        if not acquired:
+            raise TimeoutError("Failed to acquire ReplayEngine lock")
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+    @property
+    def ticks(self) -> List[GameTick]:
+        """Get current tick list based on mode"""
+        if self.is_live_mode:
+            return self.live_ring_buffer.get_all()
+        return self.file_mode_ticks
 
     # ========================================================================
     # FILE LOADING
@@ -80,25 +145,33 @@ class ReplayEngine:
 
     def load_file(self, filepath: Path) -> bool:
         """
-        Load game recording from JSONL file using replay source
-
+        Load game recording from JSONL file
+        
         Args:
             filepath: Path to .jsonl file
-
+            
         Returns:
             True if loaded successfully, False otherwise
         """
         try:
             logger.info(f"Loading game file: {filepath}")
 
+            # Stop any current recording
+            if self.recorder_sink.is_recording():
+                self.recorder_sink.stop_recording()
+
             # Use replay source to load ticks
             loaded_ticks, game_id = self.replay_source.load(str(filepath))
 
-            # AUDIT FIX: Assign to instance variables under lock
-            with self._lock:
-                self.ticks = loaded_ticks
+            with self._acquire_lock():
+                # Switch to file mode
+                self.is_live_mode = False
+                self.file_mode_ticks = loaded_ticks
                 self.current_index = 0
                 self.game_id = game_id
+                
+                # Clear live buffers when switching to file mode
+                self.live_ring_buffer.clear()
 
             # Reset state for new game session
             self.state.reset()
@@ -106,17 +179,18 @@ class ReplayEngine:
 
             event_bus.publish(Events.GAME_START, {
                 'game_id': self.game_id,
-                'tick_count': len(self.ticks),
-                'filepath': str(filepath)
+                'tick_count': len(loaded_ticks),
+                'filepath': str(filepath),
+                'mode': 'file'
             })
 
-            logger.info(f"Loaded {len(self.ticks)} ticks from game {self.game_id}")
+            logger.info(f"Loaded {len(loaded_ticks)} ticks from game {self.game_id}")
 
             # Publish file loaded event
             event_bus.publish(Events.FILE_LOADED, {
                 'filepath': str(filepath),
                 'game_id': self.game_id,
-                'tick_count': len(self.ticks)
+                'tick_count': len(loaded_ticks)
             })
 
             # Display first tick
@@ -127,6 +201,9 @@ class ReplayEngine:
         except FileNotFoundError:
             logger.error(f"File not found: {filepath}")
             return False
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in file {filepath}: {e}")
+            return False
         except Exception as e:
             logger.error(f"Failed to load file: {e}", exc_info=True)
             return False
@@ -134,19 +211,17 @@ class ReplayEngine:
     def load_game(self, ticks: List[GameTick], game_id: str) -> bool:
         """
         Load game data from a list of ticks (for testing)
-
-        Args:
-            ticks: List of GameTick objects
-            game_id: Game identifier
-
-        Returns:
-            True if loaded successfully
         """
-        with self._lock:
+        with self._acquire_lock():
             try:
-                self.ticks = ticks
+                # Switch to file mode for pre-loaded ticks
+                self.is_live_mode = False
+                self.file_mode_ticks = ticks
                 self.game_id = game_id
                 self.current_index = 0
+                
+                # Clear live buffers
+                self.live_ring_buffer.clear()
 
                 # Initialize game state
                 if ticks:
@@ -160,7 +235,11 @@ class ReplayEngine:
                     )
 
                 logger.info(f"Loaded game {game_id} with {len(ticks)} ticks")
-                event_bus.publish(Events.FILE_LOADED, {'game_id': game_id, 'tick_count': len(ticks)})
+                event_bus.publish(Events.FILE_LOADED, {
+                    'game_id': game_id, 
+                    'tick_count': len(ticks),
+                    'mode': 'preloaded'
+                })
                 return True
 
             except Exception as e:
@@ -170,233 +249,209 @@ class ReplayEngine:
     def push_tick(self, tick: GameTick) -> bool:
         """
         Push a single tick to the replay engine (for live feeds)
-
-        This method is designed for WebSocket/live feed integration where ticks
-        arrive one at a time rather than being loaded from a file in batch.
-
-        Features (Phase 5):
-        - Stores tick in ring buffer (prevents unbounded memory growth)
-        - Auto-records to disk if auto_recording enabled
-        - Initializes game state on first tick
-
+        CRITICAL FIX: Only use ring buffer in live mode, no unbounded list growth
+        
         Args:
             tick: GameTick to add
-
+            
         Returns:
             True if tick was added successfully
         """
-        with self._lock:
-            # Initialize game on first tick
-            if not self.ticks:
-                self.game_id = tick.game_id
-                self.state.reset()
-                self.state.update(
-                    game_id=self.game_id,
-                    game_active=True,
-                    current_tick=tick.tick,
-                    current_price=tick.price,
-                    current_phase=tick.phase
-                )
+        if not isinstance(tick, GameTick):
+            logger.error(f"Invalid tick type: {type(tick)}")
+            return False
 
-                event_bus.publish(Events.GAME_START, {
-                    'game_id': self.game_id,
-                    'tick_count': 0,
-                    'live_mode': True
-                })
+        try:
+            with self._acquire_lock():
+                # Initialize live mode on first tick
+                if not self.is_live_mode or not self.game_id:
+                    self.is_live_mode = True
+                    self.game_id = tick.game_id
+                    self.file_mode_ticks = []  # Clear file mode data
+                    self.current_index = 0
+                    
+                    self.state.reset()
+                    self.state.update(
+                        game_id=self.game_id,
+                        game_active=True,
+                        current_tick=tick.tick,
+                        current_price=tick.price,
+                        current_phase=tick.phase
+                    )
 
-                # Start recording if auto-recording enabled
-                if self.auto_recording:
-                    recording_file = self.recorder_sink.start_recording(self.game_id)
-                    logger.info(f"Started live game: {self.game_id}, recording to {recording_file.name}")
-                else:
-                    logger.info(f"Started live game: {self.game_id} (recording disabled)")
+                    event_bus.publish(Events.GAME_START, {
+                        'game_id': self.game_id,
+                        'tick_count': 0,
+                        'live_mode': True
+                    })
 
-            # Add tick to ring buffer (bounded memory)
-            self.live_ring_buffer.append(tick)
+                    # Start recording if auto-recording enabled
+                    if self.auto_recording:
+                        try:
+                            recording_file = self.recorder_sink.start_recording(self.game_id)
+                            logger.info(f"Started live game: {self.game_id}, recording to {recording_file.name}")
+                        except Exception as e:
+                            logger.error(f"Failed to start recording: {e}")
+                            # Continue without recording
+                    else:
+                        logger.info(f"Started live game: {self.game_id} (recording disabled)")
 
-            # Record tick to disk if recording enabled
-            if self.auto_recording:
-                self.recorder_sink.record_tick(tick)
+                # Validate game ID consistency
+                if tick.game_id != self.game_id:
+                    logger.warning(f"Tick game_id mismatch: expected {self.game_id}, got {tick.game_id}")
+                    return False
 
-            # Add tick to end of list (for backward compatibility)
-            self.ticks.append(tick)
+                # Add tick to ring buffer ONLY (no unbounded list growth)
+                self.live_ring_buffer.append(tick)
 
-            # Auto-advance to latest tick (for live mode)
-            self.current_index = len(self.ticks) - 1
+                # Record tick to disk if recording enabled
+                if self.auto_recording and self.recorder_sink.is_recording():
+                    try:
+                        self.recorder_sink.record_tick(tick)
+                    except Exception as e:
+                        logger.error(f"Failed to record tick: {e}")
+                        # Continue processing even if recording fails
 
-        # Display new tick outside lock
-        self.display_tick(self.current_index)
+                # Update current index to latest
+                self.current_index = self.live_ring_buffer.get_size() - 1
 
-        logger.debug(f"Pushed tick {tick.tick} for game {tick.game_id}")
-        return True
+            # Display new tick outside lock to prevent deadlock
+            self.display_tick(self.current_index)
+
+            logger.debug(f"Pushed tick {tick.tick} for game {tick.game_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error pushing tick: {e}", exc_info=True)
+            return False
 
     # ========================================================================
     # PLAYBACK CONTROL
     # ========================================================================
 
     def play(self):
-        """Start auto-playback (thread-safe)"""
-        if not self.ticks:
-            logger.warning("No game loaded")
-            return
-
-        # Thread-safe check-then-act pattern
-        with self._lock:
+        """Start auto-playback"""
+        with self._acquire_lock():
             if self.is_playing:
                 logger.warning("Already playing")
                 return
 
-            if self.is_at_end():
-                logger.info("At end of game, resetting to start")
-                self.reset()
+            if not self.ticks:
+                logger.warning("No game loaded")
+                return
 
             self.is_playing = True
+            self._stop_event.clear()
 
-        # Start playback thread outside lock (thread creation doesn't need protection)
-        self.playback_thread = threading.Thread(target=self._playback_loop, daemon=True)
-        self.playback_thread.start()
+            # Start playback thread
+            self.playback_thread = threading.Thread(
+                target=self._playback_loop,
+                name="ReplayEngine-Playback",
+                daemon=True
+            )
+            self.playback_thread.start()
 
-        event_bus.publish(Events.REPLAY_START)
-        logger.info("Playback started")
+            event_bus.publish(Events.REPLAY_STARTED, {'game_id': self.game_id})
+            logger.info("Playback started")
 
     def pause(self):
-        """Pause auto-playback (thread-safe)"""
-        # Thread-safe check-then-act pattern
-        with self._lock:
+        """Pause auto-playback"""
+        with self._acquire_lock():
             if not self.is_playing:
                 return
 
             self.is_playing = False
 
-        # AUDIT FIX: Signal stop event for immediate shutdown
-        self._stop_event.set()
+        # Wait for playback thread outside lock
+        if self.playback_thread and self.playback_thread.is_alive():
+            self.playback_thread.join(timeout=2.0)
 
-        # Wait for thread to finish outside lock to avoid deadlock
-        # Don't join if we're the playback thread itself
-        if self.playback_thread and self.playback_thread != threading.current_thread():
-            self.playback_thread.join(timeout=2)
-
-        # AUDIT FIX: Clear stop event for next playback
-        self._stop_event.clear()
-
-        event_bus.publish(Events.REPLAY_PAUSE)
+        event_bus.publish(Events.REPLAY_PAUSED, {'game_id': self.game_id})
         logger.info("Playback paused")
 
+    def stop(self):
+        """Stop playback and reset to start"""
+        # First pause playback
+        self.pause()
+
+        with self._acquire_lock():
+            self.current_index = 0
+
+        # Display first tick
+        if self.ticks:
+            self.display_tick(0)
+
+        event_bus.publish(Events.REPLAY_STOPPED, {'game_id': self.game_id})
+        logger.info("Playback stopped")
+
     def step_forward(self) -> bool:
-        """
-        Step forward one tick (thread-safe)
+        """Step forward one tick"""
+        with self._acquire_lock():
+            if not self.ticks:
+                return False
 
-        Returns:
-            True if stepped successfully, False if at end
-        """
-        if not self.ticks:
-            return False
-
-        with self._lock:
             if self.current_index >= len(self.ticks) - 1:
-                logger.info("Reached end of game")
                 self._handle_game_end()
                 return False
 
             self.current_index += 1
-            index = self.current_index
 
-        # Display tick outside lock (calls callbacks which may acquire other locks)
-        self.display_tick(index)
+        self.display_tick(self.current_index)
         return True
 
     def step_backward(self) -> bool:
-        """
-        Step backward one tick (thread-safe)
-
-        Returns:
-            True if stepped successfully, False if at start
-        """
-        if not self.ticks:
+        """Step backward one tick (not available in live mode)"""
+        if self.is_live_mode:
+            logger.warning("Cannot step backward in live mode")
             return False
 
-        with self._lock:
-            if self.current_index <= 0:
+        with self._acquire_lock():
+            if not self.ticks or self.current_index <= 0:
                 return False
 
             self.current_index -= 1
-            index = self.current_index
 
-        # Display tick outside lock
-        self.display_tick(index)
+        self.display_tick(self.current_index)
         return True
 
     def jump_to_tick(self, tick_number: int) -> bool:
-        """
-        Jump to specific tick number (thread-safe)
-
-        Args:
-            tick_number: Target tick number
-
-        Returns:
-            True if jumped successfully
-        """
-        if not self.ticks:
+        """Jump to specific tick number (not available in live mode)"""
+        if self.is_live_mode:
+            logger.warning("Cannot jump to tick in live mode")
             return False
 
-        # Find index for tick number
-        with self._lock:
+        with self._acquire_lock():
+            if not self.ticks:
+                return False
+
+            # Find tick with matching number
             for i, tick in enumerate(self.ticks):
                 if tick.tick == tick_number:
                     self.current_index = i
-                    index = i
-                    break
-            else:
-                logger.warning(f"Tick {tick_number} not found")
+                    self.display_tick(i)
+                    return True
+
+        logger.warning(f"Tick {tick_number} not found")
+        return False
+
+    def jump_to_index(self, index: int) -> bool:
+        """Jump to specific index in tick list"""
+        with self._acquire_lock():
+            if not self.ticks or index < 0 or index >= len(self.ticks):
                 return False
 
-        # Display tick outside lock
+            self.current_index = index
+
         self.display_tick(index)
         return True
 
     def set_tick_index(self, index: int) -> bool:
-        """
-        Set current tick by index (for testing)
-
-        Args:
-            index: Target tick index
-
-        Returns:
-            True if set successfully
-        """
-        if not self.ticks or index < 0 or index >= len(self.ticks):
-            return False
-
-        with self._lock:
-            self.current_index = index
-
-        # Display tick outside lock
-        self.display_tick(index)
-        return True
-
-    def reset(self):
-        """Reset to beginning of game (thread-safe)"""
-        self.pause()  # pause() is already thread-safe
-
-        with self._lock:
-            self.current_index = 0
-
-        # Reset state and display outside lock
-        self.state.reset()
-
-        if self.ticks:
-            self.display_tick(0)
-
-        logger.info("Replay reset to start")
+        """Backwards-compatible alias for jump_to_index()"""
+        return self.jump_to_index(index)
 
     def set_speed(self, speed: float):
-        """
-        Set playback speed (thread-safe)
-
-        Args:
-            speed: Speed multiplier (0.25, 0.5, 1.0, 2.0, 4.0, etc.)
-        """
-        with self._lock:
+        """Set playback speed multiplier"""
+        with self._acquire_lock():
             self.playback_speed = max(0.1, min(10.0, speed))
             new_speed = self.playback_speed
 
@@ -408,14 +463,13 @@ class ReplayEngine:
     # ========================================================================
 
     def display_tick(self, index: int):
-        """
-        Display tick at given index
-        Updates game state and publishes event
-        """
-        if not self.ticks or index < 0 or index >= len(self.ticks):
+        """Display tick at given index"""
+        ticks = self.ticks  # Get current tick list based on mode
+        
+        if not ticks or index < 0 or index >= len(ticks):
             return
 
-        tick = self.ticks[index]
+        tick = ticks[index]
 
         # Update game state
         self.state.update(
@@ -434,13 +488,17 @@ class ReplayEngine:
         event_bus.publish(Events.GAME_TICK, {
             'tick': tick,
             'index': index,
-            'total': len(self.ticks),
-            'progress': (index / len(self.ticks)) * 100 if self.ticks else 0
+            'total': len(ticks),
+            'progress': (index / len(ticks)) * 100 if ticks else 0,
+            'mode': 'live' if self.is_live_mode else 'file'
         })
 
         # Call UI callback if set
         if self.on_tick_callback:
-            self.on_tick_callback(tick, index, len(self.ticks))
+            try:
+                self.on_tick_callback(tick, index, len(ticks))
+            except Exception as e:
+                logger.error(f"Error in tick callback: {e}")
 
         # Check for rug event
         if tick.rugged and not self.state.get('rug_detected'):
@@ -458,7 +516,12 @@ class ReplayEngine:
 
     def _handle_game_end(self):
         """Handle reaching end of game"""
-        # Only pause if NOT in multi-game mode (instant advance for multi-game)
+        # Stop recording if in live mode
+        if self.is_live_mode and self.recorder_sink.is_recording():
+            summary = self.recorder_sink.stop_recording()
+            logger.info(f"Live game ended, recording stopped: {summary}")
+
+        # Only pause if NOT in multi-game mode
         if not self.multi_game_mode:
             self.pause()
 
@@ -467,12 +530,16 @@ class ReplayEngine:
 
         event_bus.publish(Events.GAME_END, {
             'game_id': self.game_id,
-            'metrics': metrics
+            'metrics': metrics,
+            'mode': 'live' if self.is_live_mode else 'file'
         })
         self.state.update(game_active=False)
 
         if self.on_game_end_callback:
-            self.on_game_end_callback(metrics)
+            try:
+                self.on_game_end_callback(metrics)
+            except Exception as e:
+                logger.error(f"Error in game end callback: {e}")
 
         logger.info(f"Game ended. Final metrics: {metrics}")
 
@@ -481,30 +548,35 @@ class ReplayEngine:
     # ========================================================================
 
     def _playback_loop(self):
-        """Background thread for auto-playback (thread-safe)"""
-        # AUDIT FIX: Use stop_event for clean shutdown
-        while not self._stop_event.is_set():
-            # Check if still playing (thread-safe read)
-            with self._lock:
-                if not self.is_playing:
+        """Background thread for auto-playback"""
+        logger.debug("Playback loop started")
+        
+        try:
+            while not self._stop_event.is_set():
+                # Check if still playing
+                with self._lock:
+                    if not self.is_playing:
+                        break
+                    speed = self.playback_speed
+
+                # Step forward
+                if not self.step_forward():
                     break
-                speed = self.playback_speed
 
-            # Step forward (already thread-safe)
-            if not self.step_forward():
-                break
+                # Calculate delay based on speed
+                delay = 0.25 / speed
 
-            # Calculate delay based on speed
-            # Base delay: 250ms per tick at 1x speed
-            delay = 0.25 / speed
+                # Wait with timeout for responsive shutdown
+                if self._stop_event.wait(timeout=delay):
+                    break
 
-            # AUDIT FIX: Use wait with timeout instead of sleep for responsive shutdown
-            if self._stop_event.wait(timeout=delay):
-                break
-
-        # Ensure flag is cleared (thread-safe)
-        with self._lock:
-            self.is_playing = False
+        except Exception as e:
+            logger.error(f"Error in playback loop: {e}", exc_info=True)
+        finally:
+            # Ensure flag is cleared
+            with self._lock:
+                self.is_playing = False
+            logger.debug("Playback loop ended")
 
     # ========================================================================
     # STATUS QUERIES
@@ -520,67 +592,67 @@ class ReplayEngine:
 
     def is_at_end(self) -> bool:
         """Check if at end of game"""
-        return self.current_index >= len(self.ticks) - 1
+        ticks = self.ticks
+        return self.current_index >= len(ticks) - 1 if ticks else True
 
     def get_current_tick(self) -> Optional[GameTick]:
         """Get current tick"""
-        if not self.ticks or self.current_index >= len(self.ticks):
+        ticks = self.ticks
+        if not ticks or self.current_index >= len(ticks):
             return None
-        return self.ticks[self.current_index]
+        return ticks[self.current_index]
 
     def get_progress(self) -> float:
         """Get playback progress (0.0 to 1.0)"""
-        if not self.ticks:
+        ticks = self.ticks
+        if not ticks:
             return 0.0
-        return self.current_index / len(self.ticks)
+        return self.current_index / len(ticks)
 
     def get_info(self) -> dict:
         """Get replay info"""
+        ticks = self.ticks
         return {
             'loaded': self.is_loaded(),
             'game_id': self.game_id,
-            'total_ticks': len(self.ticks),
+            'total_ticks': len(ticks),
             'current_tick': self.current_index,
             'is_playing': self.is_playing,
             'speed': self.playback_speed,
-            'progress': self.get_progress() * 100
+            'progress': self.get_progress() * 100,
+            'mode': 'live' if self.is_live_mode else 'file',
+            'ring_buffer_size': self.live_ring_buffer.get_size() if self.is_live_mode else 0
         }
 
     # ========================================================================
-    # LIVE FEED CONTROL (Phase 5)
+    # LIVE FEED CONTROL
     # ========================================================================
 
     def enable_recording(self) -> bool:
-        """
-        Enable auto-recording of live feeds
-
-        Returns:
-            True if recording was enabled
-        """
-        with self._lock:
+        """Enable auto-recording of live feeds"""
+        with self._acquire_lock():
             if self.auto_recording:
                 logger.info("Recording already enabled")
                 return False
 
             self.auto_recording = True
 
-            # Start recording if game is in progress
-            if self.ticks and not self.recorder_sink.is_recording():
-                self.recorder_sink.start_recording(self.game_id)
-                logger.info("Recording enabled and started for current game")
+            # Start recording if live game is in progress
+            if self.is_live_mode and self.live_ring_buffer and not self.recorder_sink.is_recording():
+                try:
+                    self.recorder_sink.start_recording(self.game_id)
+                    logger.info("Recording enabled and started for current game")
+                except Exception as e:
+                    logger.error(f"Failed to start recording: {e}")
+                    return False
             else:
                 logger.info("Recording enabled (will start on next game)")
 
             return True
 
     def disable_recording(self) -> bool:
-        """
-        Disable auto-recording of live feeds
-
-        Returns:
-            True if recording was disabled
-        """
-        with self._lock:
+        """Disable auto-recording of live feeds"""
+        with self._acquire_lock():
             if not self.auto_recording:
                 logger.info("Recording already disabled")
                 return False
@@ -589,48 +661,49 @@ class ReplayEngine:
 
             # Stop current recording if active
             if self.recorder_sink.is_recording():
-                summary = self.recorder_sink.stop_recording()
-                logger.info(f"Recording disabled and stopped: {summary}")
+                try:
+                    summary = self.recorder_sink.stop_recording()
+                    logger.info(f"Recording disabled and stopped: {summary}")
+                except Exception as e:
+                    logger.error(f"Failed to stop recording: {e}")
             else:
                 logger.info("Recording disabled")
 
             return True
 
     def is_recording(self) -> bool:
-        """
-        Check if currently recording
-
-        Returns:
-            True if recording is active
-        """
+        """Check if currently recording"""
         return self.recorder_sink.is_recording()
 
     def get_recording_info(self) -> dict:
-        """
-        Get current recording status
-
-        Returns:
-            Dict with recording info (enabled, active, filepath, tick_count)
-        """
-        with self._lock:
+        """Get current recording status"""
+        with self._acquire_lock():
+            current_file = self.recorder_sink.get_current_file()
             return {
                 'enabled': self.auto_recording,
                 'active': self.recorder_sink.is_recording(),
-                'filepath': str(self.recorder_sink.get_current_file()) if self.recorder_sink.get_current_file() else None,
-                'tick_count': self.recorder_sink.get_tick_count()
+                'filepath': str(current_file) if current_file else None,
+                'tick_count': self.recorder_sink.get_tick_count(),
+                'mode': 'live' if self.is_live_mode else 'file'
             }
 
     def get_ring_buffer_info(self) -> dict:
-        """
-        Get ring buffer status
-
-        Returns:
-            Dict with buffer info (size, max_size, oldest_tick, newest_tick)
-        """
+        """Get ring buffer status"""
+        oldest = self.live_ring_buffer.get_oldest_tick()
+        newest = self.live_ring_buffer.get_newest_tick()
+        
         return {
             'size': self.live_ring_buffer.get_size(),
             'max_size': self.live_ring_buffer.get_max_size(),
             'is_full': self.live_ring_buffer.is_full(),
-            'oldest_tick': self.live_ring_buffer.get_oldest_tick().tick if self.live_ring_buffer.get_oldest_tick() else None,
-            'newest_tick': self.live_ring_buffer.get_newest_tick().tick if self.live_ring_buffer.get_newest_tick() else None
+            'oldest_tick': oldest.tick if oldest else None,
+            'newest_tick': newest.tick if newest else None,
+            'memory_usage_estimate': self.live_ring_buffer.get_size() * 1024  # Rough estimate in bytes
         }
+
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup()
+        except:
+            pass
