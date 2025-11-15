@@ -1044,7 +1044,20 @@ GAME RULES:
 
     def shutdown(self):
         """Cleanup dispatcher resources during application shutdown."""
+        # Disconnect live feed first (Phase 6 cleanup)
+        if self.live_feed_connected and self.live_feed:
+            try:
+                logger.info("Shutting down live feed...")
+                self.live_feed.disconnect()
+                self.live_feed = None
+                self.live_feed_connected = False
+            except Exception as e:
+                logger.error(f"Error disconnecting live feed during shutdown: {e}", exc_info=True)
+
+        # Stop bot executor
         if self.bot_enabled:
             self.bot_executor.stop()
             self.bot_enabled = False
+
+        # Stop UI dispatcher
         self.ui_dispatcher.stop()

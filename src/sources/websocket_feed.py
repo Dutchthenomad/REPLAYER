@@ -263,7 +263,7 @@ class WebSocketFeed:
 
         # Catch-all for noise tracking
         @self.sio.on('*')
-        def catch_all(event, data):
+        def catch_all(event, *args):
             if event != 'gameStateUpdate':
                 self.metrics['noise_filtered'] += 1
                 self.logger.debug(f'❌ NOISE filtered: {event}')
