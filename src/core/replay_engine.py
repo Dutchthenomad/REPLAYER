@@ -14,6 +14,8 @@ from decimal import Decimal
 from models import GameTick
 from services import event_bus, Events
 from .game_state import GameState
+from .recorder_sink import RecorderSink
+from .live_ring_buffer import LiveRingBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,16 @@ class ReplayEngine:
         self.playback_speed = 1.0  # 1.0 = normal speed
         self.playback_thread: Optional[threading.Thread] = None
         self.multi_game_mode = False  # NEW: Multi-game auto-advance mode
+
+        # Live feed infrastructure (Phase 5)
+        self.live_ring_buffer = LiveRingBuffer(
+            max_size=config.LIVE_FEED['ring_buffer_size']
+        )
+        self.recorder_sink = RecorderSink(
+            recordings_dir=config.FILES['recordings_dir'],
+            buffer_size=config.LIVE_FEED['recording_buffer_size']
+        )
+        self.auto_recording = config.LIVE_FEED['auto_recording']
 
         # Thread safety (AUDIT FIX: Added _stop_event for clean shutdown)
         self._lock = threading.RLock()
@@ -162,6 +174,11 @@ class ReplayEngine:
         This method is designed for WebSocket/live feed integration where ticks
         arrive one at a time rather than being loaded from a file in batch.
 
+        Features (Phase 5):
+        - Stores tick in ring buffer (prevents unbounded memory growth)
+        - Auto-records to disk if auto_recording enabled
+        - Initializes game state on first tick
+
         Args:
             tick: GameTick to add
 
@@ -186,9 +203,22 @@ class ReplayEngine:
                     'tick_count': 0,
                     'live_mode': True
                 })
-                logger.info(f"Started live game: {self.game_id}")
 
-            # Add tick to end of list
+                # Start recording if auto-recording enabled
+                if self.auto_recording:
+                    recording_file = self.recorder_sink.start_recording(self.game_id)
+                    logger.info(f"Started live game: {self.game_id}, recording to {recording_file.name}")
+                else:
+                    logger.info(f"Started live game: {self.game_id} (recording disabled)")
+
+            # Add tick to ring buffer (bounded memory)
+            self.live_ring_buffer.append(tick)
+
+            # Record tick to disk if recording enabled
+            if self.auto_recording:
+                self.recorder_sink.record_tick(tick)
+
+            # Add tick to end of list (for backward compatibility)
             self.ticks.append(tick)
 
             # Auto-advance to latest tick (for live mode)
@@ -514,4 +544,93 @@ class ReplayEngine:
             'is_playing': self.is_playing,
             'speed': self.playback_speed,
             'progress': self.get_progress() * 100
+        }
+
+    # ========================================================================
+    # LIVE FEED CONTROL (Phase 5)
+    # ========================================================================
+
+    def enable_recording(self) -> bool:
+        """
+        Enable auto-recording of live feeds
+
+        Returns:
+            True if recording was enabled
+        """
+        with self._lock:
+            if self.auto_recording:
+                logger.info("Recording already enabled")
+                return False
+
+            self.auto_recording = True
+
+            # Start recording if game is in progress
+            if self.ticks and not self.recorder_sink.is_recording():
+                self.recorder_sink.start_recording(self.game_id)
+                logger.info("Recording enabled and started for current game")
+            else:
+                logger.info("Recording enabled (will start on next game)")
+
+            return True
+
+    def disable_recording(self) -> bool:
+        """
+        Disable auto-recording of live feeds
+
+        Returns:
+            True if recording was disabled
+        """
+        with self._lock:
+            if not self.auto_recording:
+                logger.info("Recording already disabled")
+                return False
+
+            self.auto_recording = False
+
+            # Stop current recording if active
+            if self.recorder_sink.is_recording():
+                summary = self.recorder_sink.stop_recording()
+                logger.info(f"Recording disabled and stopped: {summary}")
+            else:
+                logger.info("Recording disabled")
+
+            return True
+
+    def is_recording(self) -> bool:
+        """
+        Check if currently recording
+
+        Returns:
+            True if recording is active
+        """
+        return self.recorder_sink.is_recording()
+
+    def get_recording_info(self) -> dict:
+        """
+        Get current recording status
+
+        Returns:
+            Dict with recording info (enabled, active, filepath, tick_count)
+        """
+        with self._lock:
+            return {
+                'enabled': self.auto_recording,
+                'active': self.recorder_sink.is_recording(),
+                'filepath': str(self.recorder_sink.get_current_file()) if self.recorder_sink.get_current_file() else None,
+                'tick_count': self.recorder_sink.get_tick_count()
+            }
+
+    def get_ring_buffer_info(self) -> dict:
+        """
+        Get ring buffer status
+
+        Returns:
+            Dict with buffer info (size, max_size, oldest_tick, newest_tick)
+        """
+        return {
+            'size': self.live_ring_buffer.get_size(),
+            'max_size': self.live_ring_buffer.get_max_size(),
+            'is_full': self.live_ring_buffer.is_full(),
+            'oldest_tick': self.live_ring_buffer.get_oldest_tick().tick if self.live_ring_buffer.get_oldest_tick() else None,
+            'newest_tick': self.live_ring_buffer.get_newest_tick().tick if self.live_ring_buffer.get_newest_tick() else None
         }

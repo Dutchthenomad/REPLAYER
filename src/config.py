@@ -83,6 +83,13 @@ class Config:
         'max_file_size_mb': 100,
         'backup_count': 3,
     }
+
+    # ========== Live Feed Settings ==========
+    LIVE_FEED = {
+        'ring_buffer_size': 5000,  # Max ticks to keep in memory (configurable)
+        'auto_recording': True,     # Auto-record live games (explicit opt-out)
+        'recording_buffer_size': 100,  # Ticks to buffer before disk flush
+    }
     
     # ========== Logging Settings ==========
     LOGGING = {
