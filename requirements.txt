@@ -1,6 +1,7 @@
 # Core dependencies
 tkinter  # Usually comes with Python
 typing_extensions>=4.0.0
+python-socketio[client]>=5.10.0  # WebSocket live feed
 
 # Testing
 pytest>=7.0.0

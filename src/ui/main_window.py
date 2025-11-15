@@ -19,6 +19,7 @@ from ui.widgets import ChartWidget, ToastNotification
 from ui.tk_dispatcher import TkDispatcher
 from bot import BotInterface, BotController, list_strategies
 from bot.async_executor import AsyncBotExecutor
+from sources import WebSocketFeed
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,10 @@ class MainWindow:
 
         # Initialize async bot executor (prevents deadlock)
         self.bot_executor = AsyncBotExecutor(self.bot_controller)
+
+        # Initialize live feed (Phase 6)
+        self.live_feed = None
+        self.live_feed_connected = False
 
         # Ensure UI updates happen on Tk main thread
         self.ui_dispatcher = TkDispatcher(self.root)
@@ -442,9 +447,112 @@ class MainWindow:
         else:
             self.log("Failed to load game file")
             messagebox.showerror("Load Error", "Failed to load game file")
-    
+
+    def enable_live_feed(self):
+        """Enable WebSocket live feed (Phase 6)"""
+        if self.live_feed_connected:
+            self.log("Live feed already connected")
+            return
+
+        try:
+            self.log("Connecting to live feed...")
+
+            # Create WebSocketFeed
+            self.live_feed = WebSocketFeed(log_level='WARN')
+
+            # Register event handlers (THREAD-SAFE with root.after)
+            @self.live_feed.on('signal')
+            def on_signal(signal):
+                # Marshal to Tkinter main thread
+                def process_signal():
+                    try:
+                        # Convert GameSignal to GameTick
+                        tick = self.live_feed.signal_to_game_tick(signal)
+
+                        # Push to replay engine (auto-records if enabled)
+                        self.replay_engine.push_tick(tick)
+
+                        # Publish to event bus for UI updates
+                        from services.event_bus import Events
+                        self.event_bus.publish(Events.GAME_TICK, {'tick': tick})
+                    except Exception as e:
+                        logger.error(f"Error processing live signal: {e}", exc_info=True)
+
+                self.root.after(0, process_signal)
+
+            @self.live_feed.on('connected')
+            def on_connected(info):
+                # Marshal to Tkinter main thread
+                def handle_connected():
+                    self.live_feed_connected = True
+                    self.log(f"✅ Live feed connected (Socket ID: {info.get('socketId', 'N/A')})")
+                    if self.toast:
+                        self.toast.show("Live feed connected", "success")
+                    # Update status label if it exists
+                    if hasattr(self, 'phase_label'):
+                        self.phase_label.config(text="PHASE: LIVE FEED", fg='#00ff88')
+
+                self.root.after(0, handle_connected)
+
+            @self.live_feed.on('disconnected')
+            def on_disconnected(info):
+                # Marshal to Tkinter main thread
+                def handle_disconnected():
+                    self.live_feed_connected = False
+                    self.log("❌ Live feed disconnected")
+                    if self.toast:
+                        self.toast.show("Live feed disconnected", "error")
+                    if hasattr(self, 'phase_label'):
+                        self.phase_label.config(text="PHASE: DISCONNECTED", fg='#ff3366')
+
+                self.root.after(0, handle_disconnected)
+
+            @self.live_feed.on('gameComplete')
+            def on_game_complete(data):
+                # Marshal to Tkinter main thread
+                def handle_game_complete():
+                    game_num = data.get('gameNumber', 0)
+                    self.log(f"💥 Game {game_num} complete")
+
+                self.root.after(0, handle_game_complete)
+
+            # Connect to feed
+            self.live_feed.connect()
+
+        except Exception as e:
+            logger.error(f"Failed to enable live feed: {e}", exc_info=True)
+            self.log(f"Failed to connect to live feed: {e}")
+            self.toast.show(f"Live feed error: {e}", "error")
+            self.live_feed = None
+            self.live_feed_connected = False
+
+    def disable_live_feed(self):
+        """Disable WebSocket live feed"""
+        if not self.live_feed:
+            self.log("Live feed not active")
+            return
+
+        try:
+            self.log("Disconnecting from live feed...")
+            self.live_feed.disconnect()
+            self.live_feed = None
+            self.live_feed_connected = False
+            self.toast.show("Live feed disconnected", "info")
+            if hasattr(self, 'phase_label'):
+                self.phase_label.config(text="PHASE: DISCONNECTED", fg='white')
+        except Exception as e:
+            logger.error(f"Error disconnecting live feed: {e}", exc_info=True)
+            self.log(f"Error disconnecting: {e}")
+
+    def toggle_live_feed(self):
+        """Toggle live feed on/off"""
+        if self.live_feed_connected:
+            self.disable_live_feed()
+        else:
+            self.enable_live_feed()
+
 # display_tick() removed - now handled by ReplayEngine callbacks
-    
+
     def toggle_playback(self):
         """Toggle play/pause using ReplayEngine"""
         if self.replay_engine.is_playing:
@@ -894,8 +1002,10 @@ class MainWindow:
         self.root.bind('<Right>', lambda e: self.step_forward())
         self.root.bind('<h>', lambda e: self.show_help())
         self.root.bind('<H>', lambda e: self.show_help())
+        self.root.bind('l', lambda e: self.toggle_live_feed())
+        self.root.bind('L', lambda e: self.toggle_live_feed())
 
-        logger.info("Keyboard shortcuts configured")
+        logger.info("Keyboard shortcuts configured (added 'L' for live feed)")
 
     def step_backward(self):
         """Step backward one tick"""
@@ -917,6 +1027,9 @@ Playback:
   R - Reset game
   ← - Step backward
   → - Step forward
+
+Data Sources:
+  L - Toggle live WebSocket feed
 
 Other:
   H - Show this help
