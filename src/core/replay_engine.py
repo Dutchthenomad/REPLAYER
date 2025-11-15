@@ -30,8 +30,16 @@ class ReplayEngine:
     - Track playback state
     """
 
-    def __init__(self, game_state: GameState):
+    def __init__(self, game_state: GameState, replay_source=None):
+        from core.replay_source import FileDirectorySource
+        from config import config
+
         self.state = game_state
+
+        # Replay source (defaults to file directory)
+        if replay_source is None:
+            replay_source = FileDirectorySource(config.FILES['recordings_dir'])
+        self.replay_source = replay_source
 
         # Game data
         self.ticks: List[GameTick] = []
@@ -60,7 +68,7 @@ class ReplayEngine:
 
     def load_file(self, filepath: Path) -> bool:
         """
-        Load game recording from JSONL file
+        Load game recording from JSONL file using replay source
 
         Args:
             filepath: Path to .jsonl file
@@ -69,41 +77,10 @@ class ReplayEngine:
             True if loaded successfully, False otherwise
         """
         try:
-            # AUDIT FIX: Load outside lock to prevent blocking
-            loaded_ticks = []
-            game_id = None
-
             logger.info(f"Loading game file: {filepath}")
 
-            with open(filepath, 'r') as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    try:
-                        data = json.loads(line)
-
-                        # AUDIT FIX: Validate required fields before parsing
-                        required_fields = ['tick', 'price', 'phase', 'active', 'rugged', 'game_id']
-                        for field in required_fields:
-                            if field not in data:
-                                raise KeyError(f"Missing required field: {field}")
-
-                        tick = GameTick.from_dict(data)
-                        loaded_ticks.append(tick)
-
-                        # Set game_id from first tick
-                        if game_id is None:
-                            game_id = tick.game_id
-
-                    except Exception as e:
-                        logger.warning(f"Skipped invalid line {line_num}: {e}")
-                        continue
-
-            if not loaded_ticks:
-                logger.error("No valid ticks found in file")
-                return False
+            # Use replay source to load ticks
+            loaded_ticks, game_id = self.replay_source.load(str(filepath))
 
             # AUDIT FIX: Assign to instance variables under lock
             with self._lock:
@@ -177,6 +154,51 @@ class ReplayEngine:
             except Exception as e:
                 logger.error(f"Failed to load game: {e}", exc_info=True)
                 return False
+
+    def push_tick(self, tick: GameTick) -> bool:
+        """
+        Push a single tick to the replay engine (for live feeds)
+
+        This method is designed for WebSocket/live feed integration where ticks
+        arrive one at a time rather than being loaded from a file in batch.
+
+        Args:
+            tick: GameTick to add
+
+        Returns:
+            True if tick was added successfully
+        """
+        with self._lock:
+            # Initialize game on first tick
+            if not self.ticks:
+                self.game_id = tick.game_id
+                self.state.reset()
+                self.state.update(
+                    game_id=self.game_id,
+                    game_active=True,
+                    current_tick=tick.tick,
+                    current_price=tick.price,
+                    current_phase=tick.phase
+                )
+
+                event_bus.publish(Events.GAME_START, {
+                    'game_id': self.game_id,
+                    'tick_count': 0,
+                    'live_mode': True
+                })
+                logger.info(f"Started live game: {self.game_id}")
+
+            # Add tick to end of list
+            self.ticks.append(tick)
+
+            # Auto-advance to latest tick (for live mode)
+            self.current_index = len(self.ticks) - 1
+
+        # Display new tick outside lock
+        self.display_tick(self.current_index)
+
+        logger.debug(f"Pushed tick {tick.tick} for game {tick.game_id}")
+        return True
 
     # ========================================================================
     # PLAYBACK CONTROL
