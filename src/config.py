@@ -70,7 +70,7 @@ class Config:
     FILES = {
         'recordings_dir': Path(os.getenv(
             'RUGS_RECORDINGS_DIR',
-            str(Path.home() / 'rugs_recordings')
+            str(Path(__file__).parent / 'rugs_recordings')
         )),
         'config_dir': Path(os.getenv(
             'RUGS_CONFIG_DIR',
