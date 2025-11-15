@@ -89,17 +89,17 @@ class TestTradeManagerSellOperation:
         assert result['success'] == False
         assert 'reason' in result
 
-    def test_sell_pnl_calculation(self, game_state, trade_manager, price_series):
+    def test_sell_pnl_calculation(self, game_state, trade_manager, replay_engine, price_series):
         """Test P&L calculation on sell"""
         # Load game with rising prices
-        game_state.load_game(price_series, 'test-game')
-        game_state.set_tick_index(0)  # Price: 1.0
+        replay_engine.load_game(price_series, 'test-game')
+        replay_engine.set_tick_index(0)  # Price: 1.0
 
         # Buy at 1.0
         trade_manager.execute_buy(Decimal('0.01'))
 
         # Move to higher price
-        game_state.set_tick_index(3)  # Price: 2.0
+        replay_engine.set_tick_index(3)  # Price: 2.0
 
         # Sell at 2.0
         result = trade_manager.execute_sell()
@@ -160,22 +160,22 @@ class TestTradeManagerSidebetOperation:
 class TestTradeManagerValidation:
     """Tests for trade validation"""
 
-    def test_trading_not_allowed_when_inactive(self, game_state, trade_manager, sample_tick):
+    def test_trading_not_allowed_when_inactive(self, game_state, trade_manager, replay_engine, sample_tick):
         """Test trading blocked when game not active"""
         sample_tick.active = False
-        game_state.load_game([sample_tick], 'test-game')
-        game_state.set_tick_index(0)
+        replay_engine.load_game([sample_tick], 'test-game')
+        replay_engine.set_tick_index(0)
 
         result = trade_manager.execute_buy(Decimal('0.005'))
 
         assert result['success'] == False
         assert 'reason' in result
 
-    def test_trading_not_allowed_when_rugged(self, game_state, trade_manager, sample_tick):
+    def test_trading_not_allowed_when_rugged(self, game_state, trade_manager, replay_engine, sample_tick):
         """Test trading blocked when game is rugged"""
         sample_tick.rugged = True
-        game_state.load_game([sample_tick], 'test-game')
-        game_state.set_tick_index(0)
+        replay_engine.load_game([sample_tick], 'test-game')
+        replay_engine.set_tick_index(0)
 
         result = trade_manager.execute_buy(Decimal('0.005'))
 
@@ -186,25 +186,25 @@ class TestTradeManagerValidation:
 class TestTradeManagerEdgeCases:
     """Tests for edge cases"""
 
-    def test_multiple_trades_in_game(self, game_state, trade_manager, price_series):
+    def test_multiple_trades_in_game(self, game_state, trade_manager, replay_engine, price_series):
         """Test multiple buy-sell cycles in one game"""
-        game_state.load_game(price_series, 'test-game')
+        replay_engine.load_game(price_series, 'test-game')
 
         # First cycle
-        game_state.set_tick_index(0)  # Price: 1.0
+        replay_engine.set_tick_index(0)  # Price: 1.0
         result1 = trade_manager.execute_buy(Decimal('0.01'))
         assert result1['success'] == True
 
-        game_state.set_tick_index(2)  # Price: 1.5
+        replay_engine.set_tick_index(2)  # Price: 1.5
         result2 = trade_manager.execute_sell()
         assert result2['success'] == True
 
         # Second cycle
-        game_state.set_tick_index(3)  # Price: 2.0
+        replay_engine.set_tick_index(3)  # Price: 2.0
         result3 = trade_manager.execute_buy(Decimal('0.01'))
         assert result3['success'] == True
 
-        game_state.set_tick_index(5)  # Price: 3.0
+        replay_engine.set_tick_index(5)  # Price: 3.0
         result4 = trade_manager.execute_sell()
         assert result4['success'] == True
 

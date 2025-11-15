@@ -118,6 +118,7 @@ class BotInterface:
             # Check if can buy
             if (tick.active and
                 tick.phase not in config.BLOCKED_PHASES_FOR_TRADING and
+                not self.state.has_active_position() and
                 self.state.balance >= config.MIN_BET_SOL):
                 can_buy = True
                 valid_actions.append('BUY')

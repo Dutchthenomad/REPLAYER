@@ -121,6 +121,11 @@ def price_series():
 @pytest.fixture(autouse=True)
 def cleanup_event_bus():
     """Clean up event bus after each test"""
+    # Start event bus for tests
+    if not event_bus._processing:
+        event_bus.start()
+
     yield
+
     # Clear all subscribers after test
     event_bus._subscribers.clear()

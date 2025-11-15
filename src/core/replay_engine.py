@@ -142,6 +142,42 @@ class ReplayEngine:
             logger.error(f"Failed to load file: {e}", exc_info=True)
             return False
 
+    def load_game(self, ticks: List[GameTick], game_id: str) -> bool:
+        """
+        Load game data from a list of ticks (for testing)
+
+        Args:
+            ticks: List of GameTick objects
+            game_id: Game identifier
+
+        Returns:
+            True if loaded successfully
+        """
+        with self._lock:
+            try:
+                self.ticks = ticks
+                self.game_id = game_id
+                self.current_index = 0
+
+                # Initialize game state
+                if ticks:
+                    first_tick = ticks[0]
+                    self.state.update(
+                        game_id=game_id,
+                        game_active=True,
+                        current_tick=first_tick.tick,
+                        current_price=first_tick.price,
+                        current_phase=first_tick.phase
+                    )
+
+                logger.info(f"Loaded game {game_id} with {len(ticks)} ticks")
+                event_bus.publish(Events.FILE_LOADED, {'game_id': game_id, 'tick_count': len(ticks)})
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to load game: {e}", exc_info=True)
+                return False
+
     # ========================================================================
     # PLAYBACK CONTROL
     # ========================================================================
@@ -261,6 +297,26 @@ class ReplayEngine:
             else:
                 logger.warning(f"Tick {tick_number} not found")
                 return False
+
+        # Display tick outside lock
+        self.display_tick(index)
+        return True
+
+    def set_tick_index(self, index: int) -> bool:
+        """
+        Set current tick by index (for testing)
+
+        Args:
+            index: Target tick index
+
+        Returns:
+            True if set successfully
+        """
+        if not self.ticks or index < 0 or index >= len(self.ticks):
+            return False
+
+        with self._lock:
+            self.current_index = index
 
         # Display tick outside lock
         self.display_tick(index)

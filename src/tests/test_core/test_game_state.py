@@ -84,7 +84,18 @@ class TestGameStatePositionManagement:
 
         history = game_state.get_position_history()
         assert len(history) == 1
-        assert history[0] == sample_position
+        # Check entry fields match
+        closed_pos = history[0]
+        assert closed_pos.entry_price == sample_position.entry_price
+        assert closed_pos.amount == sample_position.amount
+        assert closed_pos.entry_time == sample_position.entry_time
+        assert closed_pos.entry_tick == sample_position.entry_tick
+        # Check exit fields are populated
+        assert closed_pos.status == 'closed'
+        assert closed_pos.exit_price == Decimal('1.5')
+        assert closed_pos.exit_tick == 10
+        assert closed_pos.pnl_sol == Decimal('0.005')
+        assert closed_pos.pnl_percent == Decimal('50.0')
 
     def test_multiple_positions_sequential(self, game_state):
         """Test opening multiple positions sequentially"""

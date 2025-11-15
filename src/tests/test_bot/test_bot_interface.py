@@ -72,7 +72,8 @@ class TestBotInterfaceObservation:
         assert obs['position'] is not None
         assert 'entry_price' in obs['position']
         assert 'amount' in obs['position']
-        assert 'unrealized_pnl' in obs['position']
+        assert 'current_pnl_sol' in obs['position']
+        assert 'current_pnl_percent' in obs['position']
 
     def test_observation_sidebet_none_initially(self, loaded_game_state, bot_interface):
         """Test observation sidebet is None when no sidebet"""

@@ -51,7 +51,7 @@ class TradeManager:
             return self._error_result("No active game", "BUY")
 
         # Validate
-        is_valid, error = validate_buy(amount, self.state.balance, tick)
+        is_valid, error = validate_buy(amount, self.state.balance, tick, self.state.has_active_position())
         if not is_valid:
             return self._error_result(error, "BUY")
 
@@ -190,7 +190,7 @@ class TradeManager:
         logger.info(f"SIDEBET: {amount} SOL at tick {tick.tick} (potential win: {potential_win} SOL)")
 
         return self._success_result(
-            action='SIDEBET',
+            action='SIDE',
             amount=amount,
             price=tick.price,
             tick=tick,

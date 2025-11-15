@@ -178,13 +178,13 @@ class GameState:
         with self._lock:
             old_balance = self._state['balance']
             new_balance = old_balance + amount
-            
+
             if new_balance < 0:
                 logger.warning(f"Balance would go negative: {new_balance}")
                 return False
-            
+
             self._state['balance'] = new_balance
-            
+
             # Log transaction
             self._transaction_log.append({
                 'timestamp': datetime.now(),
@@ -194,23 +194,26 @@ class GameState:
                 'new_balance': new_balance,
                 'reason': reason
             })
-            
+
             # Update statistics
+            # Track session P&L (cumulative balance changes)
+            self._stats['total_pnl'] += amount
+
             if new_balance > self._stats['peak_balance']:
                 self._stats['peak_balance'] = new_balance
-            
+
             if self._stats['peak_balance'] > 0:
                 drawdown = (self._stats['peak_balance'] - new_balance) / self._stats['peak_balance']
                 if drawdown > self._stats['max_drawdown']:
                     self._stats['max_drawdown'] = drawdown
-            
+
             # Notify observers
             self._emit(StateEvents.BALANCE_CHANGED, {
                 'old': old_balance,
                 'new': new_balance,
                 'amount': amount
             })
-            
+
             logger.info(f"Balance updated: {old_balance} -> {new_balance} ({reason})")
             return True
     
@@ -225,10 +228,12 @@ class GameState:
                 new_entry_price = position_data.entry_price
                 new_amount = position_data.amount
                 new_entry_tick = position_data.entry_tick
+                new_entry_time = position_data.entry_time  # Preserve from Position object
             else:
                 new_entry_price = position_data['entry_price']
                 new_amount = position_data['amount']
                 new_entry_tick = position_data.get('entry_tick', 0)
+                new_entry_time = position_data.get('entry_time', time.time())
 
             # Check if we have enough balance for this purchase
             cost = new_amount * new_entry_price
@@ -258,7 +263,7 @@ class GameState:
                 position_dict = {
                     'entry_price': new_entry_price,
                     'amount': new_amount,
-                    'entry_time': time.time(),
+                    'entry_time': new_entry_time,
                     'entry_tick': new_entry_tick,
                     'status': 'active'
                 }
@@ -351,12 +356,15 @@ class GameState:
             self._emit(StateEvents.SIDEBET_PLACED, sidebet)
             return True
     
-    def resolve_sidebet(self, won: bool, tick: int) -> Optional[Dict]:
+    def resolve_sidebet(self, won: bool, tick: Optional[int] = None) -> Optional[Dict]:
         """Resolve the active sidebet"""
         with self._lock:
             sidebet = self._state['sidebet']
             if not sidebet or sidebet.get('status') != 'active':
                 return None
+
+            if tick is None:
+                tick = self._state.get('current_tick', 0)
 
             sidebet['status'] = 'won' if won else 'lost'
             sidebet['resolved_tick'] = tick
@@ -640,10 +648,26 @@ class GameState:
             # Track this in state if needed
             return self._state.get('last_sidebet_resolved_tick')
 
-    def get_position_history(self) -> List[Dict]:
-        """Get history of closed positions (compatibility method)"""
+    def get_position_history(self) -> List:
+        """Get history of closed positions (returns Position objects)"""
         with self._lock:
+            from models import Position
             # Track closed positions separately for backwards compatibility
             if not hasattr(self, '_closed_positions'):
                 self._closed_positions = []
-            return self._closed_positions.copy()
+            # Convert dicts to Position objects
+            return [
+                Position(
+                    entry_price=p['entry_price'],
+                    amount=p['amount'],
+                    entry_time=p['entry_time'],
+                    entry_tick=p['entry_tick'],
+                    status=p.get('status', 'active'),
+                    exit_price=p.get('exit_price'),
+                    exit_time=p.get('exit_time'),
+                    exit_tick=p.get('exit_tick'),
+                    pnl_sol=p.get('pnl_sol'),
+                    pnl_percent=p.get('pnl_percent')
+                )
+                for p in self._closed_positions
+            ]

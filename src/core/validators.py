@@ -37,7 +37,7 @@ def validate_bet_amount(
     """
     # AUDIT FIX: Check for negative or zero amounts
     if amount <= 0:
-        return False, f"{action} amount must be positive (got {amount})"
+        return False, f"{action} amount {amount} below minimum (must be positive)"
 
     # AUDIT FIX: Check for extreme values (prevent overflow)
     if amount > Decimal('1000000'):
@@ -96,7 +96,8 @@ def validate_trading_allowed(
 def validate_buy(
     amount: Decimal,
     balance: Decimal,
-    tick: GameTick
+    tick: GameTick,
+    has_position: bool = False
 ) -> Tuple[bool, Optional[str]]:
     """
     Validate BUY action
@@ -105,10 +106,15 @@ def validate_buy(
         amount: Amount to buy
         balance: Current balance
         tick: Current game tick
+        has_position: Whether player has an active position
 
     Returns:
         Tuple of (is_valid, error_message)
     """
+    # Check for active position
+    if has_position:
+        return False, "Cannot buy: position already active"
+
     # Check trading allowed
     is_valid, error = validate_trading_allowed(tick, "BUY")
     if not is_valid:

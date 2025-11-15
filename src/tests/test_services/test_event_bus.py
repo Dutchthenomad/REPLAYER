@@ -3,6 +3,7 @@ Tests for EventBus
 """
 
 import pytest
+import time
 from services import event_bus, Events
 from services.event_bus import EventBus
 
@@ -14,14 +15,17 @@ class TestEventBusSubscription:
         """Test subscribing to an event"""
         received_events = []
 
-        def handler(data):
-            received_events.append(data)
+        def handler(event_dict):
+            received_events.append(event_dict['data'])
 
         event_bus.subscribe(Events.TRADE_BUY, handler)
 
-        # Event should be in subscribers
-        assert Events.TRADE_BUY in event_bus._subscribers
-        assert handler in event_bus._subscribers[Events.TRADE_BUY]
+        # Test functional behavior: handler should be called when event published
+        event_bus.publish(Events.TRADE_BUY, {'test': 'data'})
+        time.sleep(0.1)  # Wait for async processing
+
+        assert len(received_events) == 1
+        assert received_events[0]['test'] == 'data'
 
     def test_unsubscribe_from_event(self):
         """Test unsubscribing from an event"""
@@ -33,25 +37,28 @@ class TestEventBusSubscription:
         event_bus.subscribe(Events.TRADE_BUY, handler)
         event_bus.unsubscribe(Events.TRADE_BUY, handler)
 
-        # Handler should be removed
-        if Events.TRADE_BUY in event_bus._subscribers:
-            assert handler not in event_bus._subscribers[Events.TRADE_BUY]
+        # Test functional behavior: handler should NOT be called after unsubscribe
+        event_bus.publish(Events.TRADE_BUY, {'test': 'data'})
+        time.sleep(0.1)  # Wait for async processing
+
+        assert len(received_events) == 0
 
     def test_multiple_handlers_same_event(self):
         """Test multiple handlers for same event"""
         received_1 = []
         received_2 = []
 
-        def handler1(data):
-            received_1.append(data)
+        def handler1(event_dict):
+            received_1.append(event_dict['data'])
 
-        def handler2(data):
-            received_2.append(data)
+        def handler2(event_dict):
+            received_2.append(event_dict['data'])
 
         event_bus.subscribe(Events.TRADE_BUY, handler1)
         event_bus.subscribe(Events.TRADE_BUY, handler2)
 
         event_bus.publish(Events.TRADE_BUY, {'test': 'data'})
+        time.sleep(0.1)  # Wait for async processing
 
         assert len(received_1) == 1
         assert len(received_2) == 1
@@ -64,11 +71,12 @@ class TestEventBusPublishing:
         """Test publishing an event"""
         received_events = []
 
-        def handler(data):
-            received_events.append(data)
+        def handler(event_dict):
+            received_events.append(event_dict['data'])
 
         event_bus.subscribe(Events.TRADE_BUY, handler)
         event_bus.publish(Events.TRADE_BUY, {'test': 'data'})
+        time.sleep(0.1)  # Wait for async processing
 
         assert len(received_events) == 1
         assert received_events[0]['test'] == 'data'
@@ -82,14 +90,15 @@ class TestEventBusPublishing:
         """Test publishing multiple events"""
         received_events = []
 
-        def handler(data):
-            received_events.append(data)
+        def handler(event_dict):
+            received_events.append(event_dict['data'])
 
         event_bus.subscribe(Events.TRADE_BUY, handler)
 
         event_bus.publish(Events.TRADE_BUY, {'event': 1})
         event_bus.publish(Events.TRADE_BUY, {'event': 2})
         event_bus.publish(Events.TRADE_BUY, {'event': 3})
+        time.sleep(0.2)  # Wait for async processing
 
         assert len(received_events) == 3
         assert received_events[0]['event'] == 1
@@ -101,17 +110,18 @@ class TestEventBusPublishing:
         buy_events = []
         sell_events = []
 
-        def buy_handler(data):
-            buy_events.append(data)
+        def buy_handler(event_dict):
+            buy_events.append(event_dict['data'])
 
-        def sell_handler(data):
-            sell_events.append(data)
+        def sell_handler(event_dict):
+            sell_events.append(event_dict['data'])
 
         event_bus.subscribe(Events.TRADE_BUY, buy_handler)
         event_bus.subscribe(Events.TRADE_SELL, sell_handler)
 
         event_bus.publish(Events.TRADE_BUY, {'type': 'buy'})
         event_bus.publish(Events.TRADE_SELL, {'type': 'sell'})
+        time.sleep(0.2)  # Wait for async processing
 
         assert len(buy_events) == 1
         assert len(sell_events) == 1
@@ -184,6 +194,7 @@ class TestEventBusErrorHandling:
 
         # Should not raise, and good handler should still receive event
         event_bus.publish(Events.TRADE_BUY, {'test': 'data'})
+        time.sleep(0.1)  # Wait for async processing
 
         # Good handler should have received the event
         assert len(received) == 1
