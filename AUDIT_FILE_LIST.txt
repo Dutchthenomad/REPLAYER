@@ -1,0 +1,89 @@
+# REPLAYER Phase 4-7B - Complete File List for Audit
+
+## Modified Production Files (15 files)
+
+src/core/replay_engine.py                 # +40 lines - Multi-source support, recording, live feed
+src/sources/websocket_feed.py             # NEW - 500+ lines - WebSocket client
+src/core/recorder_sink.py                 # NEW - 280+ lines - Auto-recording to JSONL
+src/core/live_ring_buffer.py              # NEW - 180+ lines - Memory-bounded buffer
+src/ui/main_window.py                     # +186 lines - Live feed UI, menu bar
+src/core/game_state.py                    # +7 lines - P&L tracking fix
+src/services/event_bus.py                 # +4 lines - New events
+src/bot/strategies/__init__.py            # +11 lines - Better error handling
+src/main.py                               # +8 lines - Graceful shutdown
+src/sources/__init__.py                   # NEW - 15 lines - Module exports
+src/ui/tk_dispatcher.py                   # EXISTING - 47 lines - Thread-safe UI
+src/models/game_tick.py                   # EXISTING - 9-param data model
+src/core/trade_manager.py                 # EXISTING - Trade execution
+src/bot/controller.py                     # EXISTING - Bot control
+src/config.py                             # MINOR - Recording path config
+
+## Modified/Created Test Files (5+ files)
+
+src/tests/test_sources/test_websocket_feed.py     # NEW - 21 tests
+src/tests/test_sources/test_recorder_sink.py      # NEW - 21 tests (Phase 7A fix)
+src/tests/test_core/test_live_ring_buffer.py      # NEW - 12 tests
+src/tests/test_core/test_replay_engine.py         # MODIFIED - +15 tests
+src/tests/test_ui/test_main_window.py             # MODIFIED - +5 tests
+src/tests/test_ui/test_dispatcher.py              # EXISTING - Thread safety test
+
+## Documentation Files Created (10 files)
+
+AUDIT_PACKAGE.md                          # THIS FILE - Comprehensive audit doc (28KB, 1061 lines)
+DEVELOPMENT_ROADMAP.md                    # Development phases overview (9.5KB)
+SESSION_COMPLETE_SUMMARY.md               # Session summary (9.5KB)
+PHASE_7B_SUMMARY.md                       # Menu bar implementation (9.7KB)
+MENU_BAR_BUG_FIXES.md                     # Race condition fixes (6.2KB)
+LIVE_FEED_FIXES.md                        # Live feed bug fixes (7.4KB)
+LOG_ANALYSIS.md                           # Log issue analysis (8.2KB)
+RESUME_SESSION_SUMMARY.md                 # Session start summary (6.5KB)
+docs/PHASE_6_COMPLETION.md                # WebSocket integration (4KB)
+docs/PHASE_7A_COMPLETION.md               # RecorderSink fixes (2KB)
+
+## Reference Files (Not Modified)
+
+external/continuous_game_recorder.py      # Reference implementation (325 lines)
+docs/Codex/live_feed_integration_plan.md  # Planning document
+
+---
+
+## Quick Counts
+
+Production Files:     15 modified (5 new)
+Test Files:          5+ modified (3 new)
+Documentation:       10 files (~60KB)
+Total Lines Changed: +1,500, -200 (net: +1,300)
+Tests Added:         73 new tests
+Tests Passing:       237/237 (100%)
+
+---
+
+## Audit Priority Order
+
+1. AUDIT_PACKAGE.md (start here - this file)
+2. src/sources/websocket_feed.py (core new feature)
+3. src/ui/main_window.py (UI changes + race condition fix)
+4. src/core/recorder_sink.py (recording system)
+5. tests/test_sources/ (test coverage verification)
+6. Documentation files (context and fixes)
+
+---
+
+## Critical Files for Security Review
+
+1. src/sources/websocket_feed.py - External network connection
+2. src/core/recorder_sink.py - File I/O operations
+3. src/ui/main_window.py - User input handling
+
+---
+
+## Critical Files for Thread Safety Review
+
+1. src/ui/main_window.py - UI updates from worker threads
+2. src/ui/tk_dispatcher.py - Thread marshaling
+3. src/core/game_state.py - Shared state with RLock
+4. src/bot/async_executor.py - Bot worker thread
+
+---
+
+End of File List

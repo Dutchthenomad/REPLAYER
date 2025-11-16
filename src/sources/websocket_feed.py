@@ -133,7 +133,7 @@ class GameStateMachine:
             'RUG_EVENT_1': ['RUG_EVENT_2'],
             'RUG_EVENT_2': ['COOLDOWN'],
             'COOLDOWN': ['PRESALE'],
-            'PRESALE': ['PRESALE', 'GAME_ACTIVATION'],
+            'PRESALE': ['PRESALE', 'GAME_ACTIVATION', 'ACTIVE_GAMEPLAY'],  # FIX: Allow direct PRESALE → ACTIVE_GAMEPLAY
             'UNKNOWN': ['GAME_ACTIVATION', 'ACTIVE_GAMEPLAY', 'PRESALE', 'COOLDOWN']
         }
 
@@ -344,8 +344,8 @@ class WebSocketFeed:
                 'timestamp': signal.timestamp
             })
 
-        # Detect game completion
-        if signal.phase in ['RUG_EVENT_1', 'RUG_EVENT_2']:
+        # Detect game completion (AUDIT FIX: only emit on RUG_EVENT_1 to prevent duplicates)
+        if signal.phase == 'RUG_EVENT_1':
             self._handle_game_complete(signal)
 
     def _handle_game_complete(self, signal: GameSignal):

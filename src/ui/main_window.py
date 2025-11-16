@@ -75,9 +75,71 @@ class MainWindow:
         self._check_bot_results()
 
         logger.info("MainWindow initialized with ReplayEngine and async bot executor")
-    
+
+    def _create_menu_bar(self):
+        """Create menu bar for additional functionality"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # File Menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Open Recording...", command=self.load_file_dialog)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+
+        # Playback Menu
+        playback_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Playback", menu=playback_menu)
+        playback_menu.add_command(label="Play/Pause", command=self.toggle_play_pause)
+        playback_menu.add_command(label="Stop", command=self.reset_game)
+
+        # Recording Menu
+        recording_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Recording", menu=recording_menu)
+
+        # Recording toggle - tracks replay_engine.auto_recording state
+        self.recording_var = tk.BooleanVar(value=self.replay_engine.auto_recording)
+        recording_menu.add_checkbutton(
+            label="Enable Recording",
+            variable=self.recording_var,
+            command=self._toggle_recording
+        )
+        recording_menu.add_separator()
+        recording_menu.add_command(label="Open Recordings Folder", command=self._open_recordings_folder)
+
+        # Bot Menu
+        bot_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Bot", menu=bot_menu)
+
+        self.bot_var = tk.BooleanVar(value=self.bot_enabled)
+        bot_menu.add_checkbutton(
+            label="Enable Bot",
+            variable=self.bot_var,
+            command=self._toggle_bot_from_menu
+        )
+
+        # Live Feed Menu
+        live_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Live Feed", menu=live_menu)
+
+        self.live_feed_var = tk.BooleanVar(value=self.live_feed_connected)
+        live_menu.add_checkbutton(
+            label="Connect to Live Feed",
+            variable=self.live_feed_var,
+            command=self._toggle_live_feed_from_menu
+        )
+
+        # Help Menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self._show_about)
+
     def _create_ui(self):
         """Create UI matching the user's mockup design"""
+        # Create menu bar first
+        self._create_menu_bar()
+
         # ========== ROW 1: STATUS BAR (minimal height) ==========
         status_bar = tk.Frame(self.root, bg='#000000', height=30)
         status_bar.pack(fill=tk.X)
@@ -456,6 +518,9 @@ class MainWindow:
 
         try:
             self.log("Connecting to live feed...")
+            # Show connecting toast for user feedback
+            if self.toast:
+                self.toast.show("Connecting to live feed...", "info")
 
             # Create WebSocketFeed
             self.live_feed = WebSocketFeed(log_level='WARN')
@@ -484,8 +549,19 @@ class MainWindow:
             def on_connected(info):
                 # Marshal to Tkinter main thread
                 def handle_connected():
+                    socket_id = info.get('socketId')
+
+                    # Skip first connection event (Socket ID not yet assigned)
+                    # Socket.IO fires 'connect' twice during handshake - ignore the first one
+                    if socket_id is None:
+                        self.log("🔌 Connection negotiating...")
+                        return
+
+                    # Only process when Socket ID is available (actual connection established)
                     self.live_feed_connected = True
-                    self.log(f"✅ Live feed connected (Socket ID: {info.get('socketId', 'N/A')})")
+                    # Sync menu checkbox state (connection succeeded)
+                    self.live_feed_var.set(True)
+                    self.log(f"✅ Live feed connected (Socket ID: {socket_id})")
                     if self.toast:
                         self.toast.show("Live feed connected", "success")
                     # Update status label if it exists
@@ -499,6 +575,8 @@ class MainWindow:
                 # Marshal to Tkinter main thread
                 def handle_disconnected():
                     self.live_feed_connected = False
+                    # Sync menu checkbox state (disconnected)
+                    self.live_feed_var.set(False)
                     self.log("❌ Live feed disconnected")
                     if self.toast:
                         self.toast.show("Live feed disconnected", "error")
@@ -522,9 +600,12 @@ class MainWindow:
         except Exception as e:
             logger.error(f"Failed to enable live feed: {e}", exc_info=True)
             self.log(f"Failed to connect to live feed: {e}")
-            self.toast.show(f"Live feed error: {e}", "error")
+            if self.toast:
+                self.toast.show(f"Live feed error: {e}", "error")
             self.live_feed = None
             self.live_feed_connected = False
+            # Sync menu checkbox state (connection failed)
+            self.live_feed_var.set(False)
 
     def disable_live_feed(self):
         """Disable WebSocket live feed"""
@@ -1041,6 +1122,105 @@ GAME RULES:
 • All positions are lost when rug occurs
 """
         messagebox.showinfo("Help - Keyboard Shortcuts", help_text)
+
+    # ========================================================================
+    # MENU BAR CALLBACKS
+    # ========================================================================
+
+    def load_file_dialog(self):
+        """Alias for load_game() - used by menu bar"""
+        self.load_game()
+
+    def toggle_play_pause(self):
+        """Alias for toggle_playback() - used by menu bar"""
+        self.toggle_playback()
+
+    def _toggle_recording(self):
+        """Toggle recording on/off from menu"""
+        if self.replay_engine.auto_recording:
+            self.replay_engine.disable_recording()
+            self.recording_var.set(False)
+            self.log("Recording disabled")
+            if self.toast:
+                self.toast.show("Recording disabled", "info")
+        else:
+            self.replay_engine.enable_recording()
+            self.recording_var.set(True)
+            self.log("Recording enabled")
+            if self.toast:
+                self.toast.show("Recording enabled", "success")
+
+    def _open_recordings_folder(self):
+        """Open recordings folder in system file manager"""
+        import subprocess
+        import platform
+
+        recordings_dir = self.config.FILES['recordings_dir']
+
+        try:
+            system = platform.system()
+            if system == 'Linux':
+                # Try xdg-open first (most Linux distros)
+                subprocess.run(['xdg-open', str(recordings_dir)], check=True)
+            elif system == 'Darwin':  # macOS
+                subprocess.run(['open', str(recordings_dir)], check=True)
+            elif system == 'Windows':
+                subprocess.run(['explorer', str(recordings_dir)], check=True)
+            else:
+                raise OSError(f"Unsupported platform: {system}")
+
+            self.log(f"Opened recordings folder: {recordings_dir}")
+        except Exception as e:
+            logger.error(f"Failed to open recordings folder: {e}", exc_info=True)
+            self.log(f"Failed to open recordings folder: {e}")
+            if self.toast:
+                self.toast.show(f"Error opening folder: {e}", "error")
+
+    def _toggle_bot_from_menu(self):
+        """Toggle bot enable/disable from menu (syncs with button)"""
+        self.toggle_bot()
+        # Sync menu checkbutton state with actual bot state
+        self.bot_var.set(self.bot_enabled)
+
+    def _toggle_live_feed_from_menu(self):
+        """Toggle live feed connection from menu (syncs with actual state)"""
+        self.toggle_live_feed()
+        # Checkbox will be synced in event handlers (connected/disconnected)
+        # Don't sync here - connection is async and takes 100-2000ms!
+
+    def _show_about(self):
+        """Show about dialog with application information"""
+        about_text = """
+REPLAYER - Rugs.fun Game Replay & Analysis System
+Version: 2.0 (Phase 7B - Menu Bar)
+
+A professional replay viewer and empirical analysis engine for
+Rugs.fun trading game recordings.
+
+Features:
+• Interactive replay with speed control
+• Trading bot automation (Conservative, Aggressive, Sidebet)
+• Real-time WebSocket live feed integration
+• Multi-game session support
+• Position & P&L tracking
+• Empirical analysis for RL training
+
+Architecture:
+• Event-driven modular design
+• Thread-safe state management
+• 141 test suite coverage
+• Symlinked ML predictor integration
+
+Part of the Rugs.fun quantitative trading ecosystem:
+• CV-BOILER-PLATE-FORK: YOLOv8 live detection
+• rugs-rl-bot: Reinforcement learning trading bot
+• REPLAYER: Replay viewer & analysis engine
+
+Keyboard Shortcuts: Press 'H' for help
+
+© 2025 REPLAYER Project
+"""
+        messagebox.showinfo("About REPLAYER", about_text)
 
     def shutdown(self):
         """Cleanup dispatcher resources during application shutdown."""

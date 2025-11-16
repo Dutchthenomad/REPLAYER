@@ -302,11 +302,10 @@ class GameState:
             position['pnl_sol'] = pnl
             position['pnl_percent'] = pnl_percent
             
-            # Update balance
+            # Update balance (P&L automatically tracked via update_balance)
             self.update_balance(exit_value, f"Position closed at {exit_price}")
-            
-            # Update statistics
-            self._stats['total_pnl'] += pnl
+
+            # Update statistics (AUDIT FIX: removed duplicate total_pnl update - already tracked in update_balance)
             if pnl > 0:
                 self._stats['winning_trades'] += 1
             else:

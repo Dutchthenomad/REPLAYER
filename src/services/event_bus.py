@@ -48,7 +48,11 @@ class Events(Enum):
     REPLAY_START = "replay.start"
     REPLAY_PAUSE = "replay.pause"
     REPLAY_STOP = "replay.stop"
+    REPLAY_RESET = "replay.reset"
     REPLAY_SPEED_CHANGED = "replay.speed_changed"
+    REPLAY_STARTED = "replay.started"  # Alias for REPLAY_START
+    REPLAY_PAUSED = "replay.paused"    # Alias for REPLAY_PAUSE
+    REPLAY_STOPPED = "replay.stopped"  # Alias for REPLAY_STOP
 
 class EventBus:
     """

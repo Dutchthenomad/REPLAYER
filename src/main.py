@@ -93,11 +93,13 @@ class Application:
     
     def _handle_ui_error(self, event):
         """Handle UI errors"""
-        self.logger.error(f"UI Error: {event.data}")
-    
+        data = event.get('data', {})
+        self.logger.error(f"UI Error: {data}")
+
     def _handle_game_start(self, event):
         """Handle game start event"""
-        self.logger.info(f"Game started: {event.data}")
+        data = event.get('data', {})
+        self.logger.info(f"Game started: {data}")
     
     def _handle_game_end(self, event):
         """Handle game end event"""

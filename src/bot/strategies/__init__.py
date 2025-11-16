@@ -23,11 +23,18 @@ def get_strategy(name: str) -> TradingStrategy:
         name: Strategy name (conservative, aggressive, sidebet)
 
     Returns:
-        Strategy instance or None if not found
+        Strategy instance
+
+    Raises:
+        ValueError: If strategy name is invalid
     """
     name = name.lower()
     if name not in STRATEGIES:
-        return None
+        valid_strategies = ', '.join(STRATEGIES.keys())
+        raise ValueError(
+            f"Invalid strategy '{name}'. "
+            f"Valid strategies: {valid_strategies}"
+        )
 
     return STRATEGIES[name]()
 

@@ -219,9 +219,12 @@ class ReplayEngine:
                 self.file_mode_ticks = ticks
                 self.game_id = game_id
                 self.current_index = 0
-                
+
                 # Clear live buffers
                 self.live_ring_buffer.clear()
+
+                # AUDIT FIX: Reset state to prevent contamination between test runs
+                self.state.reset()
 
                 # Initialize game state
                 if ticks:
@@ -394,9 +397,13 @@ class ReplayEngine:
 
             self.is_playing = False
 
-        # Wait for playback thread outside lock
+        # AUDIT FIX: Only join thread if NOT called from within the thread itself
+        # (prevents deadlock when auto-play reaches end of game)
+        current_thread = threading.current_thread()
         if self.playback_thread and self.playback_thread.is_alive():
-            self.playback_thread.join(timeout=2.0)
+            if current_thread != self.playback_thread:
+                self.playback_thread.join(timeout=2.0)
+            # else: We're in the playback thread - don't join, just return
 
         event_bus.publish(Events.REPLAY_PAUSED, {'game_id': self.game_id})
         logger.info("Playback paused")
@@ -415,6 +422,33 @@ class ReplayEngine:
 
         event_bus.publish(Events.REPLAY_STOPPED, {'game_id': self.game_id})
         logger.info("Playback stopped")
+
+    def reset(self):
+        """Reset game to initial state (stop playback, reset state, go to beginning)"""
+        # Stop playback
+        self.pause()
+
+        with self._acquire_lock():
+            self.current_index = 0
+
+        # Reset game state
+        self.state.reset()
+
+        # Update state with first tick if available
+        if self.ticks:
+            first_tick = self.ticks[0]
+            self.state.update(
+                game_id=self.game_id,
+                current_tick=first_tick.tick,
+                current_price=first_tick.price,
+                current_phase=first_tick.phase,
+                game_active=first_tick.active,
+                rugged=first_tick.rugged
+            )
+            self.display_tick(0)
+
+        event_bus.publish(Events.REPLAY_RESET, {'game_id': self.game_id})
+        logger.info("Game reset to initial state")
 
     def step_forward(self) -> bool:
         """Step forward one tick"""
