@@ -130,10 +130,14 @@ class TestRecorderSinkTickRecording:
             recorder.start_recording(sample_tick.game_id)
             recorder.record_tick(sample_tick)
 
-            # Read back the recorded file (skip metadata header)
-            with open(recorder.current_file, 'r') as f:
+            # Save file path before stopping (stop_recording() sets current_file to None)
+            filepath = recorder.current_file
+            recorder.stop_recording()  # Ensure buffer is flushed
+
+            # Read back the recorded file (skip metadata header and end metadata)
+            with open(filepath, 'r') as f:
                 lines = f.readlines()
-                # First line is metadata header, second line is actual tick
+                # Line 0: start metadata, Line 1: tick, Line 2: end metadata
                 assert len(lines) >= 2
                 tick_line = lines[1].strip()
                 data = json.loads(tick_line)
