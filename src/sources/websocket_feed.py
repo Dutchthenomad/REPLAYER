@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import logging
 from decimal import Decimal
+from collections import deque  # AUDIT FIX: For efficient latency tracking
 
 # REPLAYER imports
 from models import GameTick
@@ -42,7 +43,7 @@ class GameSignal:
 
     # Game progress
     tickCount: int
-    price: float
+    price: Decimal  # AUDIT FIX: Use Decimal for financial precision
 
     # Timing
     cooldownTimer: int
@@ -213,9 +214,10 @@ class WebSocketFeed:
             'total_ticks': 0,
             'total_games': 0,
             'noise_filtered': 0,
-            'latencies': [],
+            'latencies': deque(maxlen=100),  # AUDIT FIX: O(1) operations, auto-evicts oldest
             'phase_transitions': 0,
-            'anomalies': 0
+            'anomalies': 0,
+            'errors': 0  # AUDIT FIX: Track callback errors
         }
 
         # State
@@ -241,32 +243,60 @@ class WebSocketFeed:
 
         @self.sio.event
         def connect():
-            self.is_connected = True
-            self.logger.info('✅ Connected to Rugs.fun backend')
-            self.logger.info(f'   Socket ID: {self.sio.sid}')
-            self._emit_event('connected', {'socketId': self.sio.sid})
+            # AUDIT FIX: Error boundary for connection handler
+            try:
+                self.is_connected = True
+                self.logger.info('✅ Connected to Rugs.fun backend')
+                self.logger.info(f'   Socket ID: {self.sio.sid}')
+                self._emit_event('connected', {'socketId': self.sio.sid})
+            except Exception as e:
+                self.logger.error(f"Error in connect handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
 
         @self.sio.event
         def disconnect():
-            self.is_connected = False
-            self.logger.warning('❌ Disconnected from backend')
-            self._emit_event('disconnected', {})
+            # AUDIT FIX: Error boundary for disconnect handler
+            try:
+                self.is_connected = False
+                self.logger.warning('❌ Disconnected from backend')
+                self._emit_event('disconnected', {})
+                # AUDIT FIX: Clear handlers on disconnect to prevent memory leaks
+                # Note: Don't clear Socket.IO internal handlers, only our custom handlers
+                # self.clear_handlers()  # Commented out - handlers are intentionally persistent
+            except Exception as e:
+                self.logger.error(f"Error in disconnect handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
 
         @self.sio.event
         def connect_error(data):
-            self.logger.error(f'🚨 Connection error: {data}')
-            self._emit_event('error', {'message': str(data)})
+            # AUDIT FIX: Error boundary for connect_error handler
+            try:
+                self.logger.error(f'🚨 Connection error: {data}')
+                self._emit_event('error', {'message': str(data)})
+            except Exception as e:
+                self.logger.error(f"Error in connect_error handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
 
         @self.sio.on('gameStateUpdate')
         def on_game_state_update(data):
-            self._handle_game_state_update(data)
+            # AUDIT FIX: Critical error boundary - prevents connection death
+            try:
+                self._handle_game_state_update(data)
+            except Exception as e:
+                self.logger.error(f"Error handling game state update: {e}", exc_info=True)
+                self.metrics['errors'] += 1
 
         # Catch-all for noise tracking
         @self.sio.on('*')
         def catch_all(event, *args):
-            if event != 'gameStateUpdate':
-                self.metrics['noise_filtered'] += 1
-                self.logger.debug(f'❌ NOISE filtered: {event}')
+            # AUDIT FIX: Error boundary for catch-all handler
+            try:
+                if event != 'gameStateUpdate':
+                    self.metrics['noise_filtered'] += 1
+                    self.logger.debug(f'❌ NOISE filtered: {event}')
+            except Exception as e:
+                self.logger.error(f"Error in catch_all handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
 
     def _handle_game_state_update(self, raw_data: Dict[str, Any]):
         """Handle gameStateUpdate event - PRIMARY SIGNAL SOURCE"""
@@ -275,10 +305,8 @@ class WebSocketFeed:
         # Calculate tick interval
         if self.last_tick_time:
             tick_interval = receive_time - self.last_tick_time
+            # AUDIT FIX: deque auto-evicts oldest when maxlen exceeded (O(1) operation)
             self.metrics['latencies'].append(tick_interval)
-            # Keep only last 100 samples
-            if len(self.metrics['latencies']) > 100:
-                self.metrics['latencies'].pop(0)
         self.last_tick_time = receive_time
 
         # Extract signal (9 fields only)
@@ -315,12 +343,16 @@ class WebSocketFeed:
 
     def _extract_signal(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         """Extract ONLY the 9 signal fields from raw gameStateUpdate"""
+        # AUDIT FIX: Convert price to Decimal for financial precision
+        raw_price = raw_data.get('price', 1.0)
+        price = Decimal(str(raw_price)) if raw_price is not None else Decimal('1.0')
+
         return {
             'gameId': raw_data.get('gameId', ''),
             'active': raw_data.get('active', False),
             'rugged': raw_data.get('rugged', False),
             'tickCount': raw_data.get('tickCount', 0),
-            'price': raw_data.get('price', 1.0),
+            'price': price,  # AUDIT FIX: Now Decimal, not float
             'cooldownTimer': raw_data.get('cooldownTimer', 0),
             'allowPreRoundBuys': raw_data.get('allowPreRoundBuys', False),
             'tradeCount': raw_data.get('tradeCount', 0),
@@ -411,6 +443,40 @@ class WebSocketFeed:
         else:
             return decorator(handler)
 
+    def remove_handler(self, event_name: str, handler: Callable):
+        """
+        Remove a specific event handler (AUDIT FIX: Prevent memory leaks)
+
+        Args:
+            event_name: Event to remove handler from
+            handler: Handler function to remove
+        """
+        if event_name in self.event_handlers:
+            try:
+                self.event_handlers[event_name].remove(handler)
+                # Remove empty lists to free memory
+                if not self.event_handlers[event_name]:
+                    del self.event_handlers[event_name]
+            except ValueError:
+                # Handler not found, silently ignore
+                pass
+
+    def clear_handlers(self, event_name: str = None):
+        """
+        Clear event handlers (AUDIT FIX: Prevent memory leaks on reconnect)
+
+        Args:
+            event_name: Specific event to clear, or None to clear all
+        """
+        if event_name:
+            if event_name in self.event_handlers:
+                self.event_handlers[event_name] = []
+                del self.event_handlers[event_name]
+        else:
+            # Clear all handlers
+            self.event_handlers.clear()
+            self.logger.debug("Cleared all event handlers")
+
     def connect(self):
         """Connect to Rugs.fun backend"""
         self.logger.info('🔌 Connecting to Rugs.fun backend...')
@@ -451,7 +517,7 @@ class WebSocketFeed:
             game_id=signal.gameId,
             tick=signal.tickCount,
             timestamp=datetime.fromtimestamp(signal.timestamp / 1000).isoformat(),
-            price=Decimal(str(signal.price)),
+            price=signal.price,  # AUDIT FIX: Already Decimal, no conversion needed
             phase=signal.phase,
             active=signal.active,
             rugged=signal.rugged,

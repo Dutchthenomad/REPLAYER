@@ -253,16 +253,20 @@ class ReplayEngine:
         """
         Push a single tick to the replay engine (for live feeds)
         CRITICAL FIX: Only use ring buffer in live mode, no unbounded list growth
-        
+        AUDIT FIX: Capture index inside lock to prevent race condition
+
         Args:
             tick: GameTick to add
-            
+
         Returns:
             True if tick was added successfully
         """
         if not isinstance(tick, GameTick):
             logger.error(f"Invalid tick type: {type(tick)}")
             return False
+
+        # AUDIT FIX: Capture display index inside lock
+        display_index = None
 
         try:
             with self._acquire_lock():
@@ -272,7 +276,7 @@ class ReplayEngine:
                     self.game_id = tick.game_id
                     self.file_mode_ticks = []  # Clear file mode data
                     self.current_index = 0
-                    
+
                     self.state.reset()
                     self.state.update(
                         game_id=self.game_id,
@@ -350,8 +354,12 @@ class ReplayEngine:
                 # Update current index to latest
                 self.current_index = self.live_ring_buffer.get_size() - 1
 
-            # Display new tick outside lock to prevent deadlock
-            self.display_tick(self.current_index)
+                # AUDIT FIX: Capture index inside lock to prevent race condition
+                display_index = self.current_index
+
+            # AUDIT FIX: Display using captured index (safe - no race condition)
+            if display_index is not None:
+                self.display_tick(display_index)
 
             logger.debug(f"Pushed tick {tick.tick} for game {tick.game_id}")
             return True

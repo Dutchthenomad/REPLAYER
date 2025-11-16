@@ -1136,19 +1136,26 @@ GAME RULES:
         self.toggle_playback()
 
     def _toggle_recording(self):
-        """Toggle recording on/off from menu"""
-        if self.replay_engine.auto_recording:
-            self.replay_engine.disable_recording()
-            self.recording_var.set(False)
-            self.log("Recording disabled")
-            if self.toast:
-                self.toast.show("Recording disabled", "info")
-        else:
-            self.replay_engine.enable_recording()
-            self.recording_var.set(True)
-            self.log("Recording enabled")
-            if self.toast:
-                self.toast.show("Recording enabled", "success")
+        """
+        Toggle recording on/off from menu
+        AUDIT FIX: Ensure all UI updates happen in main thread
+        """
+        def do_toggle():
+            if self.replay_engine.auto_recording:
+                self.replay_engine.disable_recording()
+                self.recording_var.set(False)
+                self.log("Recording disabled")
+                if self.toast:
+                    self.toast.show("Recording disabled", "info")
+            else:
+                self.replay_engine.enable_recording()
+                self.recording_var.set(True)
+                self.log("Recording enabled")
+                if self.toast:
+                    self.toast.show("Recording enabled", "success")
+
+        # AUDIT FIX: Defensive - ensure always runs in main thread
+        self.root.after(0, do_toggle)
 
     def _open_recordings_folder(self):
         """Open recordings folder in system file manager"""
@@ -1177,16 +1184,30 @@ GAME RULES:
                 self.toast.show(f"Error opening folder: {e}", "error")
 
     def _toggle_bot_from_menu(self):
-        """Toggle bot enable/disable from menu (syncs with button)"""
-        self.toggle_bot()
-        # Sync menu checkbutton state with actual bot state
-        self.bot_var.set(self.bot_enabled)
+        """
+        Toggle bot enable/disable from menu (syncs with button)
+        AUDIT FIX: Ensure all UI updates happen in main thread
+        """
+        def do_toggle():
+            self.toggle_bot()
+            # Sync menu checkbutton state with actual bot state
+            self.bot_var.set(self.bot_enabled)
+
+        # AUDIT FIX: Defensive - ensure always runs in main thread
+        self.root.after(0, do_toggle)
 
     def _toggle_live_feed_from_menu(self):
-        """Toggle live feed connection from menu (syncs with actual state)"""
-        self.toggle_live_feed()
-        # Checkbox will be synced in event handlers (connected/disconnected)
-        # Don't sync here - connection is async and takes 100-2000ms!
+        """
+        Toggle live feed connection from menu (syncs with actual state)
+        AUDIT FIX: Ensure all UI updates happen in main thread
+        """
+        def do_toggle():
+            self.toggle_live_feed()
+            # Checkbox will be synced in event handlers (connected/disconnected)
+            # Don't sync here - connection is async and takes 100-2000ms!
+
+        # AUDIT FIX: Defensive - ensure always runs in main thread
+        self.root.after(0, do_toggle)
 
     def _show_about(self):
         """Show about dialog with application information"""

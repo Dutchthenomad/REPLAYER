@@ -37,19 +37,21 @@ class RecorderSink:
     _instances_lock = threading.Lock()
     _active_instances = []
 
-    def __init__(self, recordings_dir: Path, buffer_size: int = 100):
+    def __init__(self, recordings_dir: Path, buffer_size: int = 100, max_buffer_size: int = 1000):
         """
         Initialize recorder with production safeguards
-        
+
         Args:
             recordings_dir: Directory to save recordings
-            buffer_size: Number of ticks to buffer before flush
-            
+            buffer_size: Number of ticks to buffer before flush (normal operation)
+            max_buffer_size: Maximum buffer size before forcing emergency flush (AUDIT FIX)
+
         Raises:
             RecordingError: If directory cannot be created or accessed
         """
         self.recordings_dir = Path(recordings_dir)
         self.buffer_size = max(1, buffer_size)  # Ensure positive buffer size
+        self.max_buffer_size = max(buffer_size, max_buffer_size)  # AUDIT FIX: Backpressure limit
         
         # Validate and create directory
         try:
@@ -188,14 +190,12 @@ class RecorderSink:
             if self.current_file.exists():
                 raise RecordingError("Cannot create unique filename")
 
+            # AUDIT FIX: Use temp handle to prevent file handle leaks
             # Open file for writing with proper encoding
+            temp_handle = None
             try:
-                self.file_handle = open(self.current_file, 'w', encoding='utf-8', buffering=8192)
-                self.buffer = []
-                self.tick_count = 0
-                self.error_count = 0
-                self.total_bytes_written = 0
-                
+                temp_handle = open(self.current_file, 'w', encoding='utf-8', buffering=8192)
+
                 # Write metadata header
                 metadata = {
                     '_metadata': {
@@ -204,13 +204,26 @@ class RecorderSink:
                         'version': '1.0'
                     }
                 }
-                self.file_handle.write(json.dumps(metadata) + '\n')
-                self.file_handle.flush()
-                
+                temp_handle.write(json.dumps(metadata) + '\n')
+                temp_handle.flush()
+
+                # AUDIT FIX: Only assign to self after success
+                self.file_handle = temp_handle
+                temp_handle = None  # Prevent double-close in except block
+
+                # Reset state (only after successful file opening)
+                self.buffer = []
+                self.tick_count = 0
+                self.error_count = 0
+                self.total_bytes_written = 0
+
             except Exception as e:
-                if self.file_handle:
-                    self.file_handle.close()
-                    self.file_handle = None
+                # AUDIT FIX: Clean up temp handle on error
+                if temp_handle:
+                    try:
+                        temp_handle.close()
+                    except:
+                        pass
                 raise RecordingError(f"Failed to start recording: {e}")
 
             logger.info(f"Started recording: {filename}")
@@ -218,18 +231,18 @@ class RecorderSink:
 
     def record_tick(self, tick: GameTick) -> bool:
         """
-        Record a single tick with proper error handling
-        
+        Record a single tick with proper error handling and backpressure
+
         Args:
             tick: GameTick to record
-            
+
         Returns:
             True if recorded successfully
         """
         with self._lock:
             if self._closed:
                 return False
-                
+
             if not self.file_handle:
                 logger.warning("No recording in progress, auto-starting")
                 try:
@@ -238,16 +251,28 @@ class RecorderSink:
                     logger.error(f"Failed to auto-start recording: {e}")
                     return False
 
+            # AUDIT FIX: Check for buffer overflow (backpressure)
+            if len(self.buffer) >= self.max_buffer_size:
+                logger.error(f"Buffer overflow detected ({len(self.buffer)}/{self.max_buffer_size}), forcing emergency flush")
+                try:
+                    with self._safe_file_operation():
+                        self._flush()
+                except Exception as e:
+                    logger.error(f"Emergency flush failed: {e}")
+                    # If emergency flush fails, we're in trouble - stop recording
+                    self.stop_recording()
+                    return False
+
             try:
                 # Convert tick to JSON with Decimal handling
                 tick_dict = self._serialize_tick(tick)
                 tick_json = json.dumps(tick_dict)
-                
+
                 # Validate JSON is not too large (prevent memory issues)
                 if len(tick_json) > 1024 * 1024:  # 1MB per tick limit
                     logger.error(f"Tick JSON too large: {len(tick_json)} bytes")
                     return False
-                
+
                 # Add to buffer
                 self.buffer.append(tick_json)
                 self.tick_count += 1
@@ -258,7 +283,7 @@ class RecorderSink:
                         self._flush()
 
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to record tick: {e}")
                 self.error_count += 1
