@@ -69,3 +69,6 @@ temp/
 
 # ML Models (large binary files - commented to track in git for now)
 # models/*.pkl
+
+# Test recordings (generated during tests)
+src/rugs_recordings/*.jsonl
