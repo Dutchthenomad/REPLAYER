@@ -296,10 +296,42 @@ class ReplayEngine:
                     else:
                         logger.info(f"Started live game: {self.game_id} (recording disabled)")
 
-                # Validate game ID consistency
+                # Detect new game starting (game_id changed) - LIVE FEED MULTI-GAME SUPPORT
                 if tick.game_id != self.game_id:
-                    logger.warning(f"Tick game_id mismatch: expected {self.game_id}, got {tick.game_id}")
-                    return False
+                    logger.info(f"🔄 New game detected: {self.game_id} → {tick.game_id}")
+
+                    # End current game gracefully
+                    self._handle_game_end()
+
+                    # Reset for new game
+                    self.game_id = tick.game_id
+                    self.current_index = 0
+                    self.live_ring_buffer.clear()
+
+                    self.state.reset()
+                    self.state.update(
+                        game_id=self.game_id,
+                        game_active=True,
+                        current_tick=tick.tick,
+                        current_price=tick.price,
+                        current_phase=tick.phase
+                    )
+
+                    event_bus.publish(Events.GAME_START, {
+                        'game_id': self.game_id,
+                        'tick_count': 0,
+                        'live_mode': True
+                    })
+
+                    # Start recording new game
+                    if self.auto_recording:
+                        try:
+                            recording_file = self.recorder_sink.start_recording(self.game_id)
+                            logger.info(f"Started live game: {self.game_id}, recording to {recording_file.name}")
+                        except Exception as e:
+                            logger.error(f"Failed to start recording: {e}")
+                    else:
+                        logger.info(f"Started live game: {self.game_id} (recording disabled)")
 
                 # Add tick to ring buffer ONLY (no unbounded list growth)
                 self.live_ring_buffer.append(tick)
