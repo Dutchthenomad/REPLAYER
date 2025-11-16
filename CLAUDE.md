@@ -2,8 +2,9 @@
 
 **Project**: Dual-Mode Replay/Live Game Viewer & RL Training Environment
 **Location**: `/home/nomad/Desktop/REPLAYER/`
-**Status**: ✅ **Production Ready** - All audit fixes complete, UI fully functional
-**Last Updated**: 2025-11-14
+**Status**: ✅ **Production Ready** - Phase 6 complete, Live Feed working, 237/237 tests passing
+**Last Updated**: 2025-11-15
+**Current Branch**: `feature/menu-bar` (Phase 7B in progress)
 
 ---
 
@@ -18,8 +19,8 @@ cd /home/nomad/Desktop/REPLAYER
 ### Running Tests
 ```bash
 cd src
-RUGS_LOG_DIR=/tmp/rugs_logs python3 -m pytest tests/ -v
-# Total: 148 tests (86 passing, 62 legacy failures expected)
+python3 -m pytest tests/ -v
+# Total: 237 tests - ALL PASSING ✅
 ```
 
 ### Running Analysis Scripts
@@ -32,29 +33,62 @@ python3 analyze_game_durations.py    # Game lifespan analysis
 
 ---
 
-## Current State (2025-11-14)
+## Current State (2025-11-15)
 
 ### ✅ Production Ready
 
-**Phase 3 Complete**: All audit fixes + 4 critical bugs resolved
-- **Status**: Fully functional dual-mode viewer (replay only; live feed = Phase 4+)
+**Phase 6 Complete**: WebSocket Live Feed Integration working flawlessly
+- **Status**: Fully functional dual-mode viewer (replay + live feed) ✅
 - **Bot System**: 3 strategies working (conservative, aggressive, sidebet)
-- **UI**: Thread-safe, real-time updates, no freezes
-- **Tests**: 148 tests (86 core tests passing, 62 legacy tests need alignment)
+- **UI**: Thread-safe, real-time updates, live feed support, no freezes
+- **Tests**: 237/237 tests passing ✅
+- **Live Feed**: Continuous multi-game support, 4.01 signals/sec, 241ms latency
 
-### Recent Fixes (Session 2025-11-14)
+### Recent Completions (Session 2025-11-15)
 
-**4 Critical Bugs Fixed**:
-1. ✅ **GameTick Fallback** - Added missing parameters (game_id, timestamp, cooldown_timer)
-2. ✅ **Deadlock Prevention** - `GameState._emit()` releases lock before calling callbacks
-3. ✅ **Thread Safety** - UI event handlers marshal updates via `TkDispatcher`
-4. ✅ **Attribute Name** - Fixed `tk_dispatcher` → `ui_dispatcher` typo
+**Phase 7A - RecorderSink Test Fixes** ✅
+- Fixed `test_recorded_tick_format` - Save filepath before `stop_recording()`
+- All 21 RecorderSink tests passing
+- Documentation: `docs/PHASE_7A_COMPLETION.md`
 
-**Files Modified**:
-- `src/core/game_state.py` (+11 lines) - Lock management, GameTick fallback
-- `src/ui/main_window.py` (+18 lines) - Thread-safe UI updates
+**Phase 6 - WebSocket Live Feed Integration** ✅ (3 commits)
+1. Initial integration - Socket.IO connection, thread-safe callbacks
+2. Bug fix: `catch_all` handler signature error
+3. Bug fix: Shutdown sequence cleanup
+4. Bug fix: Multi-game loop support (continuous feed across games)
+- Documentation: `docs/PHASE_6_COMPLETION.md`
+- Test script: `test_live_feed_automation.py` (62 signals in 15s)
 
-**Details**: See `DEADLOCK_BUG_REPORT.md` and `BUG_FIXES_SUMMARY.md`
+**Phase 5 - Recording Infrastructure + Audit Fixes** ✅
+- RecorderSink auto-recording, JSONL metadata format
+- Live ring buffer (5000-tick memory-bounded)
+- 7 critical audit fixes applied
+- Documentation: `docs/Codex/`
+
+**Phase 4 - ReplaySource Abstraction** ✅
+- Multi-source architecture (file replay + live feed)
+
+### 🚧 Current Development (Phase 7B - Menu Bar)
+
+**Branch**: `feature/menu-bar` (safely isolated from `main`)
+**Status**: UI mockups complete, ready for implementation
+**Goal**: Add menu bar to existing UI for recording controls and settings
+
+**Branching Strategy**:
+- **main branch**: Stable, production-ready code (Phase 6 complete)
+- **feature/menu-bar**: Menu bar development (can be reverted if needed)
+- Merge strategy: Test fully on feature branch before merging to main
+
+**Mockup Files**:
+- `ui_mockup.py` - Full menu system mockup (complex)
+- `ui_mockup_simple.py` - Minimal menu bar only (approved design)
+
+**Next Steps**:
+1. Finalize menu structure with user
+2. Implement menu bar in `src/ui/main_window.py`
+3. Add recording toggle functionality
+4. Test on feature branch
+5. Merge to main if approved
 
 ---
 
@@ -135,13 +169,16 @@ Even though we're NOT implementing ML/training yet, infrastructure must support:
 │   │   ├── layout_manager.py     # Panel positioning (256 lines)
 │   │   └── widgets/              # Reusable components
 │   │
-│   └── tests/                    # Test suite (148 tests, ~1,953 lines)
+│   └── tests/                    # Test suite (237 tests - ALL PASSING ✅)
 │       ├── conftest.py           # Shared fixtures
-│       ├── test_core/            # Core tests (58 tests)
-│       ├── test_bot/             # Bot tests (61 tests)
-│       ├── test_services/        # Service tests (13 tests)
-│       ├── test_ml/              # ML tests (1 test)
-│       └── test_ui/              # UI tests (1 test)
+│       ├── test_models/          # Data model tests (12 tests)
+│       ├── test_core/            # Core logic tests (63 tests)
+│       ├── test_bot/             # Bot system tests (54 tests)
+│       ├── test_services/        # Service tests (12 tests)
+│       ├── test_ml/              # ML integration (1 test)
+│       ├── test_ui/              # UI tests (1 test)
+│       ├── test_sources/         # WebSocket feed tests (21 tests)
+│       └── test_validators/      # Validation tests (15 tests)
 │
 ├── docs/                         # Documentation
 │   ├── Codex/                    # Audit & planning docs
