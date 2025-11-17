@@ -90,7 +90,11 @@ class RugsBrowserManager:
             user_data_dir=self.profile_path,
             extension_dirs=extension_dirs,
             headless=False,  # Visible browser for TUI
-            block_ads=False
+            block_ads=False,
+            extra_args=[
+                "--start-maximized",  # Force window to be visible and maximized
+                "--new-window",       # Open in new window (not just new tab)
+            ]
         )
 
     async def start_browser(self) -> bool:
