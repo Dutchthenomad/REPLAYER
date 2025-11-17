@@ -1,16 +1,19 @@
 """
 Main Entry Point for Rugs Replay Viewer
 Clean, modular implementation
+Phase 8.5: Added --live flag for browser automation mode
 """
 
 import sys
 import logging
+import argparse
 from pathlib import Path
 import tkinter as tk
 from typing import Optional
 
 # Add project root to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent))  # src/ directory
+sys.path.insert(0, str(Path(__file__).parent.parent))  # REPLAYER/ repo root (for browser_automation)
 
 from config import config
 from core.game_state import GameState
@@ -23,33 +26,47 @@ class Application:
     """
     Main application controller
     Coordinates all components and manages lifecycle
+    Phase 8.5: Added live_mode parameter for browser automation
     """
-    
-    def __init__(self):
+
+    def __init__(self, live_mode: bool = False):
+        """
+        Initialize application
+
+        Args:
+            live_mode: If True, enable live browser automation mode (Phase 8.5)
+        """
         # Initialize logging first
         self.logger = setup_logging()
         self.logger.info("="*60)
         self.logger.info("Rugs Replay Viewer - Starting Application")
+        if live_mode:
+            self.logger.info("MODE: LIVE BROWSER AUTOMATION (Phase 8.5)")
+        else:
+            self.logger.info("MODE: REPLAY")
         self.logger.info("="*60)
-        
+
+        # Phase 8.5: Store live mode flag
+        self.live_mode = live_mode
+
         # Initialize core components
         self.config = config
         self.state = GameState(config.FINANCIAL['initial_balance'])
         self.event_bus = event_bus
-        
+
         # Start event bus
         self.event_bus.start()
-        
+
         # Setup event handlers
         self._setup_event_handlers()
-        
+
         # Create UI
         self.root = tk.Tk()
         self.main_window = None
-        
+
         # Configure root window
         self._configure_root()
-        
+
         self.logger.info("Application initialized successfully")
     
     def _configure_root(self):
@@ -125,24 +142,26 @@ class Application:
     def run(self):
         """Run the application"""
         try:
-            # Create main window
+            # Phase 8.5: Create main window with live mode flag
             self.main_window = MainWindow(
-                self.root, 
-                self.state, 
+                self.root,
+                self.state,
                 self.event_bus,
-                self.config
+                self.config,
+                live_mode=self.live_mode  # Pass live mode flag
             )
-            
-            # Auto-load games if directory exists
-            self._auto_load_games()
-            
+
+            # Auto-load games if directory exists (skip in live mode)
+            if not self.live_mode:
+                self._auto_load_games()
+
             # Publish ready event
             self.event_bus.publish(Events.UI_READY)
-            
+
             # Start main loop
             self.logger.info("Starting UI main loop")
             self.root.mainloop()
-            
+
         except Exception as e:
             self.logger.critical(f"Critical error in main loop: {e}", exc_info=True)
             self.shutdown()
@@ -194,10 +213,34 @@ class Application:
 
 
 def main():
-    """Main entry point"""
+    """
+    Main entry point
+    Phase 8.5: Added --live command-line flag for browser automation
+    """
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='Rugs.fun Replay Viewer - Professional Edition',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  %(prog)s                 # Run in replay mode (default)
+  %(prog)s --live          # Run in live browser automation mode (Phase 8.5)
+
+Phase 8.5: Live mode connects to Rugs.fun via Playwright automation.
+        '''
+    )
+
+    parser.add_argument(
+        '--live',
+        action='store_true',
+        help='Enable live browser automation mode (requires CV-BOILER-PLATE-FORK)'
+    )
+
+    args = parser.parse_args()
+
     # Create and run application
-    app = Application()
-    
+    app = Application(live_mode=args.live)
+
     try:
         app.run()
     except KeyboardInterrupt:

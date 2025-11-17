@@ -226,6 +226,9 @@ class WebSocketFeed:
         self.is_connected = False
         self.event_handlers = {}
 
+        # AUDIT FIX: Guard to prevent duplicate event listener registration
+        self._listeners_setup = False
+
         # Setup logging
         self.logger = logging.getLogger('WebSocketFeed')
         self.logger.setLevel(getattr(logging, log_level.upper()))
@@ -239,7 +242,19 @@ class WebSocketFeed:
         self._setup_event_listeners()
 
     def _setup_event_listeners(self):
-        """Setup Socket.IO event listeners"""
+        """
+        Setup Socket.IO event listeners
+
+        AUDIT FIX: Guard against duplicate event listener registration.
+        If called multiple times (e.g., on reconnect), this prevents
+        handler accumulation and memory leaks.
+        """
+        # AUDIT FIX: Prevent duplicate event listener registration
+        if self._listeners_setup:
+            self.logger.debug("Event listeners already set up, skipping duplicate registration")
+            return
+
+        self._listeners_setup = True
 
         @self.sio.event
         def connect():

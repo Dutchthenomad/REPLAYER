@@ -1,0 +1,240 @@
+version: '1.0'
+template: replayer-python
+description: Rules and patterns for replayer-python template
+rules:
+  - pattern: Thread Safety
+    description: Critical thread safety rules for multi-threaded application
+    must_do:
+      - rule: Use ui_dispatcher.submit() for ALL UI updates from background threads
+        example: 'When GameState observer callbacks are invoked from worker thread, use ui_dispatcher.submit(lambda: widget.config(...))'
+        codeExample: 'self.ui_dispatcher.submit(lambda: self.balance_label.config(text=f''Balance: {balance:.4f}''))'
+      - rule: Release locks before invoking callbacks to prevent deadlock
+        example: In GameState._emit(), extract callbacks list inside lock, then invoke outside lock
+        codeExample: |-
+          with self._lock:
+              callbacks = list(self._observers[event])
+          # Outside lock!
+          for callback in callbacks:
+              callback(data)
+      - rule: Use threading.RLock() for re-entrant locking in state classes
+        example: GameState uses RLock so same thread can call multiple state methods
+        codeExample: self._lock = threading.RLock()
+      - rule: Extract data in worker thread before submitting to UI thread
+        example: Don't access shared state inside UI dispatcher lambda - extract values first
+        codeExample: |-
+          balance = data.get('new')
+          self.ui_dispatcher.submit(lambda: update_label(balance))
+    must_not_do:
+      - rule: NEVER update UI widgets directly from background threads
+        example: Causes TclError crashes - always use ui_dispatcher
+        codeExample: |-
+          # WRONG:
+          self.label.config(text='...')  # Called from worker thread
+          # RIGHT:
+          self.ui_dispatcher.submit(lambda: self.label.config(text='...'))
+      - rule: NEVER hold lock while invoking callbacks
+        example: Causes deadlock if callback tries to acquire same lock
+        codeExample: |-
+          # WRONG:
+          with self._lock:
+              for callback in self._observers[event]:
+                  callback(data)  # Deadlock risk!
+      - rule: NEVER use regular threading.Lock() for state management
+        example: Use RLock to allow re-entrant locking
+        codeExample: |-
+          # WRONG: threading.Lock()
+          # RIGHT: threading.RLock()
+  - pattern: Error Handling
+    description: Robust error handling for production readiness
+    must_do:
+      - rule: Wrap ALL WebSocket event handlers in try/except blocks
+        example: Prevents single handler error from crashing entire connection
+        codeExample: |-
+          @self.sio.on('game_signal')
+          def on_signal(data):
+              try:
+                  process(data)
+              except Exception as e:
+                  logger.error(f'Handler error: {e}', exc_info=True)
+      - rule: Wrap ALL observer callbacks in try/except blocks
+        example: One observer error shouldn't crash event bus
+        codeExample: |-
+          for callback in callbacks:
+              try:
+                  callback(data)
+              except Exception as e:
+                  logger.error(f'Observer error: {e}')
+      - rule: Log exceptions with exc_info=True for full stack traces
+        example: Essential for debugging production issues
+        codeExample: logger.error('Failed to process tick', exc_info=True)
+    must_not_do:
+      - rule: NEVER let exceptions escape from event handlers
+        example: Crashes WebSocket connection or event bus worker thread
+        codeExample: |-
+          # WRONG:
+          @self.sio.on('event')
+          def handler(data):
+              risky_operation(data)  # May raise!
+          # RIGHT:
+          try:
+              risky_operation(data)
+          except Exception as e:
+              logger.error(f'Error: {e}')
+      - rule: NEVER silently swallow exceptions without logging
+        example: Makes debugging impossible in production
+        codeExample: |-
+          # WRONG:
+          try:
+              operation()
+          except:
+              pass  # Silent failure!
+          # RIGHT:
+          except Exception as e:
+              logger.error(f'Operation failed: {e}')
+  - pattern: Memory Management
+    description: Prevent memory leaks and unbounded growth
+    must_do:
+      - rule: Use deque(maxlen=N) for bounded metric tracking
+        example: Prevents unbounded list growth for latency/timing metrics
+        codeExample: |-
+          from collections import deque
+          self.latencies = deque(maxlen=100)
+      - rule: Provide remove_handler() and clear_handlers() for cleanup
+        example: Allows explicit cleanup of event subscriptions
+        codeExample: |-
+          def remove_handler(self, handler_id):
+              if handler_id in self._handlers:
+                  del self._handlers[handler_id]
+      - rule: Set max_buffer_size with emergency flush for recording
+        example: Prevents unbounded buffer growth in RecorderSink
+        codeExample: |-
+          if len(self._buffer) >= self.max_buffer_size:
+              logger.warning('Buffer overflow, emergency flush')
+              self._write_buffer_to_file()
+      - rule: Register atexit handlers for resource cleanup
+        example: Ensures cleanup even on abnormal termination
+        codeExample: |-
+          import atexit
+          atexit.register(self._cleanup)
+    must_not_do:
+      - rule: NEVER use unbounded lists for metrics or event storage
+        example: Causes memory leaks in long-running processes
+        codeExample: |-
+          # WRONG: self.latencies = []
+          # RIGHT: self.latencies = deque(maxlen=100)
+      - rule: NEVER leave file handles open indefinitely
+        example: Use temporary file handle pattern - open, write, close
+        codeExample: |-
+          # WRONG:
+          self._file = open(path, 'a')
+          self._file.write(data)
+          # RIGHT:
+          with open(path, 'a') as f:
+              f.write(data)
+      - rule: NEVER create strong reference cycles in observers
+        example: Use weak references to allow garbage collection
+        codeExample: '# Consider weak references for observer storage to prevent reference cycles'
+  - pattern: Data Types & Precision
+    description: Type safety and precision for financial calculations
+    must_do:
+      - rule: Use Decimal for ALL monetary values and prices
+        example: Avoid float precision errors in P&L calculations
+        codeExample: |-
+          from decimal import Decimal
+          price: Decimal = Decimal('1.5')
+      - rule: Add type hints to ALL function signatures
+        example: Enables static analysis and IDE autocomplete
+        codeExample: 'def calculate_pnl(entry: Decimal, exit: Decimal) -> Decimal:'
+      - rule: Use @dataclass(frozen=True) for immutable value objects
+        example: Thread safety and predictable behavior
+        codeExample: |-
+          @dataclass(frozen=True)
+          class Position:
+              entry_price: Decimal
+              amount: Decimal
+      - rule: Validate data in __post_init__ for dataclasses
+        example: Ensure data integrity at construction time
+        codeExample: |-
+          def __post_init__(self):
+              if self.entry_price <= 0:
+                  raise ValueError('Price must be positive')
+    must_not_do:
+      - rule: NEVER use float for monetary values or prices
+        example: Float has precision errors (0.1 + 0.2 != 0.3)
+        codeExample: |-
+          # WRONG: price: float = 1.5
+          # RIGHT: price: Decimal = Decimal('1.5')
+      - rule: NEVER skip type hints on public APIs
+        example: Makes code harder to understand and maintain
+        codeExample: |-
+          # WRONG:
+          def process(data):
+              return result
+          # RIGHT:
+          def process(data: dict) -> Optional[Result]:
+      - rule: NEVER use mutable default arguments
+        example: Shared mutable defaults cause subtle bugs
+        codeExample: |-
+          # WRONG:
+          def func(items=[]):
+          # RIGHT:
+          def func(items: Optional[List] = None):
+              if items is None:
+                  items = []
+  - pattern: Architecture & Design
+    description: Maintain clean architecture and design patterns
+    must_do:
+      - rule: Use event bus for cross-component communication
+        example: Decouples components via pub/sub pattern
+        codeExample: event_bus.publish(Events.POSITION_OPENED, position_data)
+      - rule: Inherit from ABC for strategy pattern implementations
+        example: Enforces interface contract for trading strategies
+        codeExample: |-
+          from abc import ABC, abstractmethod
+          class TradingStrategy(ABC):
+              @abstractmethod
+              def should_buy(self, obs: dict) -> tuple[bool, str]:
+      - rule: Return tuple (action, reason) from strategy methods
+        example: Provides human-readable explanation for decisions
+        codeExample: return True, f'Price below 1.2x ({price}), safe entry'
+      - rule: Use Events enum for event type safety
+        example: Prevents typos in event names
+        codeExample: |-
+          from services import Events
+          event_bus.subscribe(Events.GAME_TICK, handler)
+    should_do:
+      - rule: Prefer composition over inheritance for behavior
+        example: More flexible and easier to test
+        codeExample: |-
+          class BotController:
+              def __init__(self, strategy: TradingStrategy):
+                  self.strategy = strategy
+      - rule: Use factory pattern for strategy instantiation
+        example: Centralized creation logic
+        codeExample: strategy = strategy_factory.create('conservative')
+      - rule: Keep event handlers lightweight - delegate to workers
+        example: Prevents blocking event queue
+        codeExample: |-
+          def on_tick(data):
+              self.work_queue.put(data)  # Delegate to worker
+    must_not_do:
+      - rule: NEVER access GameState directly from strategies
+        example: Violates encapsulation - use observation dict
+        codeExample: |-
+          # WRONG:
+          balance = self.game_state.get('balance')
+          # RIGHT:
+          balance = observation['balance']
+      - rule: NEVER mutate observation dictionaries in strategies
+        example: Treat observations as immutable input
+        codeExample: |-
+          # WRONG:
+          observation['modified'] = True
+          # RIGHT: Read only, don't modify
+      - rule: NEVER perform I/O operations in event handlers
+        example: Blocks event queue - use async worker or queue
+        codeExample: |-
+          # WRONG:
+          @event_bus.subscribe(Events.GAME_END)
+          def handler(data):
+              save_to_database(data)  # Blocking!

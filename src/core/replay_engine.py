@@ -253,7 +253,7 @@ class ReplayEngine:
         """
         Push a single tick to the replay engine (for live feeds)
         CRITICAL FIX: Only use ring buffer in live mode, no unbounded list growth
-        AUDIT FIX: Capture index inside lock to prevent race condition
+        AUDIT FIX: Capture tick data inside lock to prevent race condition
 
         Args:
             tick: GameTick to add
@@ -265,8 +265,8 @@ class ReplayEngine:
             logger.error(f"Invalid tick type: {type(tick)}")
             return False
 
-        # AUDIT FIX: Capture display index inside lock
-        display_index = None
+        # AUDIT FIX: Capture display data inside lock to prevent race condition
+        display_data = None
 
         try:
             with self._acquire_lock():
@@ -354,12 +354,19 @@ class ReplayEngine:
                 # Update current index to latest
                 self.current_index = self.live_ring_buffer.get_size() - 1
 
-                # AUDIT FIX: Capture index inside lock to prevent race condition
-                display_index = self.current_index
+                # AUDIT FIX: Capture tick data and index inside lock to prevent race condition
+                # This prevents the tick list from changing between lock release and display
+                current_ticks = self.ticks  # Property call - gets current tick list based on mode
+                if current_ticks and 0 <= self.current_index < len(current_ticks):
+                    display_data = {
+                        'tick': current_ticks[self.current_index],
+                        'index': self.current_index,
+                        'total': len(current_ticks)
+                    }
 
-            # AUDIT FIX: Display using captured index (safe - no race condition)
-            if display_index is not None:
-                self.display_tick(display_index)
+            # AUDIT FIX: Display using captured tick data (safe - no race condition)
+            if display_data is not None:
+                self._display_tick_direct(display_data['tick'], display_data['index'], display_data['total'])
 
             logger.debug(f"Pushed tick {tick.tick} for game {tick.game_id}")
             return True
@@ -539,12 +546,26 @@ class ReplayEngine:
     def display_tick(self, index: int):
         """Display tick at given index"""
         ticks = self.ticks  # Get current tick list based on mode
-        
+
         if not ticks or index < 0 or index >= len(ticks):
             return
 
         tick = ticks[index]
+        self._display_tick_direct(tick, index, len(ticks))
 
+    def _display_tick_direct(self, tick: GameTick, index: int, total: int):
+        """
+        Display tick using pre-captured data (prevents race conditions)
+
+        AUDIT FIX: This method accepts the tick directly instead of looking it up
+        by index, preventing race conditions where the tick list changes between
+        lock release and display.
+
+        Args:
+            tick: The GameTick to display
+            index: The index of this tick
+            total: Total number of ticks in the list
+        """
         # Update game state
         self.state.update(
             current_tick=tick.tick,
@@ -562,15 +583,15 @@ class ReplayEngine:
         event_bus.publish(Events.GAME_TICK, {
             'tick': tick,
             'index': index,
-            'total': len(ticks),
-            'progress': (index / len(ticks)) * 100 if ticks else 0,
+            'total': total,
+            'progress': (index / total) * 100 if total else 0,
             'mode': 'live' if self.is_live_mode else 'file'
         })
 
         # Call UI callback if set
         if self.on_tick_callback:
             try:
-                self.on_tick_callback(tick, index, len(ticks))
+                self.on_tick_callback(tick, index, total)
             except Exception as e:
                 logger.error(f"Error in tick callback: {e}")
 

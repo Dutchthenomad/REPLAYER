@@ -1,0 +1,24 @@
+# REPLAYER Project Configuration
+# Links source code to design patterns and coding standards
+
+project:
+  name: "REPLAYER"
+  description: "Dual-Mode Replay/Live Game Viewer & RL Training Environment"
+  version: "1.0.0"
+  template: "replayer-python"
+
+# Source directories to apply patterns
+sources:
+  - src/
+
+# Templates directory location
+templatesPath: templates/
+
+# Additional metadata
+metadata:
+  language: python
+  framework: tkinter
+  architecture:
+    - event-driven
+    - observer-pattern
+    - strategy-pattern

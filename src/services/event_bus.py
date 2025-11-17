@@ -18,32 +18,34 @@ class Events(Enum):
     UI_READY = "ui.ready"
     UI_UPDATE = "ui.update"
     UI_ERROR = "ui.error"
-    
+
     # Game Events
     GAME_START = "game.start"
     GAME_END = "game.end"
     GAME_TICK = "game.tick"
     GAME_RUG = "game.rug"
     RUG_DETECTED = "game.rug_detected"
-    
+
     # Trading Events
     TRADE_BUY = "trade.buy"
     TRADE_SELL = "trade.sell"
     TRADE_SIDEBET = "trade.sidebet"
     TRADE_EXECUTED = "trade.executed"
     TRADE_FAILED = "trade.failed"
-    
+    SELL_PERCENTAGE_CHANGED = "trade.sell_percentage_changed"  # Phase 8.1
+    POSITION_REDUCED = "trade.position_reduced"  # Phase 8.1
+
     # Bot Events
     BOT_ENABLED = "bot.enabled"
     BOT_DISABLED = "bot.disabled"
     BOT_DECISION = "bot.decision"
     BOT_ACTION = "bot.action"
-    
+
     # File Events
     FILE_LOADED = "file.loaded"
     FILE_SAVED = "file.saved"
     FILE_ERROR = "file.error"
-    
+
     # Replay Events
     REPLAY_START = "replay.start"
     REPLAY_PAUSE = "replay.pause"

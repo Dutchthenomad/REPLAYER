@@ -1,0 +1,515 @@
+features:
+  - name: Thread-Safe State Management
+    design_pattern: Observer Pattern with Thread Safety
+    includes:
+      - '**/core/game_state.py'
+      - '**/core/*_state.py'
+    description: |
+      # Thread-Safe State Management Pattern
+
+      ## Pattern Overview
+      Centralized state management using observer pattern with thread-safe operations. Single source of truth for game state with reactive updates.
+
+      ## What TO DO ✅
+
+      1. **Use RLock for re-entrant locking** - Allows same thread to acquire lock multiple times
+      2. **Release lock before callbacks** - Prevents deadlock when observers call back into state
+      3. **Provide immutable snapshots** - Thread-safe state access via `get_snapshot()`
+      4. **Emit events for state changes** - Notify observers of changes
+      5. **Use weak references for observers** - Prevent memory leaks
+
+      ## What NOT TO DO ❌
+
+      1. **Don't hold lock during callbacks** - Causes deadlock when observer updates state
+      2. **Don't use regular Lock** - Use RLock for re-entrant locking
+      3. **Don't expose mutable state** - Return copies/snapshots
+      4. **Don't skip locking** - All state access must be protected
+      5. **Don't call observers while holding lock** - Extract callbacks first, then call
+
+      ## Examples
+
+      ### ✅ CORRECT: Release lock before callbacks
+      ```python
+      def _emit(self, event, data):
+          with self._lock:
+              callbacks = list(self._observers[event])  # Copy while holding lock
+          # Release lock before calling callbacks!
+          for callback in callbacks:
+              try:
+                  callback(data)
+              except Exception as e:
+                  logger.error(f"Observer error: {e}")
+      ```
+
+      ### ❌ WRONG: Hold lock during callbacks
+      ```python
+      def _emit(self, event, data):
+          with self._lock:
+              for callback in self._observers[event]:  # Still holding lock!
+                  callback(data)  # DEADLOCK if callback updates state
+      ```
+
+      ### ✅ CORRECT: Immutable snapshots
+      ```python
+      def get_snapshot(self):
+          with self._lock:
+              return {
+                  'balance': self._state['balance'],
+                  'position': self._state['position'].copy() if self._state['position'] else None
+              }
+      ```
+  - name: Thread-Safe UI Updates
+    design_pattern: UI Thread Marshaling Pattern
+    includes:
+      - '**/ui/main_window.py'
+      - '**/ui/tk_dispatcher.py'
+      - '**/ui/panels.py'
+      - '**/ui/widgets/*.py'
+    description: |
+      # Thread-Safe UI Updates Pattern
+
+      ## Pattern Overview
+      Marshal UI updates from background threads to Tkinter main thread using TkDispatcher. Prevents `TclError` crashes from cross-thread UI access.
+
+      ## What TO DO ✅
+
+      1. **Always use ui_dispatcher.submit()** for UI updates from worker threads
+      2. **Extract data in worker thread** before submitting to UI thread
+      3. **Use lambda or callable** to wrap UI update logic
+      4. **Handle exceptions** in UI update callbacks
+      5. **Use root.after(0, ...)** for menu callbacks from background threads
+
+      ## What NOT TO DO ❌
+
+      1. **Never update UI directly from worker thread** - Causes TclError
+      2. **Don't access shared state in UI callback** - Extract first, then pass
+      3. **Don't use blocking operations in UI thread** - Freezes interface
+      4. **Don't skip ui_dispatcher** even for "simple" updates
+      5. **Don't forget error handling** in submitted callbacks
+
+      ## Examples
+
+      ### ✅ CORRECT: Extract data then marshal to UI
+      ```python
+      def _handle_balance_changed(self, data):
+          # Extract in worker thread
+          balance = data.get('new')
+          # Marshal to UI thread
+          self.ui_dispatcher.submit(
+              lambda: self.balance_label.config(text=f"Balance: {balance:.4f}")
+          )
+      ```
+
+      ### ❌ WRONG: Update UI directly from worker thread
+      ```python
+      def _handle_balance_changed(self, data):
+          # WRONG - Called from worker thread!
+          self.balance_label.config(text=f"Balance: {data.get('new'):.4f}")  # TclError!
+      ```
+
+      ### ✅ CORRECT: Menu callback with root.after()
+      ```python
+      def _on_bot_enable(self):
+          # Menu callback - use root.after() for thread safety
+          self.root.after(0, lambda: self._enable_bot_safely())
+      ```
+
+      ### ✅ CORRECT: Complex UI update with error handling
+      ```python
+      def _update_position_display(self, position_data):
+          entry_price = position_data['entry_price']
+          amount = position_data['amount']
+          
+          def update_ui():
+              try:
+                  self.position_label.config(
+                      text=f"Position: {amount:.4f} @ {entry_price:.2f}x"
+                  )
+                  self.position_frame.configure(bg='green')
+              except Exception as e:
+                  logger.error(f"UI update failed: {e}")
+          
+          self.ui_dispatcher.submit(update_ui)
+      ```
+  - name: Event-Driven Architecture
+    design_pattern: Publish-Subscribe Event Bus
+    includes:
+      - '**/services/event_bus.py'
+    description: |
+      # Event-Driven Architecture Pattern
+
+      ## Pattern Overview
+      Centralized event bus using publish-subscribe pattern. Decouples components via async message passing with queue-based processing.
+
+      ## What TO DO ✅
+
+      1. **Use queue-based async processing** - Non-blocking event delivery
+      2. **Isolate callback errors** - One failure doesn't crash system
+      3. **Use weak references** - Prevent memory leaks from subscriptions
+      4. **Set queue capacity limit** - Prevent unbounded memory growth
+      5. **Use daemon thread** - Clean shutdown on app exit
+      6. **Define event types as enum** - Type safety and documentation
+
+      ## What NOT TO DO ❌
+
+      1. **Don't block in event handlers** - Delays other event processing
+      2. **Don't raise exceptions** - Wrap in try/except
+      3. **Don't use unbounded queue** - Memory leak risk
+      4. **Don't forget to unsubscribe** - Causes memory leaks
+      5. **Don't use string literals** - Use Events enum for type safety
+
+      ## Examples
+
+      ### ✅ CORRECT: Subscribe with error handling
+      ```python
+      def handle_game_tick(data):
+          try:
+              tick = data['tick']
+              process_tick(tick)
+          except Exception as e:
+              logger.error(f"Failed to process tick: {e}")
+
+      event_bus.subscribe(Events.GAME_TICK, handle_game_tick)
+      ```
+
+      ### ✅ CORRECT: Publish with structured data
+      ```python
+      event_bus.publish(Events.POSITION_OPENED, {
+          'entry_price': Decimal('1.5'),
+          'amount': Decimal('0.001'),
+          'tick': 100,
+          'timestamp': time.time()
+      })
+      ```
+
+      ### ❌ WRONG: Block in event handler
+      ```python
+      def handle_game_end(data):
+          # WRONG - Blocking I/O in event handler!
+          save_game_to_database(data)  # Blocks event queue
+      ```
+
+      ### ✅ CORRECT: Use daemon thread
+      ```python
+      self._worker = threading.Thread(target=self._process_events, daemon=True)
+      self._worker.start()
+      ```
+  - name: Strategy Pattern for Bot Trading
+    design_pattern: ABC-Based Pluggable Strategies
+    includes:
+      - '**/bot/strategies/*.py'
+      - '**/bot/strategies/base.py'
+    description: |
+      # Strategy Pattern for Bot Trading
+
+      ## Pattern Overview
+      Pluggable trading strategies using Abstract Base Class. Enables runtime strategy selection and easy addition of new algorithms.
+
+      ## What TO DO ✅
+
+      1. **Inherit from TradingStrategy ABC** - Enforce interface contract
+      2. **Implement should_buy(), should_sell(), should_sidebet()** - Required methods
+      3. **Use @abstractmethod decorator** - Enforce implementation in subclasses
+      4. **Accept observation dict** - Standardized input format
+      5. **Return tuple (action, reason)** - Action + human-readable explanation
+      6. **Add strategy to factory** - Register in strategy_factory.py
+
+      ## What NOT TO DO ❌
+
+      1. **Don't access state directly** - Use observation dict only
+      2. **Don't mutate observation** - Treat as immutable
+      3. **Don't perform actions** - Return recommendation only
+      4. **Don't skip reason string** - Required for debugging/logging
+      5. **Don't hard-code strategy** - Use factory pattern
+
+      ## Examples
+
+      ### ✅ CORRECT: Strategy implementation
+      ```python
+      from bot.strategies.base import TradingStrategy
+
+      class ConservativeStrategy(TradingStrategy):
+          def should_buy(self, observation: dict) -> tuple[bool, str]:
+              price = observation['current_price']
+              balance = observation['balance']
+              
+              if price < Decimal('1.2') and balance > Decimal('0.001'):
+                  return True, f"Price below 1.2x ({price}), safe entry"
+              return False, "Price too high for conservative entry"
+          
+          def should_sell(self, observation: dict) -> tuple[bool, str]:
+              position = observation.get('position')
+              if not position:
+                  return False, "No position to sell"
+              
+              pnl_pct = observation['pnl_percentage']
+              if pnl_pct >= 20:
+                  return True, f"Take profit at {pnl_pct}% gain"
+              return False, "Not at profit target yet"
+      ```
+
+      ### ✅ CORRECT: Strategy factory usage
+      ```python
+      strategy = strategy_factory.create('conservative')
+      should_buy, reason = strategy.should_buy(observation)
+      if should_buy:
+          logger.info(f"BUY signal: {reason}")
+      ```
+
+      ### ❌ WRONG: Direct state access
+      ```python
+      def should_buy(self, observation: dict) -> tuple[bool, str]:
+          # WRONG - Accessing GameState directly!
+          balance = self.state.get('balance')  # Violates encapsulation
+      ```
+  - name: Immutable Data Models
+    design_pattern: Dataclass-Based Value Objects
+    includes:
+      - '**/models/*.py'
+    description: |
+      # Immutable Data Models Pattern
+
+      ## Pattern Overview
+      Use Python dataclasses with frozen=True for immutable value objects. Ensures thread safety and predictable behavior.
+
+      ## What TO DO ✅
+
+      1. **Use @dataclass(frozen=True)** - Immutable instances
+      2. **Use Decimal for money** - Avoid float precision issues
+      3. **Add type hints** - Enable static analysis
+      4. **Validate in __post_init__** - Ensure data integrity
+      5. **Provide factory methods** - For complex construction
+      6. **Add computed properties** - Derived values as @property
+
+      ## What NOT TO DO ❌
+
+      1. **Don't use float for money** - Use Decimal
+      2. **Don't mutate after creation** - Use frozen=True
+      3. **Don't skip validation** - Validate all inputs
+      4. **Don't use mutable defaults** - Use None + default_factory
+      5. **Don't skip type hints** - Required for clarity
+
+      ## Examples
+
+      ### ✅ CORRECT: Immutable position model
+      ```python
+      from dataclasses import dataclass
+      from decimal import Decimal
+      from typing import Optional
+
+      @dataclass(frozen=True)
+      class Position:
+          entry_price: Decimal
+          amount: Decimal
+          entry_tick: int
+          entry_time: float
+          stop_loss: Optional[Decimal] = None
+          take_profit: Optional[Decimal] = None
+          
+          def __post_init__(self):
+              if self.entry_price <= 0:
+                  raise ValueError("Entry price must be positive")
+              if self.amount <= 0:
+                  raise ValueError("Amount must be positive")
+              if self.entry_tick < 0:
+                  raise ValueError("Entry tick must be non-negative")
+          
+          @property
+          def notional_value(self) -> Decimal:
+              return self.entry_price * self.amount
+          
+          def calculate_pnl(self, exit_price: Decimal) -> Decimal:
+              return self.amount * (exit_price - self.entry_price)
+      ```
+
+      ### ✅ CORRECT: Use Decimal for prices
+      ```python
+      @dataclass(frozen=True)
+      class GameTick:
+          price: Decimal  # ✅ Decimal for precision
+          tick: int
+          timestamp: float
+      ```
+
+      ### ❌ WRONG: Mutable model with float
+      ```python
+      @dataclass  # ❌ Not frozen!
+      class Position:
+          entry_price: float  # ❌ Float has precision issues!
+          amount: float
+          # No validation, no type hints for optionals
+      ```
+  - name: WebSocket Integration Pattern
+    design_pattern: Socket.IO Event-Driven Client
+    includes:
+      - '**/sources/websocket_feed.py'
+    description: |
+      # WebSocket Integration Pattern
+
+      ## Pattern Overview
+      Socket.IO client for real-time game feed with error boundaries, reconnection logic, and thread-safe callback integration.
+
+      ## What TO DO ✅
+
+      1. **Wrap all event handlers in try/except** - Prevent crashes from handler errors
+      2. **Add weak references for handlers** - Enable cleanup via remove_handler()
+      3. **Use clear_handlers()** - Prevent memory leaks on shutdown
+      4. **Implement reconnection logic** - Handle network failures gracefully
+      5. **Log all WebSocket events** - Debug connection issues
+      6. **Use deque with maxlen** - Bounded latency tracking (O(1) operations)
+
+      ## What NOT TO DO ❌
+
+      1. **Don't skip error boundaries** - One bad handler crashes entire connection
+      2. **Don't use unbounded lists** - Use deque(maxlen=N) for metrics
+      3. **Don't forget to disconnect** - Call sio.disconnect() on shutdown
+      4. **Don't block in handlers** - Use async or queue-based processing
+      5. **Don't lose references** - Store strong refs, provide weak refs to external callers
+
+      ## Examples
+
+      ### ✅ CORRECT: Event handler with error boundary
+      ```python
+      @self.sio.on('game_signal')
+      def on_game_signal(data):
+          try:
+              # Process signal
+              signal = GameSignal.from_dict(data)
+              self._process_signal(signal)
+          except Exception as e:
+              logger.error(f"Error processing game_signal: {e}", exc_info=True)
+      ```
+
+      ### ✅ CORRECT: Bounded latency tracking
+      ```python
+      from collections import deque
+
+      class WebSocketFeed:
+          def __init__(self):
+              self.latencies = deque(maxlen=100)  # ✅ O(1) append, bounded memory
+          
+          def _record_latency(self, latency):
+              self.latencies.append(latency)
+      ```
+
+      ### ✅ CORRECT: Handler cleanup
+      ```python
+      def remove_handler(self, handler_id: str):
+          if handler_id in self._handlers:
+              del self._handlers[handler_id]
+              logger.info(f"Removed handler {handler_id}")
+
+      def clear_handlers(self):
+          self._handlers.clear()
+          logger.info("Cleared all WebSocket handlers")
+      ```
+
+      ### ❌ WRONG: No error boundary
+      ```python
+      @self.sio.on('game_signal')
+      def on_game_signal(data):
+          # WRONG - Uncaught exception crashes WebSocket connection!
+          signal = GameSignal.from_dict(data)  # May raise KeyError
+          self._process_signal(signal)
+      ```
+
+      ### ❌ WRONG: Unbounded list for metrics
+      ```python
+      self.latencies = []  # ❌ Unbounded - memory leak!
+      def _record_latency(self, latency):
+          self.latencies.append(latency)  # Grows forever
+      ```
+  - name: Resource Management Pattern
+    design_pattern: RAII with Cleanup Handlers
+    includes:
+      - '**/core/recorder_sink.py'
+      - '**/core/replay_source.py'
+    description: |
+      # Resource Management Pattern
+
+      ## Pattern Overview
+      Resource Acquisition Is Initialization (RAII) pattern with explicit cleanup. Ensures file handles, connections, and threads are properly released.
+
+      ## What TO DO ✅
+
+      1. **Use context managers (with statement)** - Automatic cleanup
+      2. **Register atexit handlers** - Cleanup on process exit
+      3. **Flush buffers before close** - Prevent data loss
+      4. **Use temporary file handles** - Close immediately after use
+      5. **Track resource state** - Prevent double-close errors
+      6. **Set max buffer size** - Emergency flush on overflow
+
+      ## What NOT TO DO ❌
+
+      1. **Don't leave files open** - Close after every write
+      2. **Don't skip flush** - Data may be lost in buffer
+      3. **Don't double-close** - Check state before closing
+      4. **Don't use unbounded buffers** - Add max_buffer_size with emergency flush
+      5. **Don't forget atexit cleanup** - Resources leak on crash
+
+      ## Examples
+
+      ### ✅ CORRECT: Temporary file handle pattern
+      ```python
+      def _write_buffer_to_file(self):
+          if not self._buffer:
+              return
+          
+          # Open file temporarily, write, close immediately
+          with open(self._filepath, 'a') as f:
+              for line in self._buffer:
+                  f.write(json.dumps(line) + '\n')
+          
+          self._buffer.clear()
+      ```
+
+      ### ✅ CORRECT: Emergency flush on overflow
+      ```python
+      def record_tick(self, tick_data: dict):
+          self._buffer.append(tick_data)
+          
+          # Emergency flush if buffer too large
+          if len(self._buffer) >= self.max_buffer_size:
+              logger.warning(f"Buffer overflow ({len(self._buffer)} items), emergency flush")
+              self._write_buffer_to_file()
+      ```
+
+      ### ✅ CORRECT: Cleanup with state tracking
+      ```python
+      def stop_recording(self):
+          if not self._is_recording:
+              return  # Already stopped, prevent double-close
+          
+          self._is_recording = False
+          self._write_buffer_to_file()  # Flush remaining buffer
+          logger.info(f"Recording stopped: {self._filepath}")
+      ```
+
+      ### ✅ CORRECT: Atexit handler registration
+      ```python
+      import atexit
+
+      class RecorderSink:
+          def __init__(self):
+              atexit.register(self._cleanup)
+          
+          def _cleanup(self):
+              if self._is_recording:
+                  self.stop_recording()
+      ```
+
+      ### ❌ WRONG: File handle leak
+      ```python
+      def __init__(self, filepath):
+          self._file = open(filepath, 'a')  # ❌ Never closed!
+
+      def record_tick(self, tick_data):
+          self._file.write(json.dumps(tick_data) + '\n')  # File stays open
+      ```
+
+      ### ❌ WRONG: No buffer size limit
+      ```python
+      def record_tick(self, tick_data):
+          self._buffer.append(tick_data)  # ❌ Unbounded - memory leak!
+          # Never flushes until stop_recording()
+      ```

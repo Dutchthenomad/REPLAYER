@@ -85,6 +85,35 @@ class Position:
         self.amount = total_amount
         self.entry_price = weighted_avg_price
 
+    def reduce_amount(self, percentage: Decimal) -> Decimal:
+        """
+        Reduce position amount by a percentage (Phase 8.1)
+
+        Args:
+            percentage: Percentage to reduce (0.1 = 10%, 0.25 = 25%, etc.)
+
+        Returns:
+            Amount that was reduced
+
+        Raises:
+            ValueError: If percentage is invalid or position is closed
+        """
+        if self.status != PositionStatus.ACTIVE:
+            raise ValueError("Cannot reduce closed position")
+
+        valid_percentages = [Decimal('0.1'), Decimal('0.25'), Decimal('0.5'), Decimal('1.0')]
+        if percentage not in valid_percentages:
+            raise ValueError(f"Invalid percentage: {percentage}. Must be one of {valid_percentages}")
+
+        if percentage == Decimal('1.0'):
+            raise ValueError("Cannot reduce by 100% - use close() instead")
+
+        # Calculate reduction
+        amount_to_reduce = self.amount * percentage
+        self.amount -= amount_to_reduce
+
+        return amount_to_reduce
+
     def to_dict(self) -> dict:
         """Convert to dictionary"""
         return {

@@ -19,6 +19,7 @@ class StateEvents(Enum):
     BALANCE_CHANGED = "balance_changed"
     POSITION_OPENED = "position_opened"
     POSITION_CLOSED = "position_closed"
+    POSITION_REDUCED = "position_reduced"  # Phase 8.1
     SIDEBET_PLACED = "sidebet_placed"
     SIDEBET_RESOLVED = "sidebet_resolved"
     TICK_UPDATED = "tick_updated"
@@ -27,6 +28,7 @@ class StateEvents(Enum):
     RUG_EVENT = "rug_event"
     PHASE_CHANGED = "phase_changed"
     BOT_ACTION = "bot_action"
+    SELL_PERCENTAGE_CHANGED = "sell_percentage_changed"  # Phase 8.1
 
 @dataclass
 class StateSnapshot:
@@ -101,7 +103,8 @@ class GameState:
             'rug_detected': False,
             'bot_enabled': False if bot_enabled is None else bot_enabled,
             'bot_strategy': bot_strategy,
-            'last_sidebet_resolved_tick': None
+            'last_sidebet_resolved_tick': None,
+            'sell_percentage': Decimal('1.0')  # Phase 8.1: Default 100%
         }
     
     # ========== State Access Methods ==========
@@ -382,7 +385,134 @@ class GameState:
             self._state['sidebet'] = None
 
             return sidebet
-    
+
+    # ========== Sell Percentage Management (Phase 8.1) ==========
+
+    def set_sell_percentage(self, percentage: Decimal) -> bool:
+        """
+        Set the sell percentage (for partial position closing)
+
+        Args:
+            percentage: Percentage to sell (0.1, 0.25, 0.5, or 1.0)
+
+        Returns:
+            True if successful, False if invalid percentage
+        """
+        with self._lock:
+            # Validate percentage (only allow 10%, 25%, 50%, 100%)
+            valid_percentages = [Decimal('0.1'), Decimal('0.25'), Decimal('0.5'), Decimal('1.0')]
+            if percentage not in valid_percentages:
+                logger.error(f"Invalid sell percentage: {percentage}. Must be one of {valid_percentages}")
+                return False
+
+            old_percentage = self._state['sell_percentage']
+            self._state['sell_percentage'] = percentage
+
+            # Emit event
+            self._emit(StateEvents.SELL_PERCENTAGE_CHANGED, {
+                'old': old_percentage,
+                'new': percentage
+            })
+
+            logger.info(f"Sell percentage changed: {old_percentage*100:.0f}% -> {percentage*100:.0f}%")
+            return True
+
+    def get_sell_percentage(self) -> Decimal:
+        """
+        Get the current sell percentage
+
+        Returns:
+            Current sell percentage (0.1 to 1.0)
+        """
+        with self._lock:
+            return self._state.get('sell_percentage', Decimal('1.0'))
+
+    def partial_close_position(
+        self,
+        percentage: Decimal,
+        exit_price: Decimal,
+        exit_time=None,
+        exit_tick: Optional[int] = None
+    ) -> Optional[Dict]:
+        """
+        Partially close the active position (Phase 8.1)
+
+        Args:
+            percentage: Percentage of position to close (0.1 to 1.0)
+            exit_price: Exit price multiplier
+            exit_time: Exit timestamp (maintained for backwards compatibility)
+            exit_tick: Exit tick number
+
+        Returns:
+            Dictionary with partial close details, or None if no active position
+        """
+        with self._lock:
+            position = self._state['position']
+            if not position or position.get('status') != 'active':
+                logger.warning("No active position to partially close")
+                return None
+
+            if exit_tick is None:
+                exit_tick = self._state.get('current_tick', 0)
+
+            # Validate percentage
+            valid_percentages = [Decimal('0.1'), Decimal('0.25'), Decimal('0.5'), Decimal('1.0')]
+            if percentage not in valid_percentages:
+                logger.error(f"Invalid percentage: {percentage}. Must be one of {valid_percentages}")
+                return None
+
+            # If 100%, use normal close_position
+            if percentage == Decimal('1.0'):
+                return self.close_position(exit_price, exit_time, exit_tick)
+
+            # Calculate partial amounts
+            original_amount = position['amount']
+            amount_to_sell = original_amount * percentage
+            remaining_amount = original_amount - amount_to_sell
+
+            # Calculate P&L for the portion being sold
+            entry_value = amount_to_sell * position['entry_price']
+            exit_value = amount_to_sell * exit_price
+            pnl = exit_value - entry_value
+            pnl_percent = ((exit_price / position['entry_price']) - 1) * 100
+
+            # Update position with reduced amount
+            position['amount'] = remaining_amount
+
+            # Update balance (add proceeds from partial sell)
+            self.update_balance(exit_value, f"Partial sell ({percentage*100:.0f}%) at {exit_price}")
+
+            # Update statistics (partial sell counts as a trade)
+            if pnl > 0:
+                self._stats['winning_trades'] += 1
+            else:
+                self._stats['losing_trades'] += 1
+
+            # Create partial close record
+            partial_close = {
+                'type': 'partial_close',
+                'percentage': percentage,
+                'amount_sold': amount_to_sell,
+                'remaining_amount': remaining_amount,
+                'entry_price': position['entry_price'],
+                'exit_price': exit_price,
+                'exit_tick': exit_tick,
+                'pnl_sol': pnl,
+                'pnl_percent': pnl_percent
+            }
+
+            # Emit event
+            self._emit(StateEvents.POSITION_REDUCED, partial_close)
+
+            logger.info(
+                f"Partial close ({percentage*100:.0f}%): "
+                f"Sold {amount_to_sell} SOL at {exit_price}, "
+                f"Remaining {remaining_amount} SOL, "
+                f"P&L: {pnl} SOL ({pnl_percent:.1f}%)"
+            )
+
+            return partial_close
+
     # ========== Observer Pattern ==========
     
     def subscribe(self, event: StateEvents, callback: Callable):

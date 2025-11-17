@@ -17,8 +17,12 @@ from core.game_queue import GameQueue
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
 from ui.tk_dispatcher import TkDispatcher
+from ui.bot_config_panel import BotConfigPanel  # Phase 8.4
 from bot import BotInterface, BotController, list_strategies
 from bot.async_executor import AsyncBotExecutor
+from bot.execution_mode import ExecutionMode  # Phase 8.4
+from bot.ui_controller import BotUIController  # Phase 8.4
+from bot.browser_executor import BrowserExecutor  # Phase 8.5
 from sources import WebSocketFeed
 
 logger = logging.getLogger(__name__)
@@ -26,13 +30,37 @@ logger = logging.getLogger(__name__)
 class MainWindow:
     """
     Main application window with integrated ReplayEngine
+    Phase 8.5: Added browser automation support
     """
 
-    def __init__(self, root: tk.Tk, state, event_bus, config):
+    def __init__(self, root: tk.Tk, state, event_bus, config, live_mode: bool = False):
+        """
+        Initialize main window
+
+        Args:
+            root: Tkinter root window
+            state: GameState instance
+            event_bus: EventBus instance
+            config: Configuration object
+            live_mode: If True, enable live browser automation (Phase 8.5)
+        """
         self.root = root
         self.state = state
         self.event_bus = event_bus
         self.config = config
+        self.live_mode = live_mode  # Phase 8.5
+
+        # Phase 8.5: Initialize browser executor (user controls connection via menu)
+        self.browser_executor = None
+        self.browser_connected = False
+
+        try:
+            from bot.browser_executor import BrowserExecutor
+            self.browser_executor = BrowserExecutor(profile_name="rugs_fun_phantom")
+            logger.info("BrowserExecutor available - user can connect via Browser menu")
+        except Exception as e:
+            logger.warning(f"BrowserExecutor not available: {e}")
+            # Graceful degradation - Browser menu will show "Not Available"
 
         # Initialize replay engine and trade manager
         self.replay_engine = ReplayEngine(state)
@@ -43,10 +71,29 @@ class MainWindow:
         self.game_queue = GameQueue(recordings_dir)
         self.multi_game_mode = False  # Programmatically controlled, not via UI
 
-        # Initialize bot
+        # Phase 8.4: Initialize bot configuration panel
+        self.bot_config_panel = BotConfigPanel(root, config_file="bot_config.json")
+        bot_config = self.bot_config_panel.get_config()
+
+        # Phase 8.4: Initialize bot with config settings
         self.bot_interface = BotInterface(state, self.trade_manager)
-        self.bot_controller = BotController(self.bot_interface, "conservative")
-        self.bot_enabled = False
+
+        # Phase 8.4: Initialize BotUIController for UI_LAYER mode
+        self.bot_ui_controller = BotUIController(self)  # 'self' = MainWindow instance
+
+        # Phase 8.4: Create BotController with execution mode from config
+        execution_mode = self.bot_config_panel.get_execution_mode()
+        strategy = self.bot_config_panel.get_strategy()
+
+        self.bot_controller = BotController(
+            self.bot_interface,
+            strategy_name=strategy,  # Fixed: parameter name is strategy_name
+            execution_mode=execution_mode,
+            ui_controller=self.bot_ui_controller if execution_mode == ExecutionMode.UI_LAYER else None
+        )
+
+        # Phase 8.4: Set bot enabled state from config
+        self.bot_enabled = self.bot_config_panel.is_bot_enabled()
 
         # Initialize async bot executor (prevents deadlock)
         self.bot_executor = AsyncBotExecutor(self.bot_controller)
@@ -119,6 +166,13 @@ class MainWindow:
             command=self._toggle_bot_from_menu
         )
 
+        # Phase 8.4: Add configuration menu item
+        bot_menu.add_separator()
+        bot_menu.add_command(
+            label="Configuration...",
+            command=lambda: self.root.after(0, self._show_bot_config)
+        )
+
         # Live Feed Menu
         live_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Live Feed", menu=live_menu)
@@ -129,6 +183,55 @@ class MainWindow:
             variable=self.live_feed_var,
             command=self._toggle_live_feed_from_menu
         )
+
+        # ========== BROWSER MENU (Phase 8.5) ==========
+        browser_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Browser", menu=browser_menu)
+
+        # Check if browser executor available
+        if self.browser_executor:
+            # Connect command (enabled)
+            browser_menu.add_command(
+                label="Connect Browser...",
+                command=lambda: self.root.after(0, self._show_browser_connection_dialog)
+            )
+
+            browser_menu.add_separator()
+
+            # Status indicators (disabled, display only)
+            browser_menu.add_command(
+                label="⚫ Status: Not Connected",
+                state=tk.DISABLED
+            )
+
+            browser_menu.add_command(
+                label="Profile: rugs_fun_phantom",
+                state=tk.DISABLED
+            )
+
+            browser_menu.add_separator()
+
+            # Disconnect command (initially disabled)
+            browser_menu.add_command(
+                label="Disconnect Browser",
+                command=self._disconnect_browser,
+                state=tk.DISABLED
+            )
+
+            # Store menu references for status updates
+            self.browser_menu = browser_menu
+            self.browser_status_item_index = 2  # "⚫ Status: Not Connected"
+            self.browser_disconnect_item_index = 5  # "Disconnect Browser"
+        else:
+            # Browser not available
+            browser_menu.add_command(
+                label="Browser automation not available",
+                state=tk.DISABLED
+            )
+            browser_menu.add_command(
+                label="(Check browser_automation/ directory)",
+                state=tk.DISABLED
+            )
 
         # Help Menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -174,6 +277,16 @@ class MainWindow:
             fg='white'
         )
         self.phase_label.pack(side=tk.RIGHT, padx=10)
+
+        # Browser status (right) - Phase 8.5
+        self.browser_status_label = tk.Label(
+            status_bar,
+            text="BROWSER: ⚫ Not Connected",
+            font=('Arial', 9),
+            bg='#000000',
+            fg='#888888'  # Gray when disconnected
+        )
+        self.browser_status_label.pack(side=tk.RIGHT, padx=10)
 
         # ========== ROW 2: CHART AREA (expands to fill) ==========
         chart_container = tk.Frame(self.root, bg='#0a0a0a')
@@ -388,6 +501,43 @@ class MainWindow:
         )
         self.sell_button.pack(side=tk.LEFT, padx=5)
 
+        # Phase 8.2: Percentage selector buttons (radio-button style)
+        # Separator between action buttons and percentage selectors
+        separator = tk.Frame(action_left, bg='#444444', width=2)
+        separator.pack(side=tk.LEFT, padx=10, fill=tk.Y, pady=15)
+
+        # Percentage buttons (smaller, radio-style)
+        pct_btn_style = {'font': ('Arial', 10, 'bold'), 'width': 6, 'height': 1, 'bd': 2, 'relief': tk.RAISED}
+
+        self.percentage_buttons = {}
+        percentages = [
+            ('10%', 0.1, '#666666'),
+            ('25%', 0.25, '#666666'),
+            ('50%', 0.5, '#666666'),
+            ('100%', 1.0, '#888888')  # Default selected (darker)
+        ]
+
+        for text, value, default_color in percentages:
+            btn = tk.Button(
+                action_left,
+                text=text,
+                command=lambda v=value: self.set_sell_percentage(v),
+                bg=default_color,
+                fg='white',
+                **pct_btn_style
+            )
+            btn.pack(side=tk.LEFT, padx=3)
+            self.percentage_buttons[value] = {
+                'button': btn,
+                'default_color': default_color,
+                'selected_color': '#00cc66',  # Green when selected
+                'value': value
+            }
+
+        # Set initial selection to 100%
+        self.current_sell_percentage = 1.0
+        self.highlight_percentage_button(1.0)
+
         # Right - bot and info
         action_right = tk.Frame(action_row, bg='#1a1a1a')
         action_right.pack(side=tk.RIGHT, padx=10, pady=10)
@@ -472,6 +622,9 @@ class MainWindow:
         self.state.subscribe(StateEvents.BALANCE_CHANGED, self._handle_balance_changed)
         self.state.subscribe(StateEvents.POSITION_OPENED, self._handle_position_opened)
         self.state.subscribe(StateEvents.POSITION_CLOSED, self._handle_position_closed)
+        # Phase 8.2: Partial sell events
+        self.state.subscribe(StateEvents.SELL_PERCENTAGE_CHANGED, self._handle_sell_percentage_changed)
+        self.state.subscribe(StateEvents.POSITION_REDUCED, self._handle_position_reduced)
     
     def log(self, message: str):
         """Log message (using logger instead of text widget)"""
@@ -681,15 +834,23 @@ class MainWindow:
             self.toast.show(f"Buy failed: {result['reason']}", "error")
     
     def execute_sell(self):
-        """Execute sell action using TradeManager"""
+        """Execute sell action using TradeManager (Phase 8.2: supports partial sells)"""
         result = self.trade_manager.execute_sell()
 
         if result['success']:
             pnl = result.get('pnl_sol', 0)
             pnl_pct = result.get('pnl_percent', 0)
             msg_type = "success" if pnl >= 0 else "error"
-            self.log(f"SELL executed - P&L: {pnl:+.4f} SOL")
-            self.toast.show(f"Sold! P&L: {pnl:+.4f} SOL ({pnl_pct:+.1f}%)", msg_type)
+
+            # Phase 8.2: Show partial sell information
+            if result.get('partial', False):
+                percentage = result.get('percentage', 1.0)
+                remaining = result.get('remaining_amount', 0)
+                self.log(f"PARTIAL SELL ({percentage*100:.0f}%) - P&L: {pnl:+.4f} SOL, Remaining: {remaining:.4f} SOL")
+                self.toast.show(f"Sold {percentage*100:.0f}%! P&L: {pnl:+.4f} SOL ({pnl_pct:+.1f}%)", msg_type)
+            else:
+                self.log(f"SELL executed - P&L: {pnl:+.4f} SOL")
+                self.toast.show(f"Sold! P&L: {pnl:+.4f} SOL ({pnl_pct:+.1f}%)", msg_type)
         else:
             self.log(f"SELL failed: {result['reason']}")
             self.toast.show(f"Sell failed: {result['reason']}", "error")
@@ -709,6 +870,58 @@ class MainWindow:
         else:
             self.log(f"SIDEBET failed: {result['reason']}")
             self.toast.show(f"Side bet failed: {result['reason']}", "error")
+
+    # ========================================================================
+    # PERCENTAGE SELECTOR (Phase 8.2)
+    # ========================================================================
+
+    def set_sell_percentage(self, percentage: float):
+        """
+        Set the sell percentage (user clicked a percentage button)
+
+        Phase 8.2: Radio-button style selector for partial sells
+
+        Args:
+            percentage: 0.1 (10%), 0.25 (25%), 0.5 (50%), or 1.0 (100%)
+        """
+        from decimal import Decimal
+
+        # Update GameState with new percentage
+        success = self.state.set_sell_percentage(Decimal(str(percentage)))
+
+        if success:
+            self.current_sell_percentage = percentage
+            # Highlight the selected button
+            self.ui_dispatcher.submit(lambda: self.highlight_percentage_button(percentage))
+            self.log(f"Sell percentage set to {percentage*100:.0f}%")
+        else:
+            self.toast.show(f"Invalid percentage: {percentage*100:.0f}%", "error")
+
+    def highlight_percentage_button(self, selected_percentage: float):
+        """
+        Highlight the selected percentage button (radio-button style)
+
+        Phase 8.2: Only one button is highlighted at a time
+
+        Args:
+            selected_percentage: The percentage value that should be highlighted
+        """
+        for pct, btn_info in self.percentage_buttons.items():
+            button = btn_info['button']
+            if pct == selected_percentage:
+                # Highlight selected button
+                button.config(
+                    bg=btn_info['selected_color'],
+                    relief=tk.SUNKEN,
+                    bd=3
+                )
+            else:
+                # Reset unselected buttons
+                button.config(
+                    bg=btn_info['default_color'],
+                    relief=tk.RAISED,
+                    bd=2
+                )
 
     # ========================================================================
     # BOT CONTROLS
@@ -955,6 +1168,24 @@ class MainWindow:
             lambda: self.log(f"Position closed - P&L: {pnl:+.4f} SOL")
         )
 
+    def _handle_sell_percentage_changed(self, data):
+        """Handle sell percentage changed (Phase 8.2, thread-safe via TkDispatcher)"""
+        new_percentage = data.get('new', 1.0)
+        # Marshal to UI thread - update button highlighting
+        self.ui_dispatcher.submit(
+            lambda: self.highlight_percentage_button(float(new_percentage))
+        )
+
+    def _handle_position_reduced(self, data):
+        """Handle partial position close (Phase 8.2, thread-safe via TkDispatcher)"""
+        percentage = data.get('percentage', 0)
+        pnl = data.get('pnl_sol', 0)
+        remaining = data.get('remaining_amount', 0)
+        # Marshal to UI thread
+        self.ui_dispatcher.submit(
+            lambda: self.log(f"Position reduced ({percentage*100:.0f}%) - P&L: {pnl:+.4f} SOL, Remaining: {remaining:.4f} SOL")
+        )
+
     def _check_bot_results(self):
         """
         Periodically check for bot execution results from async executor
@@ -1196,6 +1427,215 @@ GAME RULES:
         # AUDIT FIX: Defensive - ensure always runs in main thread
         self.root.after(0, do_toggle)
 
+    def _show_bot_config(self):
+        """
+        Show bot configuration dialog (Phase 8.4)
+        Thread-safe via root.after()
+        """
+        try:
+            # Show configuration dialog (modal)
+            updated_config = self.bot_config_panel.show()
+
+            # If user clicked OK (not cancelled)
+            if updated_config:
+                self.log("Bot configuration updated - restart required for changes to take effect")
+
+                # Inform user that restart is needed
+                if self.toast:
+                    self.toast.show(
+                        "Configuration saved. Restart application to apply changes.",
+                        "info"
+                    )
+
+                # Note: We don't update bot at runtime to avoid complexity
+                # User needs to restart application for changes to take effect
+
+        except Exception as e:
+            logger.error(f"Failed to show bot config: {e}", exc_info=True)
+            self.log(f"Error showing configuration: {e}")
+            if self.toast:
+                self.toast.show(f"Configuration error: {e}", "error")
+
+    # ========== BROWSER AUTOMATION CALLBACKS (Phase 8.5) ==========
+
+    def _show_browser_connection_dialog(self):
+        """Show browser connection wizard (Phase 8.5)"""
+        from tkinter import messagebox
+
+        if not self.browser_executor:
+            messagebox.showerror(
+                "Browser Not Available",
+                "Browser automation is not available.\n\n"
+                "Check that browser_automation/ directory exists."
+            )
+            return
+
+        if self.browser_connected:
+            messagebox.showinfo(
+                "Already Connected",
+                "Browser is already connected.\n\n"
+                "Disconnect first before reconnecting."
+            )
+            return
+
+        # AUDIT FIX: Wrap dialog creation in try/except to catch and log errors
+        try:
+            # Import dialog
+            from ui.browser_connection_dialog import BrowserConnectionDialog
+
+            logger.debug("Creating BrowserConnectionDialog...")
+
+            # Show dialog
+            dialog = BrowserConnectionDialog(
+                parent=self.root,
+                browser_executor=self.browser_executor,
+                on_connected=self._on_browser_connected,
+                on_failed=self._on_browser_connection_failed
+            )
+
+            logger.debug("Calling dialog.show()...")
+            dialog.show()
+            logger.debug("Dialog displayed successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to show browser connection dialog: {e}", exc_info=True)
+            messagebox.showerror(
+                "Dialog Error",
+                f"Failed to show browser connection dialog:\n\n{e}\n\nCheck logs for details."
+            )
+
+    def _on_browser_connected(self):
+        """Called when browser connects successfully"""
+        self.browser_connected = True
+
+        # Update status bar (if browser_status_label exists)
+        if hasattr(self, 'browser_status_label'):
+            self._update_browser_status('connected')
+
+        # Update menu (change status, enable disconnect)
+        if hasattr(self, 'browser_menu'):
+            self.browser_menu.entryconfig(
+                self.browser_status_item_index,
+                label="🟢 Status: Connected"
+            )
+            self.browser_menu.entryconfig(
+                self.browser_disconnect_item_index,
+                state=tk.NORMAL
+            )
+
+        logger.info("Browser connected successfully")
+        if self.toast:
+            self.toast.show("Browser connected to rugs.fun", "success")
+
+    def _on_browser_connection_failed(self, error=None):
+        """Called when browser connection fails"""
+        logger.error(f"Browser connection failed: {error}")
+        if self.toast:
+            self.toast.show(f"Browser connection failed: {error}", "error")
+
+    def _disconnect_browser(self):
+        """Disconnect browser (Phase 8.5)"""
+        from tkinter import messagebox
+        import asyncio
+        import threading
+
+        if not self.browser_connected:
+            return
+
+        # Confirm with user
+        result = messagebox.askyesno(
+            "Disconnect Browser",
+            "Disconnect from live browser?\n\n"
+            "This will close the browser window."
+        )
+
+        if not result:
+            return
+
+        # Update status immediately
+        if hasattr(self, 'browser_status_label'):
+            self._update_browser_status('disconnecting')
+
+        # Stop browser in background thread
+        def stop_async():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.browser_executor.stop_browser())
+                logger.info("Browser stopped successfully")
+
+                # Update UI on main thread
+                self.root.after(0, self._on_browser_disconnected)
+            except Exception as e:
+                logger.error(f"Error stopping browser: {e}")
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror("Disconnect Failed", str(e))
+                )
+            finally:
+                # AUDIT FIX: Always close event loop to prevent resource leak
+                loop.close()
+                asyncio.set_event_loop(None)
+
+        thread = threading.Thread(target=stop_async, daemon=True)
+        thread.start()
+
+    def _on_browser_disconnected(self):
+        """Called when browser disconnects"""
+        self.browser_connected = False
+
+        # Update status bar
+        if hasattr(self, 'browser_status_label'):
+            self._update_browser_status('disconnected')
+
+        # Update menu (change status, disable disconnect)
+        if hasattr(self, 'browser_menu'):
+            self.browser_menu.entryconfig(
+                self.browser_status_item_index,
+                label="⚫ Status: Not Connected"
+            )
+            self.browser_menu.entryconfig(
+                self.browser_disconnect_item_index,
+                state=tk.DISABLED
+            )
+
+        logger.info("Browser disconnected")
+        if self.toast:
+            self.toast.show("Browser disconnected", "info")
+
+    def _update_browser_status(self, status):
+        """
+        Update browser status indicator
+
+        Args:
+            status: "disconnected", "connecting", "connected", "disconnecting", "error"
+        """
+        status_icons = {
+            'disconnected': '⚫',      # Gray
+            'connecting': '🟡',        # Yellow
+            'connected': '🟢',         # Green
+            'disconnecting': '🟡',     # Yellow
+            'error': '🔴'              # Red
+        }
+
+        colors = {
+            'disconnected': '#888888',
+            'connecting': '#ffcc00',
+            'connected': '#00ff88',
+            'disconnecting': '#ffcc00',
+            'error': '#ff3366'
+        }
+
+        icon = status_icons.get(status, '⚫')
+        fg_color = colors.get(status, '#888888')
+        text = f"BROWSER: {icon} {status.title()}"
+
+        # Update status label (thread-safe)
+        if hasattr(self, 'browser_status_label'):
+            self.ui_dispatcher.submit(
+                lambda: self.browser_status_label.config(text=text, fg=fg_color)
+            )
+
     def _toggle_live_feed_from_menu(self):
         """
         Toggle live feed connection from menu (syncs with actual state)
@@ -1245,6 +1685,24 @@ Keyboard Shortcuts: Press 'H' for help
 
     def shutdown(self):
         """Cleanup dispatcher resources during application shutdown."""
+        # Phase 8.5: Stop browser if connected
+        if self.browser_connected and self.browser_executor:
+            loop = None
+            try:
+                logger.info("Shutting down browser...")
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.browser_executor.stop_browser())
+                logger.info("Browser stopped")
+            except Exception as e:
+                logger.error(f"Error stopping browser during shutdown: {e}", exc_info=True)
+            finally:
+                # AUDIT FIX: Always close event loop to prevent resource leak
+                if loop:
+                    loop.close()
+                    asyncio.set_event_loop(None)
+
         # Disconnect live feed first (Phase 6 cleanup)
         if self.live_feed_connected and self.live_feed:
             try:

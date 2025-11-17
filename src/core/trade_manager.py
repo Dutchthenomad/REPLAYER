@@ -94,6 +94,8 @@ class TradeManager:
         """
         Execute sell order (close active position)
 
+        Phase 8.1: Now supports partial sells based on sell_percentage in GameState
+
         Returns:
             Result dictionary with success, reason, and P&L
         """
@@ -109,43 +111,96 @@ class TradeManager:
         # Get position info before closing
         position = self.state.active_position
         entry_price = position.entry_price
-        amount = position.amount
+        original_amount = position.amount
 
-        # Calculate P&L
+        # Phase 8.1: Get current sell percentage
+        sell_percentage = self.state.get_sell_percentage()
+
+        # Calculate amount being sold
+        amount_sold = original_amount * sell_percentage
+
+        # Calculate P&L for the portion being sold
         pnl_sol, pnl_percent = position.calculate_unrealized_pnl(tick.price)
+        # Adjust P&L for partial sell
+        pnl_sol = pnl_sol * sell_percentage
 
-        # Close position (this will update balance automatically)
-        closed_position = self.state.close_position(tick.price, exit_tick=tick.tick)
+        # Phase 8.1: Use partial_close_position or close_position based on percentage
+        if sell_percentage < Decimal('1.0'):
+            # Partial sell
+            result = self.state.partial_close_position(sell_percentage, tick.price, exit_tick=tick.tick)
 
-        if not closed_position:
-            return self._error_result("Failed to close position", "SELL")
+            if not result:
+                return self._error_result("Failed to partially close position", "SELL")
 
-        # Publish event
-        event_bus.publish(Events.TRADE_SELL, {
-            'entry_price': float(entry_price),
-            'exit_price': float(tick.price),
-            'amount': float(amount),
-            'pnl_sol': float(pnl_sol),
-            'pnl_percent': float(pnl_percent),
-            'tick': tick.tick
-        })
+            # Publish event with partial sell flag
+            event_bus.publish(Events.TRADE_SELL, {
+                'partial': True,
+                'percentage': float(sell_percentage),
+                'entry_price': float(entry_price),
+                'exit_price': float(tick.price),
+                'amount': float(amount_sold),
+                'remaining_amount': float(result['remaining_amount']),
+                'pnl_sol': float(pnl_sol),
+                'pnl_percent': float(pnl_percent),
+                'tick': tick.tick
+            })
 
-        logger.info(f"SELL: {amount} SOL at {tick.price}x, P&L: {pnl_sol} SOL ({pnl_percent:.1f}%)")
+            logger.info(
+                f"PARTIAL SELL ({sell_percentage*100:.0f}%): {amount_sold} SOL at {tick.price}x, "
+                f"P&L: {pnl_sol} SOL ({pnl_percent:.1f}%), "
+                f"Remaining: {result['remaining_amount']} SOL"
+            )
 
-        # Calculate proceeds (entry value + pnl)
-        entry_value = amount * entry_price
-        exit_value = amount * tick.price
-        proceeds = exit_value
+            # Calculate proceeds
+            exit_value = amount_sold * tick.price
 
-        return self._success_result(
-            action='SELL',
-            amount=amount,
-            price=tick.price,
-            tick=tick,
-            balance_change=proceeds,
-            pnl_sol=pnl_sol,
-            pnl_percent=pnl_percent
-        )
+            return self._success_result(
+                action='SELL',
+                amount=amount_sold,
+                price=tick.price,
+                tick=tick,
+                balance_change=exit_value,
+                pnl_sol=pnl_sol,
+                pnl_percent=pnl_percent,
+                partial=True,
+                percentage=sell_percentage,
+                remaining_amount=result['remaining_amount']
+            )
+        else:
+            # Full sell (100%)
+            closed_position = self.state.close_position(tick.price, exit_tick=tick.tick)
+
+            if not closed_position:
+                return self._error_result("Failed to close position", "SELL")
+
+            # Publish event
+            event_bus.publish(Events.TRADE_SELL, {
+                'partial': False,
+                'percentage': 1.0,
+                'entry_price': float(entry_price),
+                'exit_price': float(tick.price),
+                'amount': float(original_amount),
+                'pnl_sol': float(pnl_sol),
+                'pnl_percent': float(pnl_percent),
+                'tick': tick.tick
+            })
+
+            logger.info(f"SELL: {original_amount} SOL at {tick.price}x, P&L: {pnl_sol} SOL ({pnl_percent:.1f}%)")
+
+            # Calculate proceeds
+            exit_value = original_amount * tick.price
+
+            return self._success_result(
+                action='SELL',
+                amount=original_amount,
+                price=tick.price,
+                tick=tick,
+                balance_change=exit_value,
+                pnl_sol=pnl_sol,
+                pnl_percent=pnl_percent,
+                partial=False,
+                percentage=Decimal('1.0')
+            )
 
     def execute_sidebet(self, amount: Decimal) -> Dict[str, Any]:
         """
