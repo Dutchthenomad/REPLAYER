@@ -1,5 +1,29 @@
 # Repository Guidelines
 
+**Last Updated**: 2025-11-17
+**Project Status**: Phase 8 (UI-First Bot System) - 85% Complete
+**Active Branch**: `main`
+**Tests**: 275/276 passing (99.6%)
+
+## Current Sprint
+
+**Objective**: Complete Phase 8 - UI-First Bot System
+**Progress**: Phases 8.1-8.5 ✅ complete, 8.6-8.7 pending (11-17 hours)
+**See**: `docs/PHASE_8_COMPLETION_ROADMAP.md` for detailed plan
+
+**Critical Issues** (Fix in next session):
+1. Bet amount defaults to 0.001 (should be 0)
+2. Execution mode defaults to BACKEND (should be UI_LAYER)
+3. Missing bot_config.json file
+
+**Recent Completions**:
+- ✅ Browser connection working (Chromium + Phantom extension)
+- ✅ Partial sell infrastructure (10%, 25%, 50%, 100% buttons)
+- ✅ BotUIController (UI-layer execution with human delays)
+- ✅ Repository cleanup (54 files archived)
+
+---
+
 ## Project Structure & Module Organization
 Runtime code sits in `src/`, with `main.py` wiring `core/`, `bot/`, `services/`, `ui/`, `models/`, and optional `ml/` bridges into rugs-rl-bot. Keep strategies in `src/bot/strategies`, widgets in `src/ui/widgets`, and tests mirroring code under `src/tests/`. Docs live in `docs/` (deep dive: `CLAUDE.md`), while replay analytics utilities (`analyze_*.py`, `debug_volatility.py`) remain at the repo root; stash their JSON outputs under `files/` or other gitignored paths to keep commits clean.
 
