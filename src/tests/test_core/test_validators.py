@@ -5,7 +5,7 @@ Tests for validation functions
 import pytest
 from decimal import Decimal
 from models import GameTick
-from core import validate_bet_amount, validate_trading_allowed
+from core import validate_bet_amount, validate_trading_allowed, validate_sidebet
 
 
 class TestValidateBetAmount:
@@ -144,3 +144,122 @@ class TestValidateTradingAllowed:
 
         assert is_valid == False
         assert "not active" in error
+
+
+class TestValidateSidebet:
+    """Tests for validate_sidebet function - Bug 1 Regression Tests"""
+
+    def test_sidebet_allowed_after_exactly_5_ticks(self, sample_tick):
+        """
+        Regression test for Bug 1: Sidebet cooldown off-by-one error
+
+        The bug was that cooldown used <= instead of <, blocking bets at exactly tick 5.
+        This test verifies that a sidebet is allowed at exactly tick N+5 after resolution.
+        """
+        from config import config
+
+        # Last sidebet resolved at tick 100
+        last_resolved_tick = 100
+        # Current tick is 105 (exactly 5 ticks later)
+        sample_tick.tick = 105
+
+        # Should be ALLOWED (5 >= SIDEBET_COOLDOWN_TICKS of 5)
+        is_valid, error = validate_sidebet(
+            amount=Decimal('0.001'),
+            balance=Decimal('1.0'),
+            tick=sample_tick,
+            has_active_sidebet=False,
+            last_sidebet_resolved_tick=last_resolved_tick
+        )
+
+        assert is_valid == True, f"Expected sidebet to be allowed at exactly {config.SIDEBET_COOLDOWN_TICKS} ticks, but got: {error}"
+        assert error is None
+
+    def test_sidebet_blocked_at_4_ticks(self, sample_tick):
+        """Test sidebet blocked at 4 ticks (1 tick before cooldown expires)"""
+        from config import config
+
+        last_resolved_tick = 100
+        sample_tick.tick = 104  # 4 ticks later
+
+        is_valid, error = validate_sidebet(
+            amount=Decimal('0.001'),
+            balance=Decimal('1.0'),
+            tick=sample_tick,
+            has_active_sidebet=False,
+            last_sidebet_resolved_tick=last_resolved_tick
+        )
+
+        assert is_valid == False
+        assert "cooldown: 1 ticks remaining" in error
+
+    def test_sidebet_blocked_at_1_tick(self, sample_tick):
+        """Test sidebet blocked at 1 tick after resolution"""
+        last_resolved_tick = 100
+        sample_tick.tick = 101  # 1 tick later
+
+        is_valid, error = validate_sidebet(
+            amount=Decimal('0.001'),
+            balance=Decimal('1.0'),
+            tick=sample_tick,
+            has_active_sidebet=False,
+            last_sidebet_resolved_tick=last_resolved_tick
+        )
+
+        assert is_valid == False
+        assert "cooldown: 4 ticks remaining" in error
+
+    def test_sidebet_allowed_at_6_ticks(self, sample_tick):
+        """Test sidebet allowed at 6 ticks (well past cooldown)"""
+        last_resolved_tick = 100
+        sample_tick.tick = 106  # 6 ticks later
+
+        is_valid, error = validate_sidebet(
+            amount=Decimal('0.001'),
+            balance=Decimal('1.0'),
+            tick=sample_tick,
+            has_active_sidebet=False,
+            last_sidebet_resolved_tick=last_resolved_tick
+        )
+
+        assert is_valid == True
+        assert error is None
+
+    def test_sidebet_allowed_when_no_previous_bet(self, sample_tick):
+        """Test sidebet allowed when no previous bet exists"""
+        is_valid, error = validate_sidebet(
+            amount=Decimal('0.001'),
+            balance=Decimal('1.0'),
+            tick=sample_tick,
+            has_active_sidebet=False,
+            last_sidebet_resolved_tick=None  # No previous bet
+        )
+
+        assert is_valid == True
+        assert error is None
+
+    def test_sidebet_blocked_when_active(self, sample_tick):
+        """Test sidebet blocked when another is already active"""
+        is_valid, error = validate_sidebet(
+            amount=Decimal('0.001'),
+            balance=Decimal('1.0'),
+            tick=sample_tick,
+            has_active_sidebet=True,  # Already has active sidebet
+            last_sidebet_resolved_tick=None
+        )
+
+        assert is_valid == False
+        assert "already active" in error
+
+    def test_sidebet_insufficient_balance(self, sample_tick):
+        """Test sidebet blocked with insufficient balance"""
+        is_valid, error = validate_sidebet(
+            amount=Decimal('1.0'),
+            balance=Decimal('0.001'),  # Not enough balance
+            tick=sample_tick,
+            has_active_sidebet=False,
+            last_sidebet_resolved_tick=None
+        )
+
+        assert is_valid == False
+        assert "Insufficient balance" in error or "balance" in error.lower()

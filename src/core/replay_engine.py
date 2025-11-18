@@ -580,11 +580,12 @@ class ReplayEngine:
         self.state.current_tick = tick
 
         # Publish tick event
+        # Use (index + 1) so progress reaches 100% at final tick
         event_bus.publish(Events.GAME_TICK, {
             'tick': tick,
             'index': index,
             'total': total,
-            'progress': (index / total) * 100 if total else 0,
+            'progress': ((index + 1) / total) * 100 if total else 0,
             'mode': 'live' if self.is_live_mode else 'file'
         })
 
@@ -702,7 +703,8 @@ class ReplayEngine:
         ticks = self.ticks
         if not ticks:
             return 0.0
-        return self.current_index / len(ticks)
+        # Use (index + 1) so progress reaches 100% at final tick
+        return (self.current_index + 1) / len(ticks)
 
     def get_info(self) -> dict:
         """Get replay info"""

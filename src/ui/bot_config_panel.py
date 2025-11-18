@@ -64,8 +64,10 @@ class BotConfigPanel:
             Configuration dictionary with defaults
         """
         # Default configuration
+        # Phase 8 Fix: Default to UI_LAYER mode (for live trading preparation)
+        # BACKEND mode is for fast training, UI_LAYER learns realistic timing
         default_config = {
-            'execution_mode': 'backend',  # Default to BACKEND mode
+            'execution_mode': 'ui_layer',  # Default to UI_LAYER mode
             'strategy': 'conservative',    # Default strategy
             'bot_enabled': False           # Bot disabled by default
         }
@@ -81,9 +83,29 @@ class BotConfigPanel:
             except Exception as e:
                 logger.error(f"Failed to load bot config: {e}")
         else:
-            logger.info("No bot config found, using defaults")
+            # Phase 8 Fix: Create default config file on first run
+            logger.info("No bot config found, creating default configuration")
+            self._save_default_config(default_config)
 
         return default_config
+
+    def _save_default_config(self, config: Dict[str, Any]) -> None:
+        """
+        Save default configuration to file (called on first run)
+
+        Args:
+            config: Configuration dictionary to save
+        """
+        try:
+            # Ensure parent directory exists
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write config to file
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            logger.info(f"Created default bot config at {self.config_file}")
+        except Exception as e:
+            logger.error(f"Failed to create default config: {e}")
 
     def _save_config(self) -> bool:
         """

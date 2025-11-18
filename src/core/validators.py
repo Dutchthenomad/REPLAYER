@@ -23,7 +23,7 @@ def validate_bet_amount(
     """
     Validate bet amount is within bounds and affordable
 
-    AUDIT FIX: Added checks for negative, zero, and extreme values
+    AUDIT FIX: Added checks for negative, zero, extreme, NaN, and Infinity values
 
     Args:
         amount: Bet amount in SOL
@@ -35,6 +35,14 @@ def validate_bet_amount(
         - (True, None) if valid
         - (False, "error message") if invalid
     """
+    # AUDIT FIX: Check for NaN or Infinity (critical - prevents all downstream bugs)
+    if not amount.is_finite():
+        return False, f"Invalid {action} amount: {amount} (must be finite)"
+
+    # AUDIT FIX: Check balance for NaN or Infinity
+    if not balance.is_finite():
+        return False, f"Invalid balance: {balance} (must be finite)"
+
     # AUDIT FIX: Check for negative or zero amounts
     if amount <= 0:
         return False, f"{action} amount {amount} below minimum (must be positive)"
@@ -186,7 +194,7 @@ def validate_sidebet(
     # Check cooldown
     if last_sidebet_resolved_tick is not None:
         ticks_since_resolution = tick.tick - last_sidebet_resolved_tick
-        if ticks_since_resolution <= config.SIDEBET_COOLDOWN_TICKS:
+        if ticks_since_resolution < config.SIDEBET_COOLDOWN_TICKS:
             remaining = config.SIDEBET_COOLDOWN_TICKS - ticks_since_resolution
             return False, f"Sidebet cooldown: {remaining} ticks remaining"
 

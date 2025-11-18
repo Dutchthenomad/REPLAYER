@@ -118,8 +118,17 @@ class MainWindow:
         self._setup_event_handlers()
         self._setup_keyboard_shortcuts()
 
+        # Bug 3 Fix: Start executor if bot was enabled in config
+        if self.bot_enabled:
+            self.bot_executor.start()
+            self.bot_toggle_button.config(state=tk.NORMAL)
+            logger.info("Bot executor auto-started from config")
+
         # Start periodic bot result checker
         self._check_bot_results()
+
+        # Phase 8.6: Start periodic timing metrics updater
+        self._update_timing_metrics_loop()
 
         logger.info("MainWindow initialized with ReplayEngine and async bot executor")
 
@@ -171,6 +180,12 @@ class MainWindow:
         bot_menu.add_command(
             label="Configuration...",
             command=lambda: self.root.after(0, self._show_bot_config)
+        )
+
+        # Phase 8.6: Add timing metrics menu item
+        bot_menu.add_command(
+            label="Timing Metrics...",
+            command=lambda: self.root.after(0, self._show_timing_metrics)
         )
 
         # Live Feed Menu
@@ -560,7 +575,9 @@ class MainWindow:
 
         tk.Label(bot_top, text="STRATEGY:", bg='#1a1a1a', fg='white', font=('Arial', 9)).pack(side=tk.LEFT, padx=5)
 
-        self.strategy_var = tk.StringVar(value="conservative")
+        # Bug 3 Fix: Initialize strategy_var with loaded strategy from config (not hardcoded)
+        loaded_strategy = self.bot_config_panel.get_strategy()
+        self.strategy_var = tk.StringVar(value=loaded_strategy)
         self.strategy_dropdown = ttk.Combobox(
             bot_top,
             textvariable=self.strategy_var,
@@ -603,6 +620,11 @@ class MainWindow:
             fg='#666666'
         )
         self.sidebet_status_label.pack(side=tk.LEFT, padx=10)
+
+        # Phase 8.6: Draggable timing overlay (replaces inline labels)
+        # Create overlay widget (hidden initially, shown in UI_LAYER mode)
+        from ui.timing_overlay import TimingOverlay
+        self.timing_overlay = TimingOverlay(self.root, config_file="timing_overlay.json")
 
         # Initialize toast notifications
         self.toast = ToastNotification(self.root)
@@ -747,8 +769,26 @@ class MainWindow:
 
                 self.root.after(0, handle_game_complete)
 
-            # Connect to feed
-            self.live_feed.connect()
+            # Bug 6 Fix: Connect to feed in background thread (non-blocking)
+            # This prevents UI freeze during Socket.IO handshake (up to 20s timeout)
+            def connect_in_background():
+                try:
+                    self.live_feed.connect()
+                except Exception as e:
+                    logger.error(f"Background connection failed: {e}", exc_info=True)
+                    # Marshal error handling to main thread
+                    def handle_error():
+                        self.log(f"Failed to connect to live feed: {e}")
+                        if self.toast:
+                            self.toast.show(f"Live feed error: {e}", "error")
+                        self.live_feed = None
+                        self.live_feed_connected = False
+                        self.live_feed_var.set(False)
+                    self.root.after(0, handle_error)
+
+            import threading
+            connection_thread = threading.Thread(target=connect_in_background, daemon=True)
+            connection_thread.start()
 
         except Exception as e:
             logger.error(f"Failed to enable live feed: {e}", exc_info=True)
@@ -960,7 +1000,19 @@ class MainWindow:
                 text="Bot: Disabled",
                 fg='#666666'
             )
+
+            # Bug 5 Fix: Re-enable manual trading buttons when bot is disabled
+            # (but only if game is active)
+            current_tick = self.state.current_tick
+            if current_tick and current_tick.active:
+                self.buy_button.config(state=tk.NORMAL)
+                self.sell_button.config(state=tk.NORMAL)
+                self.sidebet_button.config(state=tk.NORMAL)
+
             self.log("🤖 Bot disabled")
+
+        # Bug 4 Fix: Sync menu checkbox with bot state
+        self.bot_var.set(self.bot_enabled)
 
     def _on_strategy_changed(self, event):
         """Handle strategy selection change"""
@@ -1101,6 +1153,9 @@ class MainWindow:
                 self.bot_enabled = False
                 self.bot_toggle_button.config(text="🤖 Enable Bot", bg='#666666')
                 self.bot_status_label.config(text="Bot: Disabled", fg='#666666')
+
+                # Bug 4 Fix: Sync menu checkbox when auto-shutdown occurs
+                self.bot_var.set(False)
 
             self.play_button.config(text="▶️ Play")
 
@@ -1455,6 +1510,155 @@ GAME RULES:
             self.log(f"Error showing configuration: {e}")
             if self.toast:
                 self.toast.show(f"Configuration error: {e}", "error")
+
+    # ========== TIMING METRICS (Phase 8.6) ==========
+
+    def _show_timing_metrics(self):
+        """
+        Show detailed timing metrics window (Phase 8.6 - Option C)
+        Modal popup with full statistics
+        """
+        if not self.browser_executor:
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Timing Metrics",
+                "Timing metrics are only available when browser executor is active.\n\n"
+                "Enable browser connection first."
+            )
+            return
+
+        # Get timing stats
+        stats = self.browser_executor.get_timing_stats()
+
+        # Create modal dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Bot Timing Metrics")
+        dialog.geometry("400x350")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Main container
+        main_frame = tk.Frame(dialog, bg='#1a1a1a', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = tk.Label(
+            main_frame,
+            text="Execution Timing Statistics",
+            font=('Arial', 14, 'bold'),
+            bg='#1a1a1a',
+            fg='#ffffff'
+        )
+        title_label.pack(pady=(0, 15))
+
+        # Stats frame
+        stats_frame = tk.Frame(main_frame, bg='#2a2a2a', relief=tk.RIDGE, bd=2)
+        stats_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+
+        # Format stats as labels
+        stats_text = [
+            ("Total Executions:", f"{stats['total_executions']}"),
+            ("Successful:", f"{stats['successful_executions']}"),
+            ("Success Rate:", f"{stats['success_rate']:.1%}"),
+            ("", ""),
+            ("Average Total Delay:", f"{stats['avg_total_delay_ms']:.1f}ms"),
+            ("Average Click Delay:", f"{stats['avg_click_delay_ms']:.1f}ms"),
+            ("Average Confirmation:", f"{stats['avg_confirmation_delay_ms']:.1f}ms"),
+            ("", ""),
+            ("P50 Delay:", f"{stats['p50_total_delay_ms']:.1f}ms"),
+            ("P95 Delay:", f"{stats['p95_total_delay_ms']:.1f}ms"),
+        ]
+
+        for i, (label_text, value_text) in enumerate(stats_text):
+            if not label_text:  # Separator
+                separator = tk.Frame(stats_frame, height=10, bg='#2a2a2a')
+                separator.pack(fill=tk.X)
+                continue
+
+            row_frame = tk.Frame(stats_frame, bg='#2a2a2a')
+            row_frame.pack(fill=tk.X, padx=15, pady=5)
+
+            label = tk.Label(
+                row_frame,
+                text=label_text,
+                font=('Arial', 10),
+                bg='#2a2a2a',
+                fg='#cccccc',
+                anchor=tk.W
+            )
+            label.pack(side=tk.LEFT)
+
+            value = tk.Label(
+                row_frame,
+                text=value_text,
+                font=('Arial', 10, 'bold'),
+                bg='#2a2a2a',
+                fg='#00ff00' if 'Success' in label_text else '#ffffff',
+                anchor=tk.E
+            )
+            value.pack(side=tk.RIGHT)
+
+        # Close button
+        close_button = tk.Button(
+            main_frame,
+            text="Close",
+            command=dialog.destroy,
+            bg='#3a3a3a',
+            fg='#ffffff',
+            font=('Arial', 10),
+            relief=tk.FLAT,
+            padx=20,
+            pady=5
+        )
+        close_button.pack()
+
+        # Center dialog
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+    def _update_timing_metrics_display(self):
+        """
+        Update draggable timing overlay (Phase 8.6)
+        Called every second when bot is active in UI_LAYER mode
+        """
+        if not self.browser_executor:
+            # Hide overlay if no executor
+            self.timing_overlay.hide()
+            return
+
+        # Get current execution mode
+        execution_mode = self.bot_config_panel.get_execution_mode()
+        from bot.execution_mode import ExecutionMode
+
+        # Only show timing overlay in UI_LAYER mode
+        if execution_mode == ExecutionMode.UI_LAYER:
+            # Show overlay
+            self.timing_overlay.show()
+
+            # Get timing stats
+            stats = self.browser_executor.get_timing_stats()
+
+            # Update overlay with stats
+            self.timing_overlay.update_stats(stats)
+        else:
+            # Hide overlay in BACKEND mode
+            self.timing_overlay.hide()
+
+    def _update_timing_metrics_loop(self):
+        """
+        Periodic timing metrics update loop (Phase 8.6)
+        Runs every 1 second to update inline timing display
+        """
+        try:
+            self._update_timing_metrics_display()
+        except Exception as e:
+            logger.error(f"Error updating timing metrics: {e}", exc_info=True)
+
+        # Schedule next update (every 1000ms = 1 second)
+        self.root.after(1000, self._update_timing_metrics_loop)
 
     # ========== BROWSER AUTOMATION CALLBACKS (Phase 8.5) ==========
 

@@ -14,9 +14,11 @@ Key Features:
 
 import asyncio
 import logging
+import time
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from decimal import Decimal
+from dataclasses import dataclass, field
 
 try:
     from browser_automation.rugs_browser import RugsBrowserManager, BrowserStatus
@@ -28,6 +30,95 @@ except ImportError as e:
     BROWSER_MANAGER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExecutionTiming:
+    """
+    Timing metrics for a single action execution
+
+    Phase 8.6: Tracks realistic execution delays
+    """
+    action: str  # BUY, SELL, SIDEBET
+    decision_time: float  # When bot decided to act
+    click_time: float  # When click was sent
+    confirmation_time: float  # When state change confirmed
+    success: bool  # Whether execution succeeded
+
+    @property
+    def decision_to_click_ms(self) -> float:
+        """Time from decision to click (milliseconds)"""
+        return (self.click_time - self.decision_time) * 1000
+
+    @property
+    def click_to_confirmation_ms(self) -> float:
+        """Time from click to confirmation (milliseconds)"""
+        return (self.confirmation_time - self.click_time) * 1000
+
+    @property
+    def total_delay_ms(self) -> float:
+        """Total execution delay (milliseconds)"""
+        return (self.confirmation_time - self.decision_time) * 1000
+
+
+@dataclass
+class TimingMetrics:
+    """
+    Aggregated timing metrics for bot performance tracking
+
+    Phase 8.6: Statistical analysis of execution timing
+    """
+    executions: List[ExecutionTiming] = field(default_factory=list)
+    max_history: int = 100  # Keep last 100 executions
+
+    def add_execution(self, timing: ExecutionTiming) -> None:
+        """Add execution timing (bounded to max_history)"""
+        self.executions.append(timing)
+        if len(self.executions) > self.max_history:
+            self.executions.pop(0)  # Remove oldest
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Calculate timing statistics"""
+        if not self.executions:
+            return {
+                'total_executions': 0,
+                'success_rate': 0.0,
+                'avg_total_delay_ms': 0.0,
+                'avg_click_delay_ms': 0.0,
+                'avg_confirmation_delay_ms': 0.0,
+                'p50_total_delay_ms': 0.0,
+                'p95_total_delay_ms': 0.0,
+            }
+
+        successful = [e for e in self.executions if e.success]
+        total_delays = [e.total_delay_ms for e in successful]
+        click_delays = [e.decision_to_click_ms for e in successful]
+        confirm_delays = [e.click_to_confirmation_ms for e in successful]
+
+        # Calculate percentiles safely (avoid index out of bounds)
+        if total_delays:
+            sorted_delays = sorted(total_delays)
+            n = len(sorted_delays)
+            # P50: Use index n//2, bounded to [0, n-1]
+            p50_index = max(0, min(n // 2, n - 1))
+            p50_value = sorted_delays[p50_index]
+            # P95: Use index int(n * 0.95), bounded to [0, n-1]
+            p95_index = max(0, min(int(n * 0.95), n - 1))
+            p95_value = sorted_delays[p95_index]
+        else:
+            p50_value = 0.0
+            p95_value = 0.0
+
+        return {
+            'total_executions': len(self.executions),
+            'successful_executions': len(successful),
+            'success_rate': len(successful) / len(self.executions),
+            'avg_total_delay_ms': sum(total_delays) / len(total_delays) if total_delays else 0.0,
+            'avg_click_delay_ms': sum(click_delays) / len(click_delays) if click_delays else 0.0,
+            'avg_confirmation_delay_ms': sum(confirm_delays) / len(confirm_delays) if confirm_delays else 0.0,
+            'p50_total_delay_ms': p50_value,
+            'p95_total_delay_ms': p95_value,
+        }
 
 
 class BrowserExecutor:
@@ -92,6 +183,10 @@ class BrowserExecutor:
         self.last_action = None
         self.last_action_time = None
         self.retry_count = 0
+
+        # Phase 8.6: Timing metrics tracking
+        self.timing_metrics = TimingMetrics()
+        self.current_decision_time = None  # Set when bot decides to act
 
         # Configuration
         self.max_retries = 3
@@ -469,26 +564,129 @@ class BrowserExecutor:
         """
         Read balance from browser DOM
 
-        Phase 8.6: To be implemented
-        For now, returns None (not implemented)
+        Phase 8.6: Polls browser state for accurate balance
 
         Returns:
             Balance in SOL, or None if not available
         """
-        # TODO: Phase 8.6
-        logger.warning("read_balance_from_browser not implemented yet (Phase 8.6)")
-        return None
+        if not self.browser_manager or not self.browser_manager.page:
+            logger.warning("Cannot read balance: browser not started")
+            return None
+
+        try:
+            # Try multiple selectors for balance display
+            balance_selectors = [
+                'text=/Balance.*([0-9.]+)\\s*SOL/i',
+                '[data-balance]',
+                '.balance',
+                'span:has-text("SOL")',
+            ]
+
+            for selector in balance_selectors:
+                try:
+                    element = await asyncio.wait_for(
+                        self.browser_manager.page.query_selector(selector),
+                        timeout=2.0
+                    )
+                    if element:
+                        text = await element.text_content()
+                        # Extract number from text like "Balance: 1.234 SOL"
+                        import re
+                        match = re.search(r'([0-9]+\.[0-9]+)', text)
+                        if match:
+                            balance = Decimal(match.group(1))
+                            logger.debug(f"Read balance from browser: {balance} SOL")
+                            return balance
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    continue
+
+            logger.warning("Could not find balance element in browser DOM")
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to read balance from browser: {e}")
+            return None
 
     async def read_position_from_browser(self) -> Optional[Dict[str, Any]]:
         """
         Read position from browser DOM
 
-        Phase 8.6: To be implemented
-        For now, returns None (not implemented)
+        Phase 8.6: Polls browser state for open position
 
         Returns:
-            Position dict, or None if not available
+            Position dict with entry_price, amount, status; or None if no position
         """
-        # TODO: Phase 8.6
-        logger.warning("read_position_from_browser not implemented yet (Phase 8.6)")
-        return None
+        if not self.browser_manager or not self.browser_manager.page:
+            logger.warning("Cannot read position: browser not started")
+            return None
+
+        try:
+            # Try multiple selectors for position display
+            position_selectors = [
+                '[data-position]',
+                '.position',
+                'text=/Position.*([0-9.]+)x/i',
+            ]
+
+            for selector in position_selectors:
+                try:
+                    element = await asyncio.wait_for(
+                        self.browser_manager.page.query_selector(selector),
+                        timeout=2.0
+                    )
+                    if element:
+                        text = await element.text_content()
+                        # Extract position info like "Position: 1.5x, 0.01 SOL"
+                        import re
+                        price_match = re.search(r'([0-9]+\.[0-9]+)x', text)
+                        amount_match = re.search(r'([0-9]+\.[0-9]+)\\s*SOL', text)
+
+                        if price_match:
+                            entry_price = Decimal(price_match.group(1))
+                            amount = Decimal(amount_match.group(1)) if amount_match else Decimal('0.001')
+
+                            position = {
+                                'entry_price': entry_price,
+                                'amount': amount,
+                                'status': 'active',
+                                'entry_tick': 0,  # Unknown from DOM
+                            }
+                            logger.debug(f"Read position from browser: {entry_price}x, {amount} SOL")
+                            return position
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    continue
+
+            # No position found
+            logger.debug("No position found in browser DOM")
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to read position from browser: {e}")
+            return None
+
+    def get_timing_stats(self) -> Dict[str, Any]:
+        """
+        Get timing statistics for UI display
+
+        Phase 8.6: Exposes timing metrics for dashboard
+
+        Returns:
+            Dictionary with timing statistics
+        """
+        return self.timing_metrics.get_stats()
+
+    def record_decision_time(self) -> None:
+        """
+        Record when bot made decision to act
+
+        Phase 8.6: Captures decision timestamp for timing analysis
+        Should be called by bot BEFORE executing action
+        """
+        self.current_decision_time = time.time()
+        logger.debug("Decision time recorded")
