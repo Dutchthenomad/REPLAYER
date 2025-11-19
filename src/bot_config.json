@@ -1,0 +1,7 @@
+{
+  "execution_mode": "ui_layer",
+  "strategy": "conservative",
+  "bot_enabled": false,
+  "button_depress_duration_ms": 50,
+  "inter_click_pause_ms": 100
+}

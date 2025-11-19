@@ -6,12 +6,14 @@ from .base import TradingStrategy
 from .conservative import ConservativeStrategy
 from .aggressive import AggressiveStrategy
 from .sidebet import SidebetStrategy
+from .foundational import FoundationalStrategy
 
 # Strategy registry
 STRATEGIES = {
     'conservative': ConservativeStrategy,
     'aggressive': AggressiveStrategy,
     'sidebet': SidebetStrategy,
+    'foundational': FoundationalStrategy,  # Phase B: Evidence-based strategy
 }
 
 
@@ -49,6 +51,7 @@ __all__ = [
     'ConservativeStrategy',
     'AggressiveStrategy',
     'SidebetStrategy',
+    'FoundationalStrategy',  # Phase B
     'get_strategy',
     'list_strategies',
 ]

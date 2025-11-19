@@ -53,6 +53,8 @@ class BotConfigPanel:
         self.execution_mode_var = None
         self.strategy_var = None
         self.bot_enabled_var = None
+        self.button_depress_duration_var = None  # Phase A.7: Button depression duration
+        self.inter_click_pause_var = None        # Phase A.7: Inter-click pause
 
         logger.info(f"BotConfigPanel initialized (config: {self.config_file})")
 
@@ -69,7 +71,9 @@ class BotConfigPanel:
         default_config = {
             'execution_mode': 'ui_layer',  # Default to UI_LAYER mode
             'strategy': 'conservative',    # Default strategy
-            'bot_enabled': False           # Bot disabled by default
+            'bot_enabled': False,          # Bot disabled by default
+            'button_depress_duration_ms': 50,  # Visual feedback duration (ms)
+            'inter_click_pause_ms': 100   # Pause between button clicks (ms)
         }
 
         # Try to load existing config
@@ -140,7 +144,7 @@ class BotConfigPanel:
         # Create modal dialog
         self.dialog = tk.Toplevel(self.parent)
         self.dialog.title("Bot Configuration")
-        self.dialog.geometry("400x300")
+        self.dialog.geometry("450x450")  # Phase A.7: Increased height for timing controls
         self.dialog.resizable(False, False)
 
         # Make dialog modal
@@ -244,6 +248,59 @@ class BotConfigPanel:
         enable_checkbox.pack(anchor=tk.W)
 
         # ========================================================================
+        # TIMING CONFIGURATION (Phase A.7)
+        # ========================================================================
+
+        timing_frame = ttk.LabelFrame(main_frame, text="UI Button Timing (UI Layer Mode)", padding="10")
+        timing_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Button depress duration
+        depress_label = ttk.Label(timing_frame, text="Button depression duration (ms):")
+        depress_label.grid(row=0, column=0, sticky=tk.W, pady=5)
+
+        self.button_depress_duration_var = tk.IntVar(value=self.config.get('button_depress_duration_ms', 50))
+
+        depress_spinbox = ttk.Spinbox(
+            timing_frame,
+            from_=10,
+            to=500,
+            textvariable=self.button_depress_duration_var,
+            width=10
+        )
+        depress_spinbox.grid(row=0, column=1, sticky=tk.W, padx=(10, 0), pady=5)
+
+        depress_info = ttk.Label(
+            timing_frame,
+            text="(Visual feedback: SUNKEN relief duration)",
+            font=('Arial', 8),
+            foreground='gray'
+        )
+        depress_info.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
+
+        # Inter-click pause
+        pause_label = ttk.Label(timing_frame, text="Pause between button clicks (ms):")
+        pause_label.grid(row=2, column=0, sticky=tk.W, pady=5)
+
+        self.inter_click_pause_var = tk.IntVar(value=self.config.get('inter_click_pause_ms', 100))
+
+        pause_spinbox = ttk.Spinbox(
+            timing_frame,
+            from_=0,
+            to=5000,
+            textvariable=self.inter_click_pause_var,
+            width=10
+        )
+        pause_spinbox.grid(row=2, column=1, sticky=tk.W, padx=(10, 0), pady=5)
+
+        pause_info = ttk.Label(
+            timing_frame,
+            text="(Human timing: 60-100ms typical, 500ms for slow demo)",
+            font=('Arial', 8),
+            foreground='gray'
+        )
+        pause_info.grid(row=3, column=0, columnspan=2, sticky=tk.W)
+
+        # ========================================================================
         # BUTTONS
         # ========================================================================
 
@@ -278,6 +335,8 @@ class BotConfigPanel:
         self.config['execution_mode'] = self.execution_mode_var.get()
         self.config['strategy'] = self.strategy_var.get()
         self.config['bot_enabled'] = self.bot_enabled_var.get()
+        self.config['button_depress_duration_ms'] = self.button_depress_duration_var.get()  # Phase A.7
+        self.config['inter_click_pause_ms'] = self.inter_click_pause_var.get()  # Phase A.7
 
         # Save config to file
         if self._save_config():

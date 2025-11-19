@@ -163,6 +163,51 @@ class BrowserExecutor:
         '[data-input="bet-amount"]',
     ]
 
+    # Phase A.3: Increment button selectors for incremental clicking
+    CLEAR_BUTTON_SELECTORS = [
+        'button:has-text("X")',
+        'button[title*="clear"]',
+        '[data-action="clear-bet"]',
+    ]
+
+    INCREMENT_001_SELECTORS = [
+        'button:has-text("+0.001")',
+        'button[data-increment="0.001"]',
+    ]
+
+    INCREMENT_01_SELECTORS = [
+        'button:has-text("+0.01")',
+        'button[data-increment="0.01"]',
+    ]
+
+    INCREMENT_10_SELECTORS = [
+        'button:has-text("+0.1")',
+        'button[data-increment="0.1"]',
+    ]
+
+    INCREMENT_1_SELECTORS = [
+        'button:has-text("+1")',
+        'button[data-increment="1"]',
+    ]
+
+    HALF_BUTTON_SELECTORS = [
+        'button:has-text("1/2")',
+        'button:has-text("÷2")',
+        'button[data-action="half"]',
+    ]
+
+    DOUBLE_BUTTON_SELECTORS = [
+        'button:has-text("X2")',
+        'button:has-text("×2")',
+        'button[data-action="double"]',
+    ]
+
+    MAX_BUTTON_SELECTORS = [
+        'button:has-text("MAX")',
+        'button:has-text("All")',
+        'button[data-action="max"]',
+    ]
+
     def __init__(self, profile_name: str = "rugs_fun_phantom"):
         """
         Initialize browser executor
@@ -315,6 +360,9 @@ class BrowserExecutor:
         """
         Click BUY button in browser
 
+        Phase A.3 UPDATE: Now uses incremental button clicking instead
+        of direct text entry for human-like behavior.
+
         Args:
             amount: Optional bet amount to set before clicking
 
@@ -328,10 +376,10 @@ class BrowserExecutor:
 
             page = self.browser_manager.page
 
-            # Set bet amount if provided
+            # Set bet amount if provided (Phase A.3: use incremental clicking)
             if amount is not None:
-                if not await self._set_bet_amount_in_browser(amount):
-                    logger.error("Failed to set bet amount")
+                if not await self._build_amount_incrementally_in_browser(amount):
+                    logger.error("Failed to build bet amount incrementally")
                     return False
 
             # Find and click BUY button
@@ -414,6 +462,9 @@ class BrowserExecutor:
         """
         Click SIDEBET button in browser
 
+        Phase A.3 UPDATE: Now uses incremental button clicking instead
+        of direct text entry for human-like behavior.
+
         Args:
             amount: Optional bet amount to set before clicking
 
@@ -427,10 +478,10 @@ class BrowserExecutor:
 
             page = self.browser_manager.page
 
-            # Set bet amount if provided
+            # Set bet amount if provided (Phase A.3: use incremental clicking)
             if amount is not None:
-                if not await self._set_bet_amount_in_browser(amount):
-                    logger.error("Failed to set bet amount")
+                if not await self._build_amount_incrementally_in_browser(amount):
+                    logger.error("Failed to build bet amount incrementally")
                     return False
 
             # Find and click SIDEBET button
@@ -554,6 +605,150 @@ class BrowserExecutor:
 
         except Exception as e:
             logger.error(f"Error setting sell percentage: {e}", exc_info=True)
+            return False
+
+    async def _click_increment_button_in_browser(self, button_type: str, times: int = 1) -> bool:
+        """
+        Click an increment button multiple times in browser
+
+        Phase A.3: Enables bot to build amounts incrementally by clicking
+        browser buttons instead of directly setting text, matching human behavior.
+
+        Args:
+            button_type: '+0.001', '+0.01', '+0.1', '+1', '1/2', 'X2', 'MAX', 'X'
+            times: Number of times to click (default 1)
+
+        Returns:
+            True if successful, False otherwise
+
+        Example:
+            _click_increment_button_in_browser('+0.001', 3)  # 0.0 → 0.003
+        """
+        if not self.is_ready():
+            logger.error("Browser not ready for button clicking")
+            return False
+
+        try:
+            page = self.browser_manager.page
+
+            # Map button type to selectors
+            selector_map = {
+                'X': self.CLEAR_BUTTON_SELECTORS,
+                '+0.001': self.INCREMENT_001_SELECTORS,
+                '+0.01': self.INCREMENT_01_SELECTORS,
+                '+0.1': self.INCREMENT_10_SELECTORS,
+                '+1': self.INCREMENT_1_SELECTORS,
+                '1/2': self.HALF_BUTTON_SELECTORS,
+                'X2': self.DOUBLE_BUTTON_SELECTORS,
+                'MAX': self.MAX_BUTTON_SELECTORS,
+            }
+
+            selectors = selector_map.get(button_type)
+            if not selectors:
+                logger.error(f"Unknown button type: {button_type}")
+                return False
+
+            # Find button using selectors
+            button = None
+            for selector in selectors:
+                try:
+                    button = await page.wait_for_selector(
+                        selector,
+                        timeout=self.action_timeout * 1000,
+                        state='visible'
+                    )
+                    if button:
+                        break
+                except Exception:
+                    continue
+
+            if not button:
+                logger.error(f"Could not find {button_type} button with any selector")
+                return False
+
+            # Click button {times} times with human delays (10-50ms)
+            for i in range(times):
+                await button.click()
+
+                # Human delay between clicks (10-50ms)
+                if i < times - 1:
+                    import random
+                    delay = random.uniform(0.010, 0.050)  # 10-50ms
+                    await asyncio.sleep(delay)
+
+            logger.debug(f"Browser: Clicked {button_type} button {times}x")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to click {button_type} button in browser: {e}")
+            return False
+
+    async def _build_amount_incrementally_in_browser(self, target_amount: Decimal) -> bool:
+        """
+        Build to target amount by clicking increment buttons in browser
+
+        Phase A.3: Matches human behavior of clicking buttons to reach
+        desired amount, rather than directly typing. Creates realistic
+        timing patterns for live trading.
+
+        Strategy:
+        1. Click 'X' to clear to 0.0
+        2. Calculate optimal button sequence (largest first)
+        3. Click buttons to reach target
+
+        Examples:
+            0.003 → X, +0.001 (3x)
+            0.015 → X, +0.01 (1x), +0.001 (5x)
+            1.234 → X, +1 (1x), +0.1 (2x), +0.01 (3x), +0.001 (4x)
+
+        Args:
+            target_amount: Decimal target amount
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Clear to 0.0 first
+            if not await self._click_increment_button_in_browser('X'):
+                logger.error("Failed to clear bet amount in browser")
+                return False
+
+            # Human delay after clear
+            import random
+            await asyncio.sleep(random.uniform(0.010, 0.050))
+
+            # Calculate button sequence (greedy algorithm, largest first)
+            remaining = float(target_amount)
+            sequence = []
+
+            increments = [
+                (1.0, '+1'),
+                (0.1, '+0.1'),
+                (0.01, '+0.01'),
+                (0.001, '+0.001'),
+            ]
+
+            for increment_value, button_type in increments:
+                count = int(remaining / increment_value)
+                if count > 0:
+                    sequence.append((button_type, count))
+                    remaining -= count * increment_value
+                    remaining = round(remaining, 3)  # Avoid floating point errors
+
+            # Execute sequence
+            for button_type, count in sequence:
+                if not await self._click_increment_button_in_browser(button_type, count):
+                    logger.error(f"Failed to click {button_type} {count} times in browser")
+                    return False
+
+                # Human delay between different button types
+                await asyncio.sleep(random.uniform(0.010, 0.050))
+
+            logger.info(f"Browser: Built amount {target_amount} incrementally: {sequence}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to build amount incrementally in browser: {e}")
             return False
 
     # ========================================================================

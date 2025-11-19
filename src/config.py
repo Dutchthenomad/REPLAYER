@@ -28,7 +28,7 @@ class Config:
     # ========== Financial Settings ==========
     FINANCIAL = {
         'initial_balance': Decimal('0.100'),
-        'default_bet': Decimal('0.001'),
+        'default_bet': Decimal('0.0'),  # Changed from 0.001 - bot must set explicitly
         'min_bet': Decimal('0.001'),
         'max_bet': Decimal('1.0'),
         'decimal_precision': 10,

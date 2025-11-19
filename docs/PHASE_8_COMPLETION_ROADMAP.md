@@ -62,7 +62,7 @@ Phase 8 infrastructure is **90% complete** with all critical bugs fixed and timi
   - Menu integration: "Bot → Configuration..."
 
 #### **Phase 8.5: Browser Automation** ✅
-- **File**: `src/bot/browser_executor.py` (517 lines)
+- **File**: `src/bot/browser_executor.py` (860 lines)
 - **Features**:
   - `BrowserExecutor` class with async browser control
   - Browser menu in menu bar
@@ -70,88 +70,205 @@ Phase 8 infrastructure is **90% complete** with all critical bugs fixed and timi
   - Thread-safe async operations
   - Integration with CV-BOILER-PLATE-FORK automation
 
+#### **Phase 8.6: Timing Metrics** ✅
+- **Files**: `src/ui/timing_overlay.py` (354 lines), `src/bot/browser_executor.py`
+- **Features**:
+  - `TimingOverlay` draggable widget (collapsible, persistent position)
+  - `ExecutionTiming` + `TimingMetrics` dataclasses
+  - Statistical timing analysis (avg, P50, P95 delays)
+  - Auto-show/hide based on execution mode
+  - Toggle menu: "Bot → Show Timing Overlay"
+- **Tests**: 5 new tests in `src/tests/test_ui/test_timing_metrics.py`
+
 ---
 
-## Critical Gaps Requiring Immediate Fix
+## Phase A: Bot System Optimization (CURRENT)
 
-### ❌ Gap 1: Bet Amount Defaults to 0.001 (HIGH PRIORITY)
+**Status**: 60% Complete (A.1-A.3 done, A.4 in progress, A.5 pending)
+**Goal**: Make bot click buttons incrementally like a human, matching real game behavior
+
+### ✅ Phase A.1: Change Default Bet to 0.0 (COMPLETE)
 
 **User Requirement**: "Position size should normally be 0 so the bot has to begin by entering the position size"
 
-**Current Implementation**:
+**Implementation**:
 ```python
 # src/config.py line 31
-'default_bet': Decimal('0.001'),
-
-# src/ui/main_window.py line 431
-self.bet_entry.insert(0, str(self.config.FINANCIAL['default_bet']))
+'default_bet': Decimal('0.0'),  # Changed from 0.001
 ```
 
-**Impact**: Bot can accidentally execute trades with pre-filled amount instead of forcing explicit entry
+**Impact**: Bot MUST explicitly set bet amount before trading (matches real game)
 
-**Fix**:
-```python
-# Option 1: Change config (RECOMMENDED)
-# src/config.py line 31
-'default_bet': Decimal('0'),
-
-# Option 2: Hardcode zero in UI
-# src/ui/main_window.py line 431
-self.bet_entry.insert(0, "0")
-```
-
-**Verification**: Run app, check bet entry shows "0", try BUY without entering amount (should fail validation)
+**Verification**: ✅ Run app, bet entry shows "0.0" on startup
 
 ---
 
-### ❌ Gap 2: Execution Mode Defaults to BACKEND (HIGH PRIORITY)
+### ✅ Phase A.2: Incremental Button Clicking - BotUIController (COMPLETE)
 
-**User Requirement**: "Bot system uses the button interface just like a human player"
+**User Requirement**: "The bot needs to visibly click all the buttons in the UI just like a human being would"
 
-**Current Implementation**:
+**Files Modified**: `src/bot/ui_controller.py` (484 lines)
+
+**New Methods**:
 ```python
-# src/ui/bot_config_panel.py line 68
-'execution_mode': 'backend',  # Default to BACKEND mode
+# Click increment button multiple times
+def click_increment_button(self, button_type: str, times: int = 1) -> bool:
+    # button_type: 'X', '+0.001', '+0.01', '+0.1', '+1', '1/2', 'X2', 'MAX'
+    # Examples:
+    #   click_increment_button('+0.001', 3)  # 0.0 → 0.003
+
+# Build amount incrementally (greedy algorithm)
+def build_amount_incrementally(self, target_amount: Decimal) -> bool:
+    # Strategy: Clear → largest buttons first → human delays
+    # Examples:
+    #   0.003 → X, +0.001 (3x)
+    #   0.015 → X, +0.01 (1x), +0.001 (5x)
+    #   1.234 → X, +1 (1x), +0.1 (2x), +0.01 (3x), +0.001 (4x)
 ```
 
-**Impact**: Bot bypasses UI layer by default, defeating Phase 8 purpose
-
-**Fix**:
+**Updated Methods**:
 ```python
-# src/ui/bot_config_panel.py line 68
-'execution_mode': 'ui_layer',  # Default to UI_LAYER mode
+# execute_buy_with_amount() - Now uses incremental clicking
+# execute_sidebet_with_amount() - Now uses incremental clicking
 ```
 
-**Documentation Update**: Clarify BACKEND mode is for training only (fast, no UI delays)
+**Timing**: 10-50ms delays between button clicks (realistic human behavior)
 
-**Verification**: Open "Bot → Configuration...", check "UI Layer" is selected by default
+**Verification**: ✅ Watch bot play in UI_LAYER mode → see visible button clicks
 
 ---
 
-### ❌ Gap 3: No Initial Bot Config File (MEDIUM PRIORITY)
+### ✅ Phase A.3: Incremental Button Clicking - BrowserExecutor (COMPLETE)
 
-**Issue**: `bot_config.json` does not exist until user opens config dialog
+**Goal**: Same incremental clicking in live browser for deployment
 
-**Impact**: Bot always uses hardcoded defaults on first run
+**Files Modified**: `src/bot/browser_executor.py` (860 lines, +343 lines added)
 
-**Fix**:
+**New Selectors** (lines 167-209):
 ```python
-# Option 1: Generate on first run (RECOMMENDED)
-# src/main.py - Add on startup:
-if not os.path.exists('bot_config.json'):
-    default_config = {
-        'execution_mode': 'ui_layer',
-        'strategy': 'conservative',
-        'bot_enabled': False
-    }
-    with open('bot_config.json', 'w') as f:
-        json.dump(default_config, f, indent=2)
-
-# Option 2: User generates manually
-# Run app → Bot → Configuration... → Click OK
+CLEAR_BUTTON_SELECTORS = ['button:has-text("X")', ...]
+INCREMENT_001_SELECTORS = ['button:has-text("+0.001")', ...]
+INCREMENT_01_SELECTORS = ['button:has-text("+0.01")', ...]
+INCREMENT_10_SELECTORS = ['button:has-text("+0.1")', ...]
+INCREMENT_1_SELECTORS = ['button:has-text("+1")', ...]
+HALF_BUTTON_SELECTORS = ['button:has-text("1/2")', ...]
+DOUBLE_BUTTON_SELECTORS = ['button:has-text("X2")', ...]
+MAX_BUTTON_SELECTORS = ['button:has-text("MAX")', ...]
 ```
 
-**Verification**: Check `bot_config.json` exists with correct defaults
+**New Methods** (lines 604-746):
+```python
+# Click increment button in browser (async)
+async def _click_increment_button_in_browser(
+    self, button_type: str, times: int = 1
+) -> bool:
+    # Mirrors BotUIController.click_increment_button()
+    # Uses Playwright selectors to find and click browser buttons
+
+# Build amount incrementally in browser (async)
+async def _build_amount_incrementally_in_browser(
+    self, target_amount: Decimal
+) -> bool:
+    # Mirrors BotUIController.build_amount_incrementally()
+    # Same greedy algorithm, same timing delays (10-50ms)
+```
+
+**Updated Methods**:
+```python
+# click_buy() - Now uses _build_amount_incrementally_in_browser()
+# click_sidebet() - Now uses _build_amount_incrementally_in_browser()
+```
+
+**Key Difference**: Asynchronous (await), uses Playwright DOM selectors
+
+**Verification**: ✅ Syntax validated, awaits live browser testing
+
+---
+
+### 🔄 Phase A.4: Update Documentation (IN PROGRESS)
+
+**Goal**: Document incremental clicking feature in all relevant docs
+
+**Files Updated**:
+- ✅ `CLAUDE.md` - Added "Incremental Button Clicking (Phase A.2-A.3)" section
+  - Code examples for both BotUIController and BrowserExecutor
+  - Button click strategy explanation
+  - Comparison with old direct entry approach
+  - Partial sell flow documentation
+- 🔄 `docs/PHASE_8_COMPLETION_ROADMAP.md` - This file (updating now)
+
+**Remaining**:
+- README.md - Add Phase A summary to feature list
+- Update Phase 8.7 checklist to include incremental clicking verification
+
+---
+
+### ⏳ Phase A.5: Write Unit Tests (PENDING)
+
+**Goal**: Comprehensive tests for incremental clicking logic
+
+**Test Files to Create**:
+```python
+# src/tests/test_bot/test_ui_controller_incremental.py
+def test_click_increment_button_001():
+    # Verify +0.001 button clicked correct number of times
+
+def test_build_amount_incrementally_simple():
+    # Test: 0.003 → X, +0.001 (3x)
+
+def test_build_amount_incrementally_complex():
+    # Test: 1.234 → X, +1 (1x), +0.1 (2x), +0.01 (3x), +0.001 (4x)
+
+def test_build_amount_incrementally_timing():
+    # Verify 10-50ms delays between clicks
+
+def test_execute_buy_with_incremental_amount():
+    # End-to-end test: build amount → click BUY
+
+def test_execute_sidebet_with_incremental_amount():
+    # End-to-end test: build amount → click SIDEBET
+```
+
+**Estimated Time**: 2 hours
+
+---
+
+## Critical Gaps - RESOLVED in Phase A
+
+### ✅ Gap 1: Bet Amount Defaults to 0.001 → FIXED (Phase A.1)
+
+**Solution Applied**: Changed `src/config.py` line 31 to `'default_bet': Decimal('0.0')`
+
+**Verification**: ✅ Bet entry now shows "0.0" on startup
+
+---
+
+### ✅ Gap 2: Bot Doesn't Click Buttons Like Human → FIXED (Phase A.2-A.3)
+
+**Solution Applied**:
+- Phase A.2: Added incremental clicking to BotUIController
+- Phase A.3: Added incremental clicking to BrowserExecutor
+- Bot now visibly clicks +0.001, +0.01, etc. buttons to build amounts
+
+**Verification**: ✅ Watch bot in UI_LAYER mode → see button clicks
+
+---
+
+### ⏳ Gap 3: Execution Mode Defaults to BACKEND → FIXED (Session 2025-11-18)
+
+**Solution Applied**: Changed `src/ui/bot_config_panel.py` to default to `ui_layer`
+
+**Verification**: ✅ Config dialog shows "UI Layer" selected by default
+
+---
+
+### ⏳ Gap 4: No Initial Bot Config File → FIXED (Session 2025-11-18)
+
+**Solution Applied**: Added `_save_default_config()` method to create `bot_config.json` on first run
+
+**Verification**: ✅ Config file created with correct defaults on startup
+
+---
 
 ---
 

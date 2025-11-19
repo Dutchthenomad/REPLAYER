@@ -38,21 +38,39 @@ class BotUIController:
     a live browser via Playwright using identical timing.
     """
 
-    def __init__(self, main_window):
+    def __init__(self, main_window, button_depress_duration_ms: int = 50, inter_click_pause_ms: int = 100):
         """
         Initialize UI controller
 
         Args:
             main_window: MainWindow instance with UI widgets
+            button_depress_duration_ms: Duration to show button as pressed (milliseconds)
+            inter_click_pause_ms: Pause between button clicks (milliseconds)
         """
         self.main_window = main_window
         self.root = main_window.root
+
+        # Phase A.7: Configurable timing (from bot_config.json)
+        self.button_depress_duration_ms = button_depress_duration_ms  # Visual feedback duration
+        self.inter_click_pause_ms = inter_click_pause_ms  # Pause between clicks
 
         # Human delay range (as specified by user for 250ms game ticks)
         self.min_delay = 0.010  # 10ms
         self.max_delay = 0.050  # 50ms
 
-        logger.info("BotUIController initialized (UI-layer execution mode)")
+        # Store button widget references (Phase A.2 - Incremental clicking)
+        self.clear_button = main_window.clear_button
+        self.increment_001_button = main_window.increment_001_button
+        self.increment_01_button = main_window.increment_01_button
+        self.increment_10_button = main_window.increment_10_button
+        self.increment_1_button = main_window.increment_1_button
+        self.half_button = main_window.half_button
+        self.double_button = main_window.double_button
+        self.max_button = main_window.max_button
+
+        logger.info(f"BotUIController initialized (UI-layer execution mode, "
+                   f"button_depress={button_depress_duration_ms}ms, "
+                   f"inter_click_pause={inter_click_pause_ms}ms)")
 
     def _schedule_ui_action(self, action):
         """
@@ -112,6 +130,229 @@ class BotUIController:
         except Exception as e:
             logger.error(f"Failed to set bet amount: {e}")
             return False
+
+    def click_increment_button(self, button_type: str, times: int = 1) -> bool:
+        """
+        Click an increment button multiple times (human-like behavior)
+
+        Phase A.2: Enables bot to build amounts incrementally by clicking
+        buttons instead of directly setting text, matching human behavior.
+
+        Args:
+            button_type: '+0.001', '+0.01', '+0.1', '+1', '1/2', 'X2', 'MAX', 'X'
+            times: Number of times to click (default 1)
+
+        Returns:
+            True if successful
+
+        Example:
+            click_increment_button('+0.001', 3)  # 0.0 → 0.003
+        """
+        button_map = {
+            'X': self.clear_button,
+            '+0.001': self.increment_001_button,
+            '+0.01': self.increment_01_button,
+            '+0.1': self.increment_10_button,
+            '+1': self.increment_1_button,
+            '1/2': self.half_button,
+            'X2': self.double_button,
+            'MAX': self.max_button,
+        }
+
+        button = button_map.get(button_type)
+        if not button:
+            logger.error(f"Unknown button type: {button_type}")
+            return False
+
+        try:
+            # Click button {times} times with human delays
+            for i in range(times):
+                def _click_button_with_visual_feedback(btn=button):
+                    """
+                    Click button with visual depression effect
+
+                    Phase A.7: Configurable visual feedback duration + color indication
+                    """
+                    # Save original button state
+                    original_relief = btn.cget('relief')
+                    try:
+                        original_bg = btn.cget('background')
+                    except:
+                        original_bg = None
+
+                    # Press button down (sunken relief + color change)
+                    btn.config(relief=tk.SUNKEN)
+                    if original_bg:
+                        btn.config(background='#90EE90')  # Light green when pressed
+
+                    # Force UI update to show pressed state
+                    btn.update_idletasks()
+
+                    # Hold pressed state (configurable duration)
+                    self.root.after(self.button_depress_duration_ms,
+                                  lambda: self._release_button(btn, original_relief, original_bg))
+
+                    # Execute the button's command
+                    btn.invoke()
+
+                self._schedule_ui_action(_click_button_with_visual_feedback)
+
+                # Phase A.7: Configurable delay AFTER EVERY click
+                # Wait for button depression animation + pause before next click
+                # Typical: 60-100ms for realistic play, 500ms for slow demo
+                time.sleep(self.inter_click_pause_ms / 1000.0)  # Convert ms to seconds
+
+            logger.debug(f"UI: Clicked {button_type} button {times}x")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to click {button_type} button: {e}")
+            return False
+
+    def _release_button(self, button, original_relief, original_bg=None):
+        """
+        Release button back to normal state
+
+        Phase A.7: Visual feedback helper (relief + color restoration)
+        """
+        try:
+            button.config(relief=original_relief)
+            if original_bg:
+                button.config(background=original_bg)
+        except Exception as e:
+            # Button might have been destroyed
+            logger.debug(f"Could not release button: {e}")
+
+    def build_amount_incrementally(self, target_amount: Decimal) -> bool:
+        """
+        Build to target amount by clicking increment buttons
+
+        Phase A.2: Matches human behavior of clicking buttons to reach
+        desired amount, rather than directly typing. Creates realistic
+        timing patterns for RL training.
+
+        Phase A.6 UPDATE: Smart algorithm using 1/2 and X2 buttons for efficiency.
+
+        Strategy:
+        1. Click 'X' to clear to 0.0
+        2. Calculate optimal button sequence using:
+           - Standard increments (+1, +0.1, +0.01, +0.001)
+           - 1/2 button (halve current amount)
+           - X2 button (double current amount)
+        3. Choose most efficient path (fewest total clicks)
+
+        Optimized Examples:
+            0.005 → X, +0.01, 1/2 (3 clicks vs 5 clicks)
+            0.012 → X, +0.01, 1/2, +0.001, X2 (5 clicks vs 12 clicks)
+            0.003 → X, +0.001 (3x) (4 clicks - no optimization needed)
+
+        Args:
+            target_amount: Decimal target amount
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Clear to 0.0 first
+            if not self.click_increment_button('X'):
+                logger.error("Failed to clear bet amount")
+                return False
+
+            # Phase A.6: 500ms pause after clear (slow demo mode for visibility)
+            time.sleep(0.500)
+
+            # Calculate optimal button sequence using smart algorithm
+            sequence = self._calculate_optimal_sequence(float(target_amount))
+
+            # Execute sequence
+            # NOTE: click_increment_button already handles 500ms pauses between each click,
+            # so we don't need additional delays here
+            for i, (button_type, count) in enumerate(sequence):
+                if not self.click_increment_button(button_type, count):
+                    logger.error(f"Failed to click {button_type} {count} times")
+                    return False
+
+            logger.info(f"UI: Built amount {target_amount} incrementally: {sequence}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to build amount incrementally: {e}")
+            return False
+
+    def _calculate_optimal_sequence(self, target: float) -> list:
+        """
+        Calculate optimal button sequence using 1/2 and X2 buttons
+
+        Phase A.6: Smart algorithm that considers:
+        - Standard increments (greedy: largest first)
+        - Halving (if target is half of a round number)
+        - Doubling (if current value × 2 gets closer to target)
+
+        Args:
+            target: Target amount as float
+
+        Returns:
+            List of (button_type, count) tuples
+        """
+        # Try to find efficient patterns using 1/2 and X2
+
+        # Check if target is half of a round increment
+        # e.g., 0.005 = 0.01 / 2 (2 clicks vs 5 clicks)
+        round_increments = [1.0, 0.1, 0.01, 0.001]
+        for inc in round_increments:
+            if abs(target - inc / 2) < 0.0001:  # Close enough to half
+                # Build to inc, then halve
+                base_sequence = self._greedy_sequence(inc)
+                return base_sequence + [('1/2', 1)]
+
+        # Check if target can be built efficiently with X2
+        # e.g., 0.012 = (0.006) × 2 = (0.005 + 0.001) × 2
+        half_target = target / 2
+        if half_target >= 0.001:  # Only if half is reasonable
+            # Calculate cost of building half_target, then doubling
+            half_sequence = self._greedy_sequence(half_target)
+            half_clicks = sum(count for _, count in half_sequence)
+            double_clicks = half_clicks + 1  # +1 for X2
+
+            # Calculate cost of direct greedy approach
+            direct_sequence = self._greedy_sequence(target)
+            direct_clicks = sum(count for _, count in direct_sequence)
+
+            # Use doubling if it's more efficient
+            if double_clicks < direct_clicks:
+                return half_sequence + [('X2', 1)]
+
+        # Fall back to greedy algorithm (no optimization found)
+        return self._greedy_sequence(target)
+
+    def _greedy_sequence(self, target: float) -> list:
+        """
+        Greedy algorithm: largest increments first
+
+        Args:
+            target: Target amount as float
+
+        Returns:
+            List of (button_type, count) tuples
+        """
+        remaining = target
+        sequence = []
+
+        increments = [
+            (1.0, '+1'),
+            (0.1, '+0.1'),
+            (0.01, '+0.01'),
+            (0.001, '+0.001'),
+        ]
+
+        for increment_value, button_type in increments:
+            count = int(remaining / increment_value)
+            if count > 0:
+                sequence.append((button_type, count))
+                remaining -= count * increment_value
+                remaining = round(remaining, 3)  # Avoid floating point errors
+
+        return sequence
 
     def set_sell_percentage(self, percentage: float) -> bool:
         """
@@ -307,13 +548,17 @@ class BotUIController:
         """
         Set bet amount and click BUY (composite action)
 
+        Phase A.2 UPDATE: Now uses incremental button clicking instead
+        of direct text entry for human-like behavior.
+
         Args:
             amount: Amount in SOL
 
         Returns:
             True if successful
         """
-        if not self.set_bet_amount(amount):
+        # Use incremental clicking (Phase A.2)
+        if not self.build_amount_incrementally(amount):
             return False
 
         return self.click_buy()
@@ -334,13 +579,17 @@ class BotUIController:
         """
         Set bet amount and click SIDEBET (composite action)
 
+        Phase A.2 UPDATE: Now uses incremental button clicking instead
+        of direct text entry for human-like behavior.
+
         Args:
             amount: Amount in SOL
 
         Returns:
             True if successful
         """
-        if not self.set_bet_amount(amount):
+        # Use incremental clicking (Phase A.2)
+        if not self.build_amount_incrementally(amount):
             return False
 
         return self.click_sidebet()

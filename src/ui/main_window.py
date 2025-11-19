@@ -78,25 +78,14 @@ class MainWindow:
         # Phase 8.4: Initialize bot with config settings
         self.bot_interface = BotInterface(state, self.trade_manager)
 
-        # Phase 8.4: Initialize BotUIController for UI_LAYER mode
-        self.bot_ui_controller = BotUIController(self)  # 'self' = MainWindow instance
-
-        # Phase 8.4: Create BotController with execution mode from config
-        execution_mode = self.bot_config_panel.get_execution_mode()
-        strategy = self.bot_config_panel.get_strategy()
-
-        self.bot_controller = BotController(
-            self.bot_interface,
-            strategy_name=strategy,  # Fixed: parameter name is strategy_name
-            execution_mode=execution_mode,
-            ui_controller=self.bot_ui_controller if execution_mode == ExecutionMode.UI_LAYER else None
-        )
+        # Phase A.2: Bot components will be initialized AFTER UI is built (line ~640)
+        # to avoid AttributeError when accessing button references
+        self.bot_ui_controller = None  # Placeholder, will be set later
+        self.bot_controller = None     # Placeholder, will be set later
+        self.bot_executor = None       # Placeholder, will be set later
 
         # Phase 8.4: Set bot enabled state from config
         self.bot_enabled = self.bot_config_panel.is_bot_enabled()
-
-        # Initialize async bot executor (prevents deadlock)
-        self.bot_executor = AsyncBotExecutor(self.bot_controller)
 
         # Initialize live feed (Phase 6)
         self.live_feed = None
@@ -186,6 +175,15 @@ class MainWindow:
         bot_menu.add_command(
             label="Timing Metrics...",
             command=lambda: self.root.after(0, self._show_timing_metrics)
+        )
+
+        # Phase A: Add timing overlay toggle
+        bot_menu.add_separator()
+        self.timing_overlay_var = tk.BooleanVar(value=False)  # Hidden by default
+        bot_menu.add_checkbutton(
+            label="Show Timing Overlay",
+            variable=self.timing_overlay_var,
+            command=self._toggle_timing_overlay
         )
 
         # Live Feed Menu
@@ -453,14 +451,30 @@ class MainWindow:
 
         bet_btn_style = {'font': ('Arial', 9), 'width': 6, 'bd': 1, 'relief': tk.RAISED}
 
-        tk.Button(bet_center, text="X", command=self.clear_bet_amount, bg='#333333', fg='white', **bet_btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(bet_center, text="+0.001", command=lambda: self.increment_bet_amount(Decimal('0.001')), bg='#333333', fg='white', **bet_btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(bet_center, text="+0.01", command=lambda: self.increment_bet_amount(Decimal('0.01')), bg='#333333', fg='white', **bet_btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(bet_center, text="+0.1", command=lambda: self.increment_bet_amount(Decimal('0.1')), bg='#333333', fg='white', **bet_btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(bet_center, text="+1", command=lambda: self.increment_bet_amount(Decimal('1')), bg='#333333', fg='white', **bet_btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(bet_center, text="1/2", command=lambda: self.set_bet_amount(Decimal(self.bet_entry.get())/2), bg='#333333', fg='white', **bet_btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(bet_center, text="X2", command=lambda: self.set_bet_amount(Decimal(self.bet_entry.get())*2), bg='#333333', fg='white', **bet_btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(bet_center, text="MAX", command=lambda: self.set_bet_amount(self.state.get('balance')), bg='#333333', fg='white', **bet_btn_style).pack(side=tk.LEFT, padx=2)
+        # Store button references for BotUIController access (Phase A.2)
+        self.clear_button = tk.Button(bet_center, text="X", command=self.clear_bet_amount, bg='#333333', fg='white', **bet_btn_style)
+        self.clear_button.pack(side=tk.LEFT, padx=2)
+
+        self.increment_001_button = tk.Button(bet_center, text="+0.001", command=lambda: self.increment_bet_amount(Decimal('0.001')), bg='#333333', fg='white', **bet_btn_style)
+        self.increment_001_button.pack(side=tk.LEFT, padx=2)
+
+        self.increment_01_button = tk.Button(bet_center, text="+0.01", command=lambda: self.increment_bet_amount(Decimal('0.01')), bg='#333333', fg='white', **bet_btn_style)
+        self.increment_01_button.pack(side=tk.LEFT, padx=2)
+
+        self.increment_10_button = tk.Button(bet_center, text="+0.1", command=lambda: self.increment_bet_amount(Decimal('0.1')), bg='#333333', fg='white', **bet_btn_style)
+        self.increment_10_button.pack(side=tk.LEFT, padx=2)
+
+        self.increment_1_button = tk.Button(bet_center, text="+1", command=lambda: self.increment_bet_amount(Decimal('1')), bg='#333333', fg='white', **bet_btn_style)
+        self.increment_1_button.pack(side=tk.LEFT, padx=2)
+
+        self.half_button = tk.Button(bet_center, text="1/2", command=lambda: self.set_bet_amount(Decimal(self.bet_entry.get())/2), bg='#333333', fg='white', **bet_btn_style)
+        self.half_button.pack(side=tk.LEFT, padx=2)
+
+        self.double_button = tk.Button(bet_center, text="X2", command=lambda: self.set_bet_amount(Decimal(self.bet_entry.get())*2), bg='#333333', fg='white', **bet_btn_style)
+        self.double_button.pack(side=tk.LEFT, padx=2)
+
+        self.max_button = tk.Button(bet_center, text="MAX", command=lambda: self.set_bet_amount(self.state.get('balance')), bg='#333333', fg='white', **bet_btn_style)
+        self.max_button.pack(side=tk.LEFT, padx=2)
 
         # Right - wallet balance
         self.balance_label = tk.Label(
@@ -628,6 +642,30 @@ class MainWindow:
 
         # Initialize toast notifications
         self.toast = ToastNotification(self.root)
+
+        # Phase A.2: Initialize BotUIController AFTER all UI widgets are created
+        # (moved from line 82 to avoid AttributeError accessing button references)
+        # Phase A.7: Pass timing configuration from bot_config.json
+        bot_config = self.bot_config_panel.get_config()
+        self.bot_ui_controller = BotUIController(
+            self,
+            button_depress_duration_ms=bot_config.get('button_depress_duration_ms', 50),
+            inter_click_pause_ms=bot_config.get('inter_click_pause_ms', 100)
+        )
+
+        # Phase A.2: Create BotController now that ui_controller is ready
+        execution_mode = self.bot_config_panel.get_execution_mode()
+        strategy = self.bot_config_panel.get_strategy()
+
+        self.bot_controller = BotController(
+            self.bot_interface,
+            strategy_name=strategy,
+            execution_mode=execution_mode,
+            ui_controller=self.bot_ui_controller if execution_mode == ExecutionMode.UI_LAYER else None
+        )
+
+        # Phase A.2: Initialize async bot executor (prevents deadlock)
+        self.bot_executor = AsyncBotExecutor(self.bot_controller)
     
     def _setup_event_handlers(self):
         """Setup event bus subscriptions"""
@@ -1482,6 +1520,24 @@ GAME RULES:
         # AUDIT FIX: Defensive - ensure always runs in main thread
         self.root.after(0, do_toggle)
 
+    def _toggle_timing_overlay(self):
+        """
+        Toggle timing overlay widget visibility (Phase A)
+        Shows/hides the draggable timing metrics overlay
+        """
+        def do_toggle():
+            if self.timing_overlay_var.get():
+                # Show overlay
+                self.timing_overlay.show()
+                self.log("Timing overlay shown")
+            else:
+                # Hide overlay
+                self.timing_overlay.hide()
+                self.log("Timing overlay hidden")
+
+        # Ensure always runs in main thread
+        self.root.after(0, do_toggle)
+
     def _show_bot_config(self):
         """
         Show bot configuration dialog (Phase 8.4)
@@ -1633,8 +1689,10 @@ GAME RULES:
         execution_mode = self.bot_config_panel.get_execution_mode()
         from bot.execution_mode import ExecutionMode
 
-        # Only show timing overlay in UI_LAYER mode
-        if execution_mode == ExecutionMode.UI_LAYER:
+        # Only show timing overlay if BOTH conditions met:
+        # 1. UI_LAYER mode
+        # 2. User has toggled it on via menu
+        if execution_mode == ExecutionMode.UI_LAYER and self.timing_overlay_var.get():
             # Show overlay
             self.timing_overlay.show()
 
@@ -1644,7 +1702,7 @@ GAME RULES:
             # Update overlay with stats
             self.timing_overlay.update_stats(stats)
         else:
-            # Hide overlay in BACKEND mode
+            # Hide overlay if not in UI_LAYER mode OR user toggled it off
             self.timing_overlay.hide()
 
     def _update_timing_metrics_loop(self):
