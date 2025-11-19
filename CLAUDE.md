@@ -2,10 +2,10 @@
 
 **Project**: Dual-Mode Replay/Live Game Viewer & RL Training Environment
 **Location**: `/home/nomad/Desktop/REPLAYER/`
-**Status**: ✅ **Production Ready** - Phase 8 85% Complete (8.6-8.7 pending)
-**Last Updated**: 2025-11-17
-**Current Branch**: `main` (browser connection working, merged from feature/ui-first-bot)
-**Next Milestone**: Complete Phase 8.6-8.7 (11-17 hours remaining)
+**Status**: ✅ **Production Ready** - Phase 8.6 Complete, 8.7 Pending (90% done)
+**Last Updated**: 2025-11-18
+**Current Branch**: `main` (all bug fixes + timing metrics complete)
+**Next Milestone**: Phase 8.7 Production Readiness (2-3 hours remaining)
 
 ---
 
@@ -21,7 +21,7 @@ cd /home/nomad/Desktop/REPLAYER
 ```bash
 cd src
 python3 -m pytest tests/ -v
-# Total: 237 tests - ALL PASSING ✅
+# Total: 275 tests - ALL PASSING ✅
 ```
 
 ### Running Analysis Scripts
@@ -34,38 +34,68 @@ python3 analyze_game_durations.py    # Game lifespan analysis
 
 ---
 
-## Current State (2025-11-17)
+## Current State (2025-11-18)
 
-### ✅ Browser Connection Working - Phase 8 Infrastructure Complete
+### ✅ Phase 8.6 Complete - Timing Metrics + All Bug Fixes Applied
+
+**Session 2025-11-18**: Bug Fixes + Timing Metrics Infrastructure
+- **Status**: Phase 8.6 complete, all bugs fixed ✅
+- **Tests**: 275/275 passing (100%) ✅
+- **Bugs Fixed**: 12 total (6 original + 5 critical + 1 runtime)
+- **New Features**: Draggable timing overlay widget, timing metrics tracking
+- **Bot System**: 3 strategies, dual-mode execution (BACKEND/UI_LAYER)
+- **Phase 8**: 90% complete (Phases 8.1-8.6 done, 8.7 pending)
+
+### Recent Completions (Session 2025-11-18)
+
+**12 Bug Fixes** ✅ (Commit: 93077fa)
+
+**Original Audit Bugs (6)**:
+1. ✅ **Sidebet Cooldown Off-By-One** - Changed `<=` to `<`, added 7 regression tests
+2. ✅ **Progress Never Reaches 100%** - Changed to `(index+1)/len`, added test
+3. ✅ **Bot Config Ignored on Startup** - Strategy dropdown now syncs from config
+4. ✅ **Menu Checkbox Never Updates** - Added `bot_var.set()` calls
+5. ✅ **Manual Buttons Stay Disabled** - Re-enable when bot disabled
+6. ✅ **Live Feed Blocks UI** - Moved to background thread with async connection
+
+**Audit Bugs (5 Critical + 1 Runtime)**:
+7. ✅ **Thread Safety Violation** - Wrapped GUI updates in `parent.after(0, ...)`
+8. ✅ **P95 Index Out of Bounds** - Added bounds checking for percentile calc
+9. ✅ **Decimal NaN/Infinity** - Added `is_finite()` checks for validation
+10. ✅ **Widget Destruction** - Protected with try/except + `winfo_exists()`
+11. ✅ **Unicode Rendering** - ASCII fallback for systems without Unicode support
+12. ✅ **Bad Geometry Specifier** - Fixed None handling in window positioning
+
+**Phase 8 Config Defaults Fixed** ✅:
+- Bet amount: 0.001 → 0 (bot must enter explicitly)
+- Execution mode: backend → ui_layer
+- Added `_save_default_config()` for persistence
+
+**Phase 8.6: Timing Metrics Complete** ✅:
+- `TimingOverlay` widget (300 lines) - Draggable, collapsible, persistent
+- `ExecutionTiming` + `TimingMetrics` dataclasses for tracking
+- Browser state polling methods (130 lines)
+- 5 new unit tests for timing metrics
+- Auto-show/hide based on execution mode
+
+**Documentation Updates** ✅:
+- README.md rewritten (326 lines) with Phase 8.5 features
+- Updated stats: 275 tests, ~12,000 lines of code
+- Documented dual-mode operation, timing metrics, bot strategies
+
+**Files Changed**: 10 files (8 modified, 2 created)
+- **Insertions**: 1,348 lines
+- **Deletions**: 237 lines
+- **Git**: Committed 93077fa, pushed to GitHub ✅
+
+### Previous Sessions
 
 **Session 2025-11-17**: Browser Connection Fixes + Repository Cleanup
 - **Status**: Browser connection fully operational ✅
-- **Tests**: 275/276 passing (99.6%) ✅
-- **Bot System**: 3 strategies working, dual-mode execution (BACKEND/UI_LAYER)
-- **UI**: Thread-safe, partial sell buttons (10%/25%/50%/100%), bot config panel
-- **Browser**: Chromium launches with visible window, Phantom extension loaded
-- **Phase 8**: Infrastructure 85% complete (Phases 8.1-8.5 done)
-
-### Recent Completions (Session 2025-11-17)
-
-**Browser Connection Fixes** ✅ (Commits: 14cad5c, 4dbd400)
-Applied 5 critical fixes to browser connection system:
-
-1. ✅ **Playwright Path Resolution** - Hardcoded `/home/nomad/.cache/ms-playwright`
-2. ✅ **Pre-Configured Profile** - Using `.gamebot/chromium_profiles/rugs_fun_phantom/`
-3. ✅ **Extension Validation** - Manifest.json check before loading Phantom
-4. ✅ **Error Handling** - Comprehensive try/except in dialog creation
-5. ✅ **Window Visibility** - Added `--start-maximized` and `--new-window` flags
-
-**Repository Cleanup** ✅
+- **Commit**: 14cad5c, 4dbd400
+- Applied 5 critical fixes to browser connection system
 - Archived 54 development files to `docs/archive/`
-- Removed redundant directories (`browser_profiles/`, `browser_extensions/`)
-- Created comprehensive documentation (`BROWSER_CONNECTION_COMPLETE.md`, `CLEANUP_PLAN.md`)
-
-**Files Changed**: 75 files (11,138 insertions, 119 deletions)
-**Git**: Merged to `main`, pushed to GitHub
-
-### Previous Sessions
+- Files Changed: 75 files (11,138 insertions, 119 deletions)
 
 **Production Audit Fixes** ✅ (2025-11-16, Commit: 0da54fe)
 Applied 8 critical and high-priority fixes from third-party audit:
@@ -101,10 +131,10 @@ Applied 8 critical and high-priority fixes from third-party audit:
 
 ### 🚀 Current Development: Phase 8 - UI-First Bot System
 
-**Status**: 85% Complete (Phases 8.1-8.5 ✅, 8.6-8.7 pending)
-**Last Updated**: 2025-11-17
-**Branch**: `main` (feature/ui-first-bot merged)
-**Remaining Work**: 11-17 hours (2-3 work days)
+**Status**: 90% Complete (Phases 8.1-8.6 ✅, 8.7 pending)
+**Last Updated**: 2025-11-18
+**Branch**: `main` (all bug fixes + timing metrics complete)
+**Remaining Work**: 2-3 hours (Phase 8.7 only)
 **Goal**: Transform bot system to support dual-mode execution (backend for training, UI-layer for live trading)
 
 **Completion Roadmap**: See `docs/PHASE_8_COMPLETION_ROADMAP.md` for comprehensive guide
@@ -115,19 +145,11 @@ Applied 8 critical and high-priority fixes from third-party audit:
 - ✅ **Phase 8.3**: BotUIController (COMPLETE - 347 lines, UI-layer execution)
 - ✅ **Phase 8.4**: Bot Configuration UI (COMPLETE - 312 lines, JSON persistence)
 - ✅ **Phase 8.5**: Browser Automation (COMPLETE - 517 lines, working connection)
-- ⏳ **Phase 8.6**: State Sync & Timing Learning (PENDING - 3-4 hours)
+- ✅ **Phase 8.6**: Timing Metrics (COMPLETE - 300 lines, draggable overlay) ⭐ NEW
 - ⏳ **Phase 8.7**: Production Readiness (PENDING - 2-3 hours)
 
-**Critical Issues Found**:
-1. ❌ Bet amount defaults to 0.001 (should be 0 - bot must enter explicitly)
-2. ❌ Execution mode defaults to BACKEND (should be UI_LAYER)
-3. ❌ No bot_config.json file (defaults not persisted)
-
-**Next Session Priorities**:
-1. Fix 3 critical configuration defaults (1-2 hours)
-2. Add missing test coverage: 37 new tests (2-3 hours)
-3. Implement Phase 8.6: Timing metrics tracking (3-4 hours)
-4. Implement Phase 8.7: Safety mechanisms + validation (2-3 hours)
+**Next Session**:
+- Implement Phase 8.7: Safety mechanisms (loss limits, emergency stop, validation)
 
 **Architecture Insight**: By executing trades through the UI layer in REPLAYER, the bot learns realistic timing (button click delay + network latency + backend processing). This prepares the bot for identical timing in the live browser environment, where it will control the real game via Playwright automation.
 
@@ -377,13 +399,13 @@ Even though we're NOT implementing ML/training yet, infrastructure must support:
 ├── DEADLOCK_BUG_REPORT.md        # Technical bug analysis
 ├── BUG_FIXES_SUMMARY.md          # Bug fix summary
 │
-├── src/                          # Production code (~8,000 lines)
+├── src/                          # Production code (~12,000 lines)
 │   ├── main.py                   # Application entry point
 │   ├── config.py                 # Centralized configuration
 │   │
 │   ├── models/                   # Data models
 │   │   ├── game_tick.py          # GameTick data model (9 params)
-│   │   ├── position.py           # Position tracking
+│   │   ├── position.py           # Position tracking with partial close
 │   │   ├── side_bet.py           # Sidebet mechanics (5x payout)
 │   │   └── enums.py              # Game phase enums
 │   │
@@ -392,12 +414,17 @@ Even though we're NOT implementing ML/training yet, infrastructure must support:
 │   │   ├── replay_engine.py      # Playback control (439 lines)
 │   │   ├── trade_manager.py      # Trade execution (297 lines)
 │   │   ├── game_queue.py         # Multi-game queue (133 lines)
-│   │   └── validators.py         # Input validation (187 lines)
+│   │   ├── validators.py         # Input validation (202 lines) ⭐ UPDATED
+│   │   ├── live_ring_buffer.py   # Memory-bounded buffer (5000 ticks)
+│   │   └── recorder_sink.py      # Auto-recording to JSONL
 │   │
 │   ├── bot/                      # Bot automation system
 │   │   ├── interface.py          # BotInterface ABC (226 lines)
 │   │   ├── controller.py         # BotController (152 lines)
 │   │   ├── async_executor.py     # Async execution (214 lines)
+│   │   ├── ui_controller.py      # BotUIController (347 lines)
+│   │   ├── browser_executor.py   # Browser automation (517 lines) ⭐ UPDATED
+│   │   ├── execution_mode.py     # ExecutionMode enum
 │   │   └── strategies/           # Trading strategies
 │   │       ├── base.py           # TradingStrategy ABC
 │   │       ├── conservative.py   # Low-risk strategy (3,475 lines)
@@ -413,21 +440,29 @@ Even though we're NOT implementing ML/training yet, infrastructure must support:
 │   │   ├── event_bus.py          # ⭐ Event pub/sub system
 │   │   └── logger.py             # Logging configuration
 │   │
+│   ├── sources/                  # Tick sources
+│   │   └── websocket_feed.py     # Live WebSocket integration
+│   │
 │   ├── ui/                       # User interface
-│   │   ├── main_window.py        # ⭐ Main window (926 lines)
+│   │   ├── main_window.py        # ⭐ Main window (1730 lines) ⭐ UPDATED
 │   │   ├── tk_dispatcher.py      # ⭐ Thread-safe UI updates (47 lines)
 │   │   ├── panels.py             # UI panels (525 lines)
+│   │   ├── bot_config_panel.py   # Bot configuration (334 lines) ⭐ UPDATED
+│   │   ├── timing_overlay.py     # Draggable timing widget (354 lines) ⭐ NEW
 │   │   ├── layout_manager.py     # Panel positioning (256 lines)
 │   │   └── widgets/              # Reusable components
 │   │
-│   └── tests/                    # Test suite (237 tests - ALL PASSING ✅)
+│   └── tests/                    # Test suite (275 tests - ALL PASSING ✅)
 │       ├── conftest.py           # Shared fixtures
 │       ├── test_models/          # Data model tests (12 tests)
-│       ├── test_core/            # Core logic tests (63 tests)
+│       ├── test_core/            # Core logic tests (71 tests) ⭐ UPDATED
+│       │   ├── test_replay_engine.py  # +1 progress test ⭐
+│       │   └── test_validators.py     # +7 sidebet tests ⭐
 │       ├── test_bot/             # Bot system tests (54 tests)
 │       ├── test_services/        # Service tests (12 tests)
 │       ├── test_ml/              # ML integration (1 test)
-│       ├── test_ui/              # UI tests (1 test)
+│       ├── test_ui/              # UI tests (6 tests) ⭐ UPDATED
+│       │   └── test_timing_metrics.py  # +5 timing tests ⭐ NEW
 │       ├── test_sources/         # WebSocket feed tests (21 tests)
 │       └── test_validators/      # Validation tests (15 tests)
 │
@@ -897,6 +932,6 @@ git push origin main           # Push to GitHub
 
 ---
 
-**Status**: Production ready, all audit fixes complete
-**Next Phase**: Live feed integration (Phase 4-7, ~1-2 weeks)
-**Last Updated**: 2025-11-14
+**Status**: Production ready, Phase 8.6 complete (90% of Phase 8 done)
+**Next Phase**: Phase 8.7 Production Readiness (2-3 hours)
+**Last Updated**: 2025-11-18
