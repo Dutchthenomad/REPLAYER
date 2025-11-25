@@ -9,6 +9,7 @@ import logging
 import argparse
 from pathlib import Path
 import tkinter as tk
+import ttkbootstrap as ttk
 from typing import Optional
 
 # Add project root to path for imports
@@ -60,8 +61,9 @@ class Application:
         # Setup event handlers
         self._setup_event_handlers()
 
-        # Create UI
-        self.root = tk.Tk()
+        # Create UI with ttkbootstrap theming (Phase: UI Theming)
+        # Using 'cyborg' theme for HUD-style gaming aesthetic
+        self.root = ttk.Window(themename='cyborg')
         self.main_window = None
 
         # Configure root window
