@@ -38,7 +38,8 @@ class BotUIController:
     a live browser via Playwright using identical timing.
     """
 
-    def __init__(self, main_window, button_depress_duration_ms: int = 50, inter_click_pause_ms: int = 100):
+    def __init__(self, main_window, button_depress_duration_ms: int = 50, inter_click_pause_ms: int = 100,
+                 clear_pause_ms: int = 50):
         """
         Initialize UI controller
 
@@ -46,6 +47,9 @@ class BotUIController:
             main_window: MainWindow instance with UI widgets
             button_depress_duration_ms: Duration to show button as pressed (milliseconds)
             inter_click_pause_ms: Pause between button clicks (milliseconds)
+            clear_pause_ms: Pause after clear button before building amount (milliseconds)
+                           AUDIT FIX: Was hardcoded to 500ms, now configurable.
+                           Production: 50ms, Demo mode: 500ms
         """
         self.main_window = main_window
         self.root = main_window.root
@@ -53,24 +57,71 @@ class BotUIController:
         # Phase A.7: Configurable timing (from bot_config.json)
         self.button_depress_duration_ms = button_depress_duration_ms  # Visual feedback duration
         self.inter_click_pause_ms = inter_click_pause_ms  # Pause between clicks
+        # AUDIT FIX: Configurable clear pause (was hardcoded 500ms)
+        self.clear_pause_ms = clear_pause_ms  # Pause after clear before building
 
         # Human delay range (as specified by user for 250ms game ticks)
         self.min_delay = 0.010  # 10ms
         self.max_delay = 0.050  # 50ms
 
         # Store button widget references (Phase A.2 - Incremental clicking)
-        self.clear_button = main_window.clear_button
-        self.increment_001_button = main_window.increment_001_button
-        self.increment_01_button = main_window.increment_01_button
-        self.increment_10_button = main_window.increment_10_button
-        self.increment_1_button = main_window.increment_1_button
-        self.half_button = main_window.half_button
-        self.double_button = main_window.double_button
-        self.max_button = main_window.max_button
+        # AUDIT FIX: Access via property getters for existence checking
+        self._main_window = main_window
 
         logger.info(f"BotUIController initialized (UI-layer execution mode, "
                    f"button_depress={button_depress_duration_ms}ms, "
-                   f"inter_click_pause={inter_click_pause_ms}ms)")
+                   f"inter_click_pause={inter_click_pause_ms}ms, "
+                   f"clear_pause={clear_pause_ms}ms)")
+
+    # AUDIT FIX: Safe widget access with existence checking
+    def _widget_exists(self, widget) -> bool:
+        """Check if widget still exists and is valid."""
+        try:
+            return widget is not None and widget.winfo_exists()
+        except tk.TclError:
+            return False
+
+    def _get_button(self, attr_name):
+        """Safely get button widget from main_window."""
+        try:
+            btn = getattr(self._main_window, attr_name, None)
+            if self._widget_exists(btn):
+                return btn
+            return None
+        except Exception:
+            return None
+
+    @property
+    def clear_button(self):
+        return self._get_button('clear_button')
+
+    @property
+    def increment_001_button(self):
+        return self._get_button('increment_001_button')
+
+    @property
+    def increment_01_button(self):
+        return self._get_button('increment_01_button')
+
+    @property
+    def increment_10_button(self):
+        return self._get_button('increment_10_button')
+
+    @property
+    def increment_1_button(self):
+        return self._get_button('increment_1_button')
+
+    @property
+    def half_button(self):
+        return self._get_button('half_button')
+
+    @property
+    def double_button(self):
+        return self._get_button('double_button')
+
+    @property
+    def max_button(self):
+        return self._get_button('max_button')
 
     def _schedule_ui_action(self, action):
         """
@@ -82,13 +133,22 @@ class BotUIController:
 
         Args:
             action: Callable to execute on UI thread
+
+        Returns:
+            True if scheduled successfully, False if UI is destroyed
         """
+        # AUDIT FIX: Check if root still exists before scheduling
+        if not self._widget_exists(self.root):
+            logger.debug("UI destroyed, skipping action")
+            return False
+
         if threading.current_thread() == threading.main_thread():
             # Already on main thread, use root.after
             self.root.after(0, action)
         else:
             # Worker thread, use thread-safe dispatcher
             self.main_window.ui_dispatcher.submit(action)
+        return True
 
     def _human_delay(self):
         """
@@ -258,8 +318,8 @@ class BotUIController:
                 logger.error("Failed to clear bet amount")
                 return False
 
-            # Phase A.6: 500ms pause after clear (slow demo mode for visibility)
-            time.sleep(0.500)
+            # AUDIT FIX: Configurable pause after clear (production: 50ms, demo: 500ms)
+            time.sleep(self.clear_pause_ms / 1000.0)
 
             # Calculate optimal button sequence using smart algorithm
             sequence = self._calculate_optimal_sequence(float(target_amount))
@@ -329,20 +389,25 @@ class BotUIController:
         """
         Greedy algorithm: largest increments first
 
+        AUDIT FIX: Uses Decimal internally to avoid floating point precision errors
+
         Args:
             target: Target amount as float
 
         Returns:
             List of (button_type, count) tuples
         """
-        remaining = target
+        from decimal import Decimal, ROUND_DOWN
+
+        # AUDIT FIX: Convert to Decimal for precise arithmetic
+        remaining = Decimal(str(target))
         sequence = []
 
         increments = [
-            (1.0, '+1'),
-            (0.1, '+0.1'),
-            (0.01, '+0.01'),
-            (0.001, '+0.001'),
+            (Decimal('1'), '+1'),
+            (Decimal('0.1'), '+0.1'),
+            (Decimal('0.01'), '+0.01'),
+            (Decimal('0.001'), '+0.001'),
         ]
 
         for increment_value, button_type in increments:
@@ -350,7 +415,7 @@ class BotUIController:
             if count > 0:
                 sequence.append((button_type, count))
                 remaining -= count * increment_value
-                remaining = round(remaining, 3)  # Avoid floating point errors
+                # Decimal handles precision correctly, no rounding needed
 
         return sequence
 

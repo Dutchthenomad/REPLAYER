@@ -4,8 +4,76 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Project**: REPLAYER - Dual-Mode Replay/Live Trading Platform for Rugs.fun
 **Location**: `/home/nomad/Desktop/REPLAYER/`
-**Status**: Production Ready (Phase 8.6 Complete, 275/275 tests passing)
+**Status**: Phase 9.1 Complete (CDP Browser Connection)
 **Current Branch**: `main`
+
+---
+
+## CRITICAL: Production Readiness Audit Complete (Nov 24, 2025)
+
+**Audit Results**: MEDIUM-HIGH risk level. System requires critical fixes before production.
+- See `COMPREHENSIVE_AUDIT_REPORT.md` for full audit findings
+- See `PRODUCTION_READINESS_PLAN.md` for 4-week fix roadmap
+
+**Next Priority**: Begin Phase 10 (Critical Fixes) immediately
+
+---
+
+## Phase 9.1 Complete: CDP Browser Connection
+
+### What Was Implemented (Nov 22, 2025)
+
+**Problem Solved**: Playwright's bundled Chromium has a known MV3 extension bug - Phantom extension appears in toolbar but `window.phantom` never gets injected.
+
+**Solution Implemented**: CDP (Chrome DevTools Protocol) connection to YOUR system Chrome.
+
+**Files Created/Modified**:
+1. `browser_automation/cdp_browser_manager.py` - NEW (270 lines)
+   - Chrome binary detection
+   - CDP port availability checking
+   - Chrome launch with debug port
+   - CDP connection via `connect_over_cdp()`
+
+2. `src/bot/browser_executor.py` - MODIFIED
+   - Added CDP manager support (primary)
+   - Legacy RugsBrowserManager kept as fallback
+   - All action methods updated to use `page` property
+
+3. `src/ui/browser_connection_dialog.py` - MODIFIED
+   - Updated for CDP workflow
+   - Simplified options (no wallet step - persisted in profile)
+
+4. `scripts/test_cdp_connection.py` - NEW
+   - Interactive test script for CDP workflow
+
+### How to Test CDP Connection
+
+```bash
+cd /home/nomad/Desktop/REPLAYER
+python3 scripts/test_cdp_connection.py
+```
+
+### How CDP Works
+
+```python
+# CDP connects to YOUR Chrome browser
+from browser_automation.cdp_browser_manager import CDPBrowserManager
+
+manager = CDPBrowserManager()
+await manager.connect()  # Launches Chrome if needed
+# Your Phantom wallet is now available!
+await manager.navigate_to_game()
+# ... do automation ...
+await manager.disconnect()  # Chrome keeps running
+```
+
+### First-Time Setup
+
+Before using CDP connection, set up your Chrome profile:
+1. Run the test script: `python3 scripts/test_cdp_connection.py`
+2. In the Chrome window that opens, install Phantom wallet
+3. Connect Phantom to rugs.fun
+4. Close and rerun - wallet should still be connected!
 
 ---
 
@@ -25,6 +93,12 @@ python3 -m pytest tests/ -v                    # All tests (275 total)
 python3 -m pytest tests/test_core/ -v          # Core logic tests
 python3 -m pytest tests/test_bot/ -v           # Bot system tests
 python3 -m pytest tests/ --cov=. --cov-report=html  # With coverage
+
+# Run with specific markers (from pytest.ini)
+python3 -m pytest -m unit                      # Unit tests only
+python3 -m pytest -m integration               # Integration tests only
+python3 -m pytest -m "not slow"                # Exclude slow tests
+python3 -m pytest -m ui                        # UI tests only
 ```
 
 ### Analysis Scripts (for RL training data)
@@ -42,6 +116,25 @@ black .                           # Format code
 flake8                           # Lint
 mypy core/ bot/ services/        # Type checking
 ./verify_tests.sh                # Pre-commit verification
+
+# Pre-commit review (automated code review)
+cd /home/nomad/Desktop/REPLAYER
+./scripts/pre_commit_review.sh   # Run aicode-review checks
+```
+
+### Debugging Commands
+```bash
+# Manual bot testing (watch UI behavior)
+./run.sh  # Then enable bot in UI
+
+# Automated debugging with screenshots
+cd src
+python3 debug_bot_session.py --duration 30     # Capture 30s of bot activity
+python3 automated_bot_test.py --games 5        # Run validation test on 5 games
+python3 playwright_debug_helper.py             # Visual browser automation debug
+
+# Demo incremental clicking (educational)
+python3 demo_incremental_clicking.py           # Show button clicking algorithm
 ```
 
 ---
@@ -361,6 +454,14 @@ self.ui_dispatcher.submit(lambda: widget.config(text="..."))
 - NOT in repository root (was moved in Phase 6)
 - Check symlink: `ls -la src/rugs_recordings`
 
+### 6. Browser XPaths and Selectors
+- Button selectors documented in `docs/XPATHS.txt`
+- Used by BrowserExecutor for live browser automation
+- Increment buttons: `+0.001`, `+0.01`, `+0.1`, `+1`, `1/2`, `X2`, `MAX`, `X` (clear)
+- Action buttons: `BUY`, `SELL`, `SIDEBET`
+- Partial sell: `10%`, `25%`, `50%`, `100%`
+- If selectors change, update both XPATHS.txt and `browser_automation/rugs_browser.py`
+
 ---
 
 ## Integration Points
@@ -382,65 +483,197 @@ self.ui_dispatcher.submit(lambda: widget.config(text="..."))
 - Ensures ML dependency compatibility
 - Fallback to system python3 if unavailable
 
+### Environment Variables
+- `RUGS_RECORDINGS_DIR` - Path to recordings directory (default: `/home/nomad/rugs_recordings`)
+- `RUGS_CONFIG_DIR` - Config directory (default: `~/.config/replayer`)
+- `LOG_LEVEL` - Logging level (default: `INFO`)
+- Set in `src/config.py` with `Config.get_env()`
+
 ---
 
 ## File Organization
 
-### Core Modules
-- `src/core/game_state.py` - State management (640 lines) ⭐
-- `src/core/replay_engine.py` - Playback control
-- `src/core/trade_manager.py` - Trade execution logic
-- `src/core/validators.py` - Input validation (Decimal, NaN checks)
+### Source Directory Structure (`src/`)
+```
+src/
+├── main.py                  # Application entry point
+├── config.py                # Centralized configuration
+│
+├── models/                  # Data models
+│   ├── game_tick.py        # GameTick (9 parameters)
+│   ├── position.py         # Position tracking with partial close
+│   ├── side_bet.py         # Sidebet (5x payout)
+│   └── enums.py            # Game phase enums
+│
+├── core/                    # Core business logic ⭐
+│   ├── game_state.py       # State management (640 lines)
+│   ├── replay_engine.py    # Playback control
+│   ├── trade_manager.py    # Trade execution
+│   ├── validators.py       # Input validation
+│   ├── live_ring_buffer.py # Memory-bounded buffer
+│   └── recorder_sink.py    # Auto-recording to JSONL
+│
+├── bot/                     # Bot automation system ⭐
+│   ├── controller.py       # Bot orchestration
+│   ├── ui_controller.py    # UI-layer execution (347 lines)
+│   ├── browser_executor.py # Browser automation (517 lines)
+│   ├── execution_mode.py   # BACKEND vs UI_LAYER
+│   ├── async_executor.py   # Async execution (214 lines)
+│   └── strategies/         # Trading strategies
+│       ├── base.py         # TradingStrategy ABC
+│       ├── conservative.py # Low-risk strategy
+│       ├── aggressive.py   # High-risk strategy
+│       └── foundational.py # Production strategy
+│
+├── ml/                      # ML integration (symlinks)
+│   ├── predictor.py        # SidebetPredictor wrapper
+│   └── feature_extractor.py # Feature engineering
+│
+├── sources/                 # Tick sources
+│   └── websocket_feed.py   # Live WebSocket integration
+│
+├── ui/                      # User interface ⭐
+│   ├── main_window.py      # Main window (1730 lines)
+│   ├── tk_dispatcher.py    # Thread-safe UI (47 lines)
+│   ├── panels.py           # UI panels
+│   ├── bot_config_panel.py # Bot settings dialog
+│   ├── timing_overlay.py   # Timing metrics widget
+│   └── widgets/            # Reusable components
+│       ├── chart.py        # Chart widget
+│       └── toast.py        # Toast notifications
+│
+├── services/                # Shared services ⭐
+│   ├── event_bus.py        # Event pub/sub system
+│   └── logger.py           # Logging configuration
+│
+├── tests/                   # Test suite (275 tests)
+│   ├── conftest.py         # Shared fixtures
+│   ├── test_core/          # Core logic (63 tests)
+│   ├── test_bot/           # Bot system (54 tests)
+│   ├── test_ui/            # UI components (6 tests)
+│   ├── test_models/        # Data models (12 tests)
+│   ├── test_services/      # Services (12 tests)
+│   ├── test_ml/            # ML integration (1 test)
+│   └── test_sources/       # WebSocket (21 tests)
+│
+├── rugs_recordings/         # Symlink to /home/nomad/rugs_recordings
+│
+├── debug_bot_session.py     # Debug script with screenshots
+├── automated_bot_test.py    # Automated validation
+├── playwright_debug_helper.py # Browser debug
+├── demo_incremental_clicking.py # Educational demo
+└── verify_tests.sh          # Pre-commit test verification
+```
 
-### Bot System
-- `src/bot/controller.py` - Bot orchestration ⭐
-- `src/bot/ui_controller.py` - UI-layer execution (Phase 8.3)
-- `src/bot/browser_executor.py` - Live browser control (Phase 8.5)
-- `src/bot/strategies/` - Trading strategy implementations
-
-### UI Components
-- `src/ui/main_window.py` - Main window (1730 lines) ⭐
-- `src/ui/tk_dispatcher.py` - Thread-safe UI (47 lines) ⭐
-- `src/ui/bot_config_panel.py` - Bot configuration dialog
-- `src/ui/timing_overlay.py` - Draggable timing metrics widget (Phase 8.6)
-
-### Services
-- `src/services/event_bus.py` - Event pub/sub ⭐
-- `src/services/logger.py` - Logging setup
-
-### Tests
-- `src/tests/conftest.py` - Shared fixtures
-- `src/tests/test_core/` - Core logic (71 tests)
-- `src/tests/test_bot/` - Bot system (54 tests)
-- `src/tests/test_ui/` - UI components (6 tests)
-
-### Documentation
-- `CLAUDE.md` - This file (developer guide)
+### Repository Root Files
+- `CLAUDE.md` - Developer guide (this file)
 - `AGENTS.md` - Concise repository guidelines
 - `README.md` - User-facing overview
-- `docs/PHASE_8_COMPLETION_ROADMAP.md` - Current development status
-- `docs/game_mechanics/` - Game rules knowledge base
+- `run.sh` - Launch script
+- `architect.yaml` - Design patterns config (aicode-architect)
+- `RULES.yaml` - Coding standards (aicode-review)
+- `toolkit.yaml` - Project metadata
+
+### Documentation (`docs/`)
+- `PHASE_8_COMPLETION_ROADMAP.md` - Current development status
+- `DEBUGGING_GUIDE.md` - Debugging workflow and tools
+- `QUICK_START_GUIDE.md` - User quick start
+- `NEXT_SESSION_PLAN.md` - Next session planning
+- `XPATHS.txt` - Browser element selectors
+- `game_mechanics/` - Game rules knowledge base
+- `archive/` - Historical reference docs
+
+### Browser Automation (`browser_automation/`)
+- `rugs_browser.py` - Browser manager (268 lines)
+- `automation.py` - Wallet automation (226 lines)
+- `persistent_profile.py` - Profile config (161 lines)
 
 ---
 
 ## Current Development Status
 
-**Phase 8: UI-First Bot System** - 90% Complete
+**PRIORITY: Phase 10-14 Production Readiness** (4-week plan)
 
-✅ **Completed** (Phases 8.1-8.6):
-- Partial sell infrastructure (10%, 25%, 50%, 100% buttons)
-- BotUIController (UI-layer execution with human delays)
-- Bot configuration panel with JSON persistence
-- Browser automation via Playwright
-- Timing metrics tracking with draggable overlay widget
-- 12 critical bug fixes (thread safety, validation, config defaults)
+See `PRODUCTION_READINESS_PLAN.md` for detailed implementation roadmap.
 
-⏳ **Remaining** (Phase 8.7, ~2-3 hours):
-- Safety mechanisms (loss limits, emergency stop)
-- Validation layer for browser actions
-- Production readiness checklist
+### Phase 10: CRITICAL FIXES (Days 1-5) - START IMMEDIATELY
+- **10.1**: Fix browser automation path imports (Day 1)
+- **10.2**: Implement memory management/archival (Days 2-3)
+- **10.3**: Fix WebSocket Decimal conversion (Day 3)
+- **10.4**: Fix EventBus shutdown race condition (Days 4-5)
 
-**Next Session**: Implement Phase 8.7 safety features
+### Phase 11: HIGH PRIORITY (Days 6-12)
+- **11.1**: Browser reconnection logic (Days 6-7)
+- **11.2**: Thread safety audit (Days 8-9)
+- **11.3**: File handle management (Days 10-11)
+- **11.4**: Remove backup files (Day 12)
+
+### Phase 12: MEDIUM PRIORITY (Days 13-19)
+- **12.1**: Async/Sync architecture (Days 13-14)
+- **12.2**: Configuration centralization (Days 15-16)
+- **12.3**: Input validation (Days 17-18)
+- **12.4**: Async file I/O (Day 19)
+
+### Phase 13: PERFORMANCE (Days 20-23)
+- **13.1**: WebSocket latency buffer (Day 20)
+- **13.2**: Lock optimization (Days 21-22)
+- **13.3**: Performance profiling (Day 23)
+
+### Phase 14: SECURITY & TESTING (Days 24-28)
+- **14.1**: Security hardening (Days 24-25)
+- **14.2**: Comprehensive testing (Days 26-27)
+- **14.3**: Documentation & deployment (Day 28)
+
+---
+
+## Previously Completed: Phase 9 CDP Browser Connection
+
+### Problem Identified (Nov 22, 2025)
+Playwright's `launch_persistent_context` with MV3 extensions (Phantom) is fundamentally broken:
+- Extension loads (visible in toolbar)
+- Service worker doesn't start
+- `window.phantom` never injected
+- rugs.fun shows "Install Phantom" dialog even though it's installed
+
+### Solution: CDP Connection Architecture
+See `docs/BROWSER_CONNECTION_PLAN.md` for full 6-phase plan.
+
+**Phase 9.1**: CDP Infrastructure (2-3h) - **START HERE**
+- Create `CDPBrowserManager` class
+- Connect to running Chrome via `connect_over_cdp()`
+- Profile at `~/.gamebot/chrome_profiles/rugs_bot`
+
+**Phase 9.2**: Setup Script (1-2h)
+- Interactive `scripts/setup_chrome_profile.py`
+- User installs Phantom, connects wallet once
+- Profile persists forever
+
+**Phase 9.3**: UI Integration (2-3h)
+- Update menu: Connect to Chrome, Launch Chrome, Setup Profile
+- Replace RugsBrowserManager with CDPBrowserManager
+
+**Phase 9.4**: Button Automation (2-3h)
+- Verify XPath selectors work via CDP
+- Test incremental clicking
+
+**Phase 9.5**: Robustness (2-3h)
+- Auto-reconnect, health checks, recovery
+
+**Phase 9.6**: Documentation (1-2h)
+
+**Total Estimate**: 10-16 hours
+
+---
+
+### Previous Phases (Complete)
+
+**Phase 8: UI-First Bot System** - 95% Complete
+- ✅ Partial sell infrastructure (10%, 25%, 50%, 100% buttons)
+- ✅ BotUIController (UI-layer execution with human delays)
+- ✅ Bot configuration panel with JSON persistence
+- ✅ Timing metrics tracking with draggable overlay widget
+- ✅ 12 critical bug fixes (thread safety, validation, config defaults)
+- ⏸️ Phase 8.7 (safety mechanisms) - DEFERRED until browser works
 
 ---
 
@@ -471,18 +704,58 @@ git push origin main          # Push to remote
 
 ## Key References
 
+**For Browser Connection Plan**: See `docs/BROWSER_CONNECTION_PLAN.md` (Phase 9 implementation details)
+
 **For Detailed Context**: See `/home/nomad/CLAUDE.md` (parent project overview)
 
 **For Quick Guidelines**: See `AGENTS.md` (concise repository rules)
-
-**For Planning**: See `docs/PHASE_8_COMPLETION_ROADMAP.md` (current status)
 
 **For Architecture Deep-Dive**: See `docs/Codex/codebase_audit.md` (audit findings)
 
 **For Game Rules**: See `docs/game_mechanics/GAME_MECHANICS.md`
 
+**For XPath Selectors**: See `docs/XPATHS.txt` (button selectors for automation)
+
 ---
 
-**Last Updated**: 2025-11-18
-**Status**: Production Ready (275/275 tests passing)
-**Next Milestone**: Phase 8.7 Production Readiness
+**Last Updated**: 2025-11-22
+**Status**: Phase 9 Active (Browser Connection Overhaul)
+**Next Milestone**: CDP Browser Connection (Phase 9.1)
+
+---
+
+## Additional Resources
+
+**For Browser Plan**: See `docs/BROWSER_CONNECTION_PLAN.md` (bulletproof browser connection)
+
+**For Deep Debugging**: See `docs/DEBUGGING_GUIDE.md` (comprehensive debugging workflow)
+
+**For Quick Reference**: See `AGENTS.md` (concise coding guidelines)
+
+**For Users**: See `docs/QUICK_START_GUIDE.md` (user-facing documentation)
+
+**For Architecture Review**: See `architect.yaml` and `RULES.yaml` (design patterns and coding standards)
+
+---
+
+## Session Notes (Nov 22, 2025)
+
+### What Happened This Session
+1. Attempted to fix browser connection issues with Playwright's `launch_persistent_context`
+2. Discovered fundamental MV3 extension bug in Playwright's bundled Chromium
+3. Researched alternatives: CDP, Selenium, Synpress
+4. Created comprehensive plan: `docs/BROWSER_CONNECTION_PLAN.md`
+5. **Decision**: Use CDP (Chrome DevTools Protocol) to connect to system Chrome
+
+### Files Modified
+- `browser_automation/rugs_browser.py` - Reverted to HEAD (temporary page reload added then removed)
+- `docs/BROWSER_CONNECTION_PLAN.md` - NEW: Complete 6-phase implementation plan
+- `CLAUDE.md` - Updated with Phase 9 priority
+
+### Files to Create Next Session
+- `browser_automation/cdp_browser_manager.py` - New CDP-based browser manager
+- `scripts/setup_chrome_profile.py` - One-time profile setup script
+
+### Key Insight
+The problem was never the code - Playwright + MV3 extensions is fundamentally broken.
+CDP connection to YOUR Chrome is the proven solution used by all wallet automation projects.

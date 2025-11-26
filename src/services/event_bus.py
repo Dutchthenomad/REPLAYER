@@ -71,6 +71,9 @@ class EventBus:
         # AUDIT FIX: Use weak references to prevent memory leaks
         self._subscribers: Dict[Events, List[weakref.ref]] = {}
 
+        # AUDIT FIX 2: Track original callbacks by id for proper unsubscribe
+        self._callback_ids: Dict[Events, Dict[int, Any]] = {}
+
         # AUDIT FIX: Increased queue size from 1000 to 5000
         self._queue = queue.Queue(maxsize=max_queue_size)
 
@@ -124,6 +127,7 @@ class EventBus:
         Subscribe to an event
 
         AUDIT FIX: Added weak reference support to prevent memory leaks
+        AUDIT FIX 2: Track callback IDs for proper unsubscribe
 
         Args:
             event: Event to subscribe to
@@ -133,44 +137,75 @@ class EventBus:
         with self._sub_lock:
             if event not in self._subscribers:
                 self._subscribers[event] = []
+            if event not in self._callback_ids:
+                self._callback_ids[event] = {}
+
+            # Use object id to track callback for unsubscribe
+            cb_id = id(callback)
+
+            # Skip if already subscribed (prevent duplicates)
+            if cb_id in self._callback_ids[event]:
+                logger.debug(f"Already subscribed to {event.value}, skipping duplicate")
+                return
 
             # AUDIT FIX: Store as weak reference by default
             if weak:
                 try:
                     ref = weakref.ref(callback)
-                    self._subscribers[event].append(ref)
+                    self._subscribers[event].append((cb_id, ref))
                 except TypeError:
                     # Callback not weak-referenceable (e.g., lambda), store directly
-                    self._subscribers[event].append(lambda: callback)
+                    self._subscribers[event].append((cb_id, callback))
             else:
                 # Store direct reference
-                self._subscribers[event].append(lambda: callback)
+                self._subscribers[event].append((cb_id, callback))
+
+            # Track by ID for unsubscribe
+            self._callback_ids[event][cb_id] = callback
             logger.debug(f"Subscribed to {event.value}")
     
     def unsubscribe(self, event: Events, callback: Callable):
         """
         Unsubscribe from an event
 
-        AUDIT FIX: Handle weak references properly
+        AUDIT FIX 2: Use callback ID for proper matching (fixes broken unsubscribe)
         """
         with self._sub_lock:
-            if event in self._subscribers:
-                # AUDIT FIX: Filter out matching callbacks (handle weak refs)
-                self._subscribers[event] = [
-                    ref for ref in self._subscribers[event]
-                    if callable(ref) and ref() != callback
-                ]
-                logger.debug(f"Unsubscribed from {event.value}")
+            if event not in self._subscribers:
+                logger.debug(f"No subscribers for {event.value}, nothing to unsubscribe")
+                return
+
+            cb_id = id(callback)
+
+            # Remove from ID tracking
+            if event in self._callback_ids:
+                self._callback_ids[event].pop(cb_id, None)
+
+            # Remove from subscriber list by ID
+            self._subscribers[event] = [
+                (cid, ref) for cid, ref in self._subscribers[event]
+                if cid != cb_id
+            ]
+            logger.debug(f"Unsubscribed from {event.value}")
     
     def publish(self, event: Events, data: Any = None):
         """
         Publish an event
 
-        AUDIT FIX: Track statistics
+        AUDIT FIX: Track statistics and queue capacity monitoring
         """
         try:
             self._queue.put_nowait((event, data))
             self._stats['events_published'] += 1
+
+            # AUDIT FIX: Warn at 80% capacity
+            qsize = self._queue.qsize()
+            max_size = self._queue.maxsize
+            if max_size > 0 and qsize > max_size * 0.8:
+                logger.warning(
+                    f"EventBus queue at {qsize}/{max_size} "
+                    f"({qsize/max_size*100:.0f}% capacity)"
+                )
         except queue.Full:
             self._stats['events_dropped'] += 1
             logger.warning(f"Event queue full, dropping event: {event.value}")
@@ -197,27 +232,39 @@ class EventBus:
 
         AUDIT FIX: CRITICAL - DO NOT hold lock during callback execution!
         This prevents deadlocks when callbacks publish events.
+        AUDIT FIX 2: Updated to work with (cb_id, ref) tuple format
         """
         # AUDIT FIX: Get callbacks THEN release lock before calling them
         callbacks_to_call = []
         with self._sub_lock:
             if event in self._subscribers:
                 # Clean up dead weak references while we're here
-                alive_callbacks = []
-                for ref in self._subscribers[event]:
-                    if callable(ref):
-                        # It's a weakref
+                alive_entries = []
+                for cb_id, ref in self._subscribers[event]:
+                    if hasattr(ref, '__call__') and hasattr(ref, '__self__'):
+                        # It's a weakref - call it to get the actual callback
                         cb = ref()
                         if cb is not None:
                             callbacks_to_call.append(cb)
-                            alive_callbacks.append(ref)
+                            alive_entries.append((cb_id, ref))
+                    elif callable(ref):
+                        # Check if it's a weakref by trying to call it
+                        try:
+                            cb = ref()
+                            if cb is not None:
+                                callbacks_to_call.append(cb)
+                                alive_entries.append((cb_id, ref))
+                        except TypeError:
+                            # Not a weakref, it's a direct reference
+                            callbacks_to_call.append(ref)
+                            alive_entries.append((cb_id, ref))
                     else:
-                        # It's a direct reference (lambda wrapper)
+                        # Direct reference (not callable in the weakref sense)
                         callbacks_to_call.append(ref)
-                        alive_callbacks.append(ref)
+                        alive_entries.append((cb_id, ref))
 
                 # Update list with only alive callbacks
-                self._subscribers[event] = alive_callbacks
+                self._subscribers[event] = alive_entries
 
         # AUDIT FIX: Call callbacks OUTSIDE the lock!
         for callback in callbacks_to_call:
@@ -236,7 +283,7 @@ class EventBus:
         """
         with self._sub_lock:
             stats = {
-                'subscriber_count': sum(len(callbacks) for callbacks in self._subscribers.values()),
+                'subscriber_count': sum(len(entries) for entries in self._subscribers.values()),
                 'event_types': len(self._subscribers),
                 'queue_size': self._queue.qsize(),
                 'processing': self._processing
@@ -244,6 +291,17 @@ class EventBus:
             # Add processing stats
             stats.update(self._stats)
             return stats
+
+    def clear_all(self):
+        """
+        Clear all subscribers (for testing/cleanup).
+
+        AUDIT FIX 2: Added for proper cleanup
+        """
+        with self._sub_lock:
+            self._subscribers.clear()
+            self._callback_ids.clear()
+            logger.debug("All subscribers cleared")
 
 # Global instance
 event_bus = EventBus()

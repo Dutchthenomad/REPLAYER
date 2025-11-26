@@ -43,6 +43,7 @@ class Config:
         'rug_liquidation_price': Decimal('0.02'),
         'max_position_size': Decimal('10.0'),
         'stop_loss_threshold': Decimal('0.5'),
+        'blocked_phases': ["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "UNKNOWN"],
     }
     
     # ========== Playback Settings ==========
@@ -133,17 +134,6 @@ class Config:
         'console_output': True,
     }
     
-    # ========== Flat Config Attributes (for bot compatibility) ==========
-    MIN_BET_SOL = Decimal('0.001')
-    MAX_BET_SOL = Decimal('1.0')
-    DEFAULT_BET_SOL = Decimal('0.001')
-    SIDEBET_MULTIPLIER = Decimal('5.0')
-    SIDEBET_WINDOW_TICKS = 40
-    SIDEBET_COOLDOWN_TICKS = 5
-    BLOCKED_PHASES_FOR_TRADING = ["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "UNKNOWN"]
-    INITIAL_BALANCE_SOL = Decimal('0.100')
-    MAX_POSITION_HISTORY = 1000
-
     # ========== Bot Settings ==========
     BOT = {
         'decision_delay': 0.5,

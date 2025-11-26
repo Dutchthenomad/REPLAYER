@@ -52,12 +52,12 @@ def validate_bet_amount(
         return False, f"{action} amount {amount} is unreasonably large"
 
     # Check minimum
-    if amount < config.MIN_BET_SOL:
-        return False, f"{action} amount {amount} below minimum {config.MIN_BET_SOL} SOL"
+    if amount < config.FINANCIAL['min_bet']:
+        return False, f"{action} amount {amount} below minimum {config.FINANCIAL['min_bet']} SOL"
 
     # Check maximum
-    if amount > config.MAX_BET_SOL:
-        return False, f"{action} amount {amount} exceeds maximum {config.MAX_BET_SOL} SOL"
+    if amount > config.FINANCIAL['max_bet']:
+        return False, f"{action} amount {amount} exceeds maximum {config.FINANCIAL['max_bet']} SOL"
 
     # AUDIT FIX: Check for negative balance
     if balance < 0:
@@ -95,7 +95,7 @@ def validate_trading_allowed(
         return False, f"{action} not allowed: game has been rugged"
 
     # Check phase
-    if tick.phase in config.BLOCKED_PHASES_FOR_TRADING:
+    if tick.phase in config.GAME_RULES['blocked_phases']:
         return False, f"{action} not allowed in {tick.phase} phase"
 
     return True, None
@@ -194,8 +194,8 @@ def validate_sidebet(
     # Check cooldown
     if last_sidebet_resolved_tick is not None:
         ticks_since_resolution = tick.tick - last_sidebet_resolved_tick
-        if ticks_since_resolution < config.SIDEBET_COOLDOWN_TICKS:
-            remaining = config.SIDEBET_COOLDOWN_TICKS - ticks_since_resolution
+        if ticks_since_resolution < config.GAME_RULES['sidebet_cooldown_ticks']:
+            remaining = config.GAME_RULES['sidebet_cooldown_ticks'] - ticks_since_resolution
             return False, f"Sidebet cooldown: {remaining} ticks remaining"
 
     return True, None

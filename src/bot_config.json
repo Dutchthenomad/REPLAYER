@@ -2,6 +2,7 @@
   "execution_mode": "ui_layer",
   "strategy": "conservative",
   "bot_enabled": false,
+  "default_balance_sol": 0.01,
   "button_depress_duration_ms": 50,
   "inter_click_pause_ms": 100
 }

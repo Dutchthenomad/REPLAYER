@@ -1,6 +1,6 @@
 """
-Browser Connection Dialog - Phase 8.5
-Connection wizard for browser automation with step-by-step progress
+Browser Connection Dialog - Phase 9.1 (CDP Update)
+Connection wizard for browser automation using CDP connection
 """
 
 import tkinter as tk
@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 
 class BrowserConnectionDialog:
     """
-    Connection wizard for browser automation
+    Connection wizard for browser automation via CDP
+
+    Phase 9.1: Uses Chrome DevTools Protocol (CDP) connection to YOUR Chrome browser.
+    This ensures wallet and profile persist across sessions.
 
     Shows step-by-step progress with visual feedback:
     - Profile selection dropdown
-    - Option checkboxes (visible mode, auto-wallet, navigate)
     - Real-time progress log
     - Thread-safe async connection
     """
@@ -46,48 +48,56 @@ class BrowserConnectionDialog:
     def show(self):
         """Show connection dialog"""
         self.dialog = tk.Toplevel(self.parent)
-        self.dialog.title("Connect to Live Browser")
+        self.dialog.title("Connect to Chrome via CDP")
         self.dialog.geometry("600x500")
+
+        # CDP Info Banner
+        info_frame = ttk.Frame(self.dialog, padding=10)
+        info_frame.pack(fill=tk.X)
+
+        info_text = (
+            "CDP Mode: Connects to YOUR Chrome browser (not Playwright's Chromium).\n"
+            "Your Phantom wallet and profile will persist across sessions."
+        )
+        ttk.Label(
+            info_frame,
+            text=info_text,
+            wraplength=550,
+            foreground="blue"
+        ).pack(anchor=tk.W)
 
         # Profile selection
         profile_frame = ttk.Frame(self.dialog, padding=10)
         profile_frame.pack(fill=tk.X)
 
         ttk.Label(profile_frame, text="Profile:").pack(side=tk.LEFT)
-        self.profile_var = tk.StringVar(value="rugs_fun_phantom")
+        self.profile_var = tk.StringVar(value="rugs_bot")
         profile_dropdown = ttk.Combobox(
             profile_frame,
             textvariable=self.profile_var,
-            values=["rugs_fun_phantom", "rugs_observer"],
+            values=["rugs_bot", "rugs_observer"],
             state='readonly',
             width=20
         )
         profile_dropdown.pack(side=tk.LEFT, padx=10)
 
-        # Options
+        # Options (simplified for CDP)
         options_frame = ttk.Frame(self.dialog, padding=10)
         options_frame.pack(fill=tk.X)
-
-        self.visible_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            options_frame,
-            text="Open browser in visible mode",
-            variable=self.visible_var
-        ).pack(anchor=tk.W)
-
-        self.auto_wallet_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            options_frame,
-            text="Auto-connect Phantom wallet",
-            variable=self.auto_wallet_var
-        ).pack(anchor=tk.W)
 
         self.navigate_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             options_frame,
-            text="Navigate to rugs.fun",
+            text="Navigate to rugs.fun (if not already there)",
             variable=self.navigate_var
         ).pack(anchor=tk.W)
+
+        # Note about wallet (already persisted in Chrome)
+        ttk.Label(
+            options_frame,
+            text="Note: Phantom wallet is managed in your Chrome profile",
+            foreground="gray"
+        ).pack(anchor=tk.W, pady=(5, 0))
 
         # Progress display
         progress_frame = ttk.Frame(self.dialog, padding=10)
@@ -166,53 +176,56 @@ class BrowserConnectionDialog:
 
     async def _connect_async(self):
         """
-        Async connection process
+        Async CDP connection process
+
+        Phase 9.1: Uses CDP to connect to YOUR Chrome browser.
 
         Returns:
             bool: True if connection succeeded, False otherwise
         """
         try:
-            # Step 1: Start browser
-            self._log_progress("\nStep 1: Starting browser...", "info")
-            self._log_progress("  Initializing RugsBrowserManager")
+            # Step 1: Connect via CDP
+            self._log_progress("\nStep 1: Connecting via CDP...", "info")
+            self._log_progress("  Checking for running Chrome on port 9222")
 
             profile = self.profile_var.get()
-            self._log_progress(f"  Loading profile: {profile}")
-            self._log_progress("  Loading Phantom extension")
+            self._log_progress(f"  Profile: {profile}")
+
+            # Update executor profile
+            self.browser_executor.profile_name = profile
+
+            self._log_progress("  Launching Chrome (if not running)...")
 
             success = await self.browser_executor.start_browser()
             if not success:
-                self._log_progress("Browser failed to start", "error")
+                self._log_progress("CDP connection failed", "error")
+                self._log_progress("  Make sure Chrome is installed", "error")
                 return False
 
-            self._log_progress("Browser started successfully!", "success")
+            self._log_progress("CDP connection established!", "success")
 
-            # Step 2: Navigate
+            # Show current page URL
+            if self.browser_executor.page:
+                url = self.browser_executor.page.url
+                self._log_progress(f"  Current URL: {url}", "info")
+
+            # Step 2: Navigate if requested
             if self.navigate_var.get():
-                self._log_progress("\nStep 2: Navigating to rugs.fun...", "info")
-                self._log_progress("  Opening https://rugs.fun")
-
-                nav_success = await self.browser_executor.browser_manager.navigate_to_game()
-                if nav_success:
-                    self._log_progress("Page loaded successfully!", "success")
+                page = self.browser_executor.page
+                if page and "rugs.fun" not in page.url:
+                    self._log_progress("\nStep 2: Navigating to rugs.fun...", "info")
+                    try:
+                        await page.goto("https://rugs.fun", wait_until="domcontentloaded", timeout=30000)
+                        self._log_progress("Page loaded successfully!", "success")
+                    except Exception as e:
+                        self._log_progress(f"Navigation issue: {e}", "warning")
                 else:
-                    self._log_progress("Navigation unclear - check browser", "warning")
-
-            # Step 3: Connect wallet
-            if self.auto_wallet_var.get():
-                self._log_progress("\nStep 3: Connecting wallet...", "info")
-                self._log_progress("  Checking existing connection")
-                self._log_progress("  Looking for Connect button")
-
-                wallet_success = await self.browser_executor.browser_manager.connect_wallet()
-                if wallet_success:
-                    self._log_progress("Wallet connected successfully!", "success")
-                else:
-                    self._log_progress("Wallet connection unclear - may need manual approval", "warning")
+                    self._log_progress("\nStep 2: Already on rugs.fun", "success")
 
             self._log_progress("\n" + "="*60, "info")
-            self._log_progress("✓ Connection Complete!", "success")
+            self._log_progress("CDP Connection Complete!", "success")
             self._log_progress("Browser is ready for trading", "success")
+            self._log_progress("Wallet: Check your Chrome profile", "info")
             self._log_progress("="*60, "info")
 
             return True

@@ -204,7 +204,16 @@ class WebSocketFeed:
             log_level: Logging level (DEBUG, INFO, WARN, ERROR)
         """
         self.server_url = 'https://backend.rugs.fun?frontend-version=1.0'
-        self.sio = socketio.Client(logger=False, engineio_logger=False)
+
+        # AUDIT FIX: Configure Socket.IO with heartbeat and reconnection
+        self.sio = socketio.Client(
+            logger=False,
+            engineio_logger=False,
+            reconnection=True,              # Enable automatic reconnection
+            reconnection_attempts=10,       # Max 10 reconnection attempts
+            reconnection_delay=1,           # Start with 1s delay
+            reconnection_delay_max=10,      # Max 10s delay (exponential backoff)
+        )
         self.state_machine = GameStateMachine()
 
         # Metrics
@@ -287,9 +296,41 @@ class WebSocketFeed:
             # AUDIT FIX: Error boundary for connect_error handler
             try:
                 self.logger.error(f'🚨 Connection error: {data}')
-                self._emit_event('error', {'message': str(data)})
+                self._emit_event('error', {'message': str(data), 'type': 'connect_error'})
             except Exception as e:
                 self.logger.error(f"Error in connect_error handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
+        # AUDIT FIX: Add reconnection event handlers
+        @self.sio.event
+        def reconnect():
+            """Handle successful reconnection"""
+            try:
+                self.is_connected = True
+                self.logger.info('🔄 Reconnected to Rugs.fun backend')
+                self._emit_event('reconnected', {'socketId': self.sio.sid})
+            except Exception as e:
+                self.logger.error(f"Error in reconnect handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
+        @self.sio.event
+        def reconnect_attempt(attempt_number):
+            """Handle reconnection attempt"""
+            try:
+                self.logger.warning(f'⏳ Reconnection attempt #{attempt_number}...')
+                self._emit_event('reconnect_attempt', {'attempt': attempt_number})
+            except Exception as e:
+                self.logger.error(f"Error in reconnect_attempt handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
+        @self.sio.event
+        def reconnect_failed():
+            """Handle reconnection failure (all attempts exhausted)"""
+            try:
+                self.logger.error('❌ Reconnection failed - all attempts exhausted')
+                self._emit_event('reconnect_failed', {})
+            except Exception as e:
+                self.logger.error(f"Error in reconnect_failed handler: {e}", exc_info=True)
                 self.metrics['errors'] += 1
 
         @self.sio.on('gameStateUpdate')

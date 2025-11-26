@@ -1,0 +1,50 @@
+================================================================================
+DEPRECATED - DO NOT USE FOR CODE
+================================================================================
+
+These absolute XPaths are BRITTLE and will break when Rugs.fun updates their UI.
+They are kept here for REFERENCE ONLY.
+
+USE INSTEAD: Text-based selectors in browser_executor.py
+Example: 'button:has-text("BUY")' instead of absolute XPath
+
+Primary selectors are defined in:
+  /src/bot/browser_executor.py (BUY_BUTTON_SELECTORS, etc.)
+
+================================================================================
+
+XPATHS (Reference Only - May Be Outdated)
+
++ 0.001: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[1]/div/div/div/div[1]/button[1]
+
++0.01: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[1]/div/div/div/div[1]/button[2]
+
++0.1: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[3]
+
++1: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[4]
+
+1/2: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[5]
+
+X2: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[6]
+
+MAX: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[7]
+
+X: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[1]/div/div/div/button
+
+BUY: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[3]/div[1]/button
+
+SELL: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[3]/div[2]/button/div
+
+SIDEBET (ACTIVATE): /html/body/div[1]/div/div[2]/div[2]/div/div[3]/div[2]/div/div[3]
+
+SIDEBET (OLD UN-HIDE - DEPRECATED): /html/body/div[1]/div/div[2]/div[2]/div/div[3]/div[2]/div/div[1]
+
+10%: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[1]
+
+25%: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[2]
+
+50%: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[3]
+
+100%: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[4]
+
+SHORT: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[3]/div[2]/button

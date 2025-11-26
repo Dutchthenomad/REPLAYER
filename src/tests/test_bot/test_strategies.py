@@ -32,10 +32,10 @@ class TestStrategyRegistry:
         assert strategy is not None
 
     def test_get_invalid_strategy(self):
-        """Test getting invalid strategy returns None"""
-        strategy = get_strategy('nonexistent')
-
-        assert strategy is None
+        """Test getting invalid strategy raises ValueError"""
+        import pytest
+        with pytest.raises(ValueError):
+            get_strategy('nonexistent')
 
 
 class TestConservativeStrategy:

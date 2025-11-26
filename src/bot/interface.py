@@ -1,5 +1,6 @@
 """
 Bot Interface - API for bot actions and observations
+Refactored to remove legacy compatibility layer dependencies.
 """
 
 import logging
@@ -11,6 +12,8 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# Constants previously in Config
+BLOCKED_PHASES_FOR_TRADING = ["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "UNKNOWN"]
 
 class BotInterface:
     """
@@ -46,56 +49,74 @@ class BotInterface:
             Dictionary with current state, wallet, position, sidebet, game info
             or None if no game loaded
         """
-        tick = self.state.current_tick
-        if not tick:
-            return None
-
+        snap = self.state.get_snapshot()
+        
+        # Use metadata active/rugged flags or defaults from snapshot
+        # Note: active/rugged were added to StateSnapshot in Phase 3
+        is_active = snap.active
+        is_rugged = snap.rugged
+        
         # Get position info
         position_info = None
-        if self.state.has_active_position():
-            pos = self.state.active_position
-            unrealized_pnl_sol, unrealized_pnl_pct = pos.calculate_unrealized_pnl(tick.price)
+        if snap.position and snap.position.get('status') == 'active':
+            pos = snap.position
+            entry_price = pos['entry_price']
+            amount = pos['amount']
+            
+            # Calculate PnL manually (previously done by Position model)
+            current_val = amount * snap.price
+            entry_val = amount * entry_price
+            unrealized_pnl_sol = current_val - entry_val
+            
+            if entry_price > 0:
+                unrealized_pnl_pct = ((snap.price / entry_price) - 1) * 100
+            else:
+                unrealized_pnl_pct = Decimal('0')
+
             position_info = {
-                'entry_price': float(pos.entry_price),
-                'amount': float(pos.amount),
-                'entry_tick': pos.entry_tick,
+                'entry_price': float(entry_price),
+                'amount': float(amount),
+                'entry_tick': pos['entry_tick'],
                 'current_pnl_sol': float(unrealized_pnl_sol),
                 'current_pnl_percent': float(unrealized_pnl_pct)
             }
 
         # Get sidebet info
         sidebet_info = None
-        if self.state.has_active_sidebet():
-            sb = self.state.active_sidebet
-            ticks_remaining = (sb.placed_tick + config.SIDEBET_WINDOW_TICKS) - tick.tick
+        if snap.sidebet and snap.sidebet.get('status') == 'active':
+            sb = snap.sidebet
+            window = config.GAME_RULES['sidebet_window_ticks']
+            multiplier = config.GAME_RULES['sidebet_multiplier']
+            
+            ticks_remaining = (sb['placed_tick'] + window) - snap.tick
             sidebet_info = {
-                'amount': float(sb.amount),
-                'placed_tick': sb.placed_tick,
-                'placed_price': float(sb.placed_price),
+                'amount': float(sb['amount']),
+                'placed_tick': sb['placed_tick'],
+                'placed_price': float(sb['placed_price']),
                 'ticks_remaining': ticks_remaining,
-                'potential_win': float(sb.amount * config.SIDEBET_MULTIPLIER)
+                'potential_win': float(sb['amount'] * multiplier)
             }
 
         return {
             'current_state': {
-                'price': float(tick.price),
-                'tick': tick.tick,
-                'phase': tick.phase,
-                'active': tick.active,
-                'rugged': tick.rugged,
-                'trade_count': tick.trade_count
+                'price': float(snap.price),
+                'tick': snap.tick,
+                'phase': snap.phase,
+                'active': is_active,
+                'rugged': is_rugged,
+                'trade_count': self.state.get_stats('total_trades')
             },
             'wallet': {
-                'balance': float(self.state.balance),
-                'starting_balance': float(self.state.initial_balance),
-                'session_pnl': float(self.state.session_pnl)
+                'balance': float(snap.balance),
+                'starting_balance': float(self.state.get('initial_balance', Decimal('0.1'))),
+                'session_pnl': float(self.state.get_stats('total_pnl'))
             },
             'position': position_info,
             'sidebet': sidebet_info,
             'game_info': {
-                'game_id': self.state.current_game_id or 'Unknown',
-                'current_tick_index': self.state._current_tick_index,
-                'total_ticks': len(self.state._current_game)
+                'game_id': snap.game_id or 'Unknown',
+                'current_tick_index': snap.tick,
+                'total_ticks': 0 # Legacy compat, was len(self.state._current_game) which was []
             }
         }
 
@@ -106,38 +127,49 @@ class BotInterface:
         Returns:
             Dictionary with valid_actions, can_buy, can_sell, can_sidebet, constraints
         """
-        tick = self.state.current_tick
-
+        snap = self.state.get_snapshot()
+        
         # Default: no actions available
         valid_actions = ['WAIT']
         can_buy = False
         can_sell = False
         can_sidebet = False
 
-        if tick:
+        # Retrieve config values
+        min_bet = config.FINANCIAL['min_bet']
+        max_bet = config.FINANCIAL['max_bet']
+        sidebet_mult = config.GAME_RULES['sidebet_multiplier']
+        sidebet_window = config.GAME_RULES['sidebet_window_ticks']
+        sidebet_cooldown = config.GAME_RULES['sidebet_cooldown_ticks']
+
+        if snap:
+            has_position = snap.position and snap.position.get('status') == 'active'
+            has_sidebet = snap.sidebet and snap.sidebet.get('status') == 'active'
+            
             # Check if can buy
-            if (tick.active and
-                tick.phase not in config.BLOCKED_PHASES_FOR_TRADING and
-                not self.state.has_active_position() and
-                self.state.balance >= config.MIN_BET_SOL):
+            if (snap.active and
+                snap.phase not in BLOCKED_PHASES_FOR_TRADING and
+                not has_position and
+                snap.balance >= min_bet):
                 can_buy = True
                 valid_actions.append('BUY')
 
             # Check if can sell
-            if self.state.has_active_position():
+            if has_position:
                 can_sell = True
                 valid_actions.append('SELL')
 
             # Check if can sidebet
-            if (tick.active and
-                tick.phase not in config.BLOCKED_PHASES_FOR_TRADING and
-                not self.state.has_active_sidebet() and
-                self.state.balance >= config.MIN_BET_SOL):
+            if (snap.active and
+                snap.phase not in BLOCKED_PHASES_FOR_TRADING and
+                not has_sidebet and
+                snap.balance >= min_bet):
 
                 # Check cooldown
-                if self.state._last_sidebet_resolved_tick is not None:
-                    ticks_since = tick.tick - self.state._last_sidebet_resolved_tick
-                    if ticks_since > config.SIDEBET_COOLDOWN_TICKS:
+                last_resolved = self.state.get('last_sidebet_resolved_tick')
+                if last_resolved is not None:
+                    ticks_since = snap.tick - last_resolved
+                    if ticks_since > sidebet_cooldown:
                         can_sidebet = True
                         valid_actions.append('SIDE')
                 else:
@@ -150,11 +182,11 @@ class BotInterface:
             'can_sell': can_sell,
             'can_sidebet': can_sidebet,
             'constraints': {
-                'min_bet': float(config.MIN_BET_SOL),
-                'max_bet': float(config.MAX_BET_SOL),
-                'sidebet_multiplier': float(config.SIDEBET_MULTIPLIER),
-                'sidebet_window_ticks': config.SIDEBET_WINDOW_TICKS,
-                'sidebet_cooldown_ticks': config.SIDEBET_COOLDOWN_TICKS
+                'min_bet': float(min_bet),
+                'max_bet': float(max_bet),
+                'sidebet_multiplier': float(sidebet_mult),
+                'sidebet_window_ticks': sidebet_window,
+                'sidebet_cooldown_ticks': sidebet_cooldown
             }
         }
 

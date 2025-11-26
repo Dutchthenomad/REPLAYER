@@ -576,9 +576,6 @@ class ReplayEngine:
             game_id=tick.game_id
         )
 
-        # Store current tick reference
-        self.state.current_tick = tick
-
         # Publish tick event
         # Use (index + 1) so progress reaches 100% at final tick
         event_bus.publish(Events.GAME_TICK, {

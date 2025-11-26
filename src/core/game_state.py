@@ -14,6 +14,12 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# AUDIT FIX: Bounded history to prevent unbounded memory growth
+MAX_HISTORY_SIZE = 10000  # Max snapshots to keep
+MAX_TRANSACTION_LOG_SIZE = 1000  # Max transactions to keep
+MAX_CLOSED_POSITIONS_SIZE = 500  # Max closed positions to keep
+
+
 class StateEvents(Enum):
     """Events that can be emitted by state changes"""
     BALANCE_CHANGED = "balance_changed"
@@ -41,6 +47,8 @@ class StateSnapshot:
     phase: str = "UNKNOWN"
     price: Decimal = Decimal('1.0')
     game_id: Optional[str] = None
+    active: bool = False
+    rugged: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 class GameState:
@@ -133,9 +141,10 @@ class GameState:
                 phase=self._state['current_phase'],
                 price=self._state['current_price'],
                 game_id=self._state['game_id'],
+                active=self._state.get('game_active', False),
+                rugged=self._state.get('rugged', False),
                 metadata={
-                    'bot_enabled': self._state['bot_enabled'],
-                    'rugged': self._state['rugged']
+                    'bot_enabled': self._state['bot_enabled']
                 }
             )
     
@@ -163,8 +172,10 @@ class GameState:
                     self._state = old_state
                     return False
                 
-                # Record history
+                # Record history (AUDIT FIX: bounded)
                 self._history.append(self.get_snapshot())
+                if len(self._history) > MAX_HISTORY_SIZE:
+                    self._history = self._history[-MAX_HISTORY_SIZE:]
                 
                 # Notify observers of changes
                 self._notify_changes(old_state, self._state)
@@ -188,7 +199,7 @@ class GameState:
 
             self._state['balance'] = new_balance
 
-            # Log transaction
+            # Log transaction (AUDIT FIX: bounded)
             self._transaction_log.append({
                 'timestamp': datetime.now(),
                 'type': 'balance_change',
@@ -197,6 +208,8 @@ class GameState:
                 'new_balance': new_balance,
                 'reason': reason
             })
+            if len(self._transaction_log) > MAX_TRANSACTION_LOG_SIZE:
+                self._transaction_log = self._transaction_log[-MAX_TRANSACTION_LOG_SIZE:]
 
             # Update statistics
             # Track session P&L (cumulative balance changes)
@@ -316,8 +329,10 @@ class GameState:
             
             self._emit(StateEvents.POSITION_CLOSED, position)
 
-            # Add to closed positions history
+            # Add to closed positions history (AUDIT FIX: bounded)
             self._closed_positions.append(position.copy())
+            if len(self._closed_positions) > MAX_CLOSED_POSITIONS_SIZE:
+                self._closed_positions = self._closed_positions[-MAX_CLOSED_POSITIONS_SIZE:]
 
             # Clear active position
             self._state['position'] = None
@@ -657,128 +672,10 @@ class GameState:
                 'roi': roi
             }
 
-    # ========== Bot Interface Compatibility Methods ==========
-
-    def has_active_position(self) -> bool:
-        """Check if has active position (bot interface compatibility)"""
-        with self._lock:
-            position = self._state.get('position')
-            return position is not None and position.get('status') == 'active'
-
-    def has_active_sidebet(self) -> bool:
-        """Check if has active sidebet (bot interface compatibility)"""
-        with self._lock:
-            sidebet = self._state.get('sidebet')
-            return sidebet is not None and sidebet.get('status') == 'active'
-
-    @property
-    def active_position(self):
-        """Get active position as property (bot interface compatibility)"""
-        with self._lock:
-            position = self._state.get('position')
-            if position and position.get('status') == 'active':
-                # Convert to Position-like object for bot interface
-                from models import Position
-                import time
-                return Position(
-                    entry_price=position['entry_price'],
-                    amount=position['amount'],
-                    entry_time=position.get('entry_time', time.time()),
-                    entry_tick=position['entry_tick']
-                )
-            return None
-
-    @property
-    def active_sidebet(self):
-        """Get active sidebet as property (bot interface compatibility)"""
-        with self._lock:
-            sidebet = self._state.get('sidebet')
-            if sidebet and sidebet.get('status') == 'active':
-                # Convert to SideBet-like object for bot interface
-                from models import SideBet
-                return SideBet(
-                    amount=sidebet['amount'],
-                    placed_tick=sidebet['placed_tick'],
-                    placed_price=sidebet['placed_price']
-                )
-            return None
-
-    @property
-    def current_tick(self):
-        """Get current tick as property (bot interface compatibility)"""
-        with self._lock:
-            # Return stored tick object if available, otherwise create from state
-            stored_tick = self._state.get('_current_tick_object')
-            if stored_tick:
-                return stored_tick
-
-            # Fallback: create from state data
-            from models import GameTick
-            from datetime import datetime
-            return GameTick(
-                game_id=self._state.get('game_id', 'unknown'),
-                tick=self._state.get('current_tick', 0),
-                timestamp=datetime.now().isoformat(),
-                price=self._state.get('current_price', Decimal('1.0')),
-                phase=self._state.get('current_phase', 'UNKNOWN'),
-                active=self._state.get('game_active', False),
-                rugged=self._state.get('rugged', False),
-                cooldown_timer=0,
-                trade_count=0
-            )
-
-    @current_tick.setter
-    def current_tick(self, tick):
-        """Set current tick object (replay engine compatibility)"""
-        with self._lock:
-            # Store the GameTick object directly
-            self._state['_current_tick_object'] = tick
-
-    @property
-    def balance(self) -> Decimal:
-        """Get current balance as property (bot interface compatibility)"""
-        with self._lock:
-            return self._state.get('balance', Decimal('0'))
-
-    @property
-    def initial_balance(self) -> Decimal:
-        """Get initial balance as property (bot interface compatibility)"""
-        with self._lock:
-            return self._state.get('initial_balance', Decimal('0.100'))
-
-    @property
-    def session_pnl(self) -> Decimal:
-        """Get session P&L as property (bot interface compatibility)"""
-        with self._lock:
-            return self._stats.get('total_pnl', Decimal('0'))
-
-    @property
-    def current_game_id(self) -> Optional[str]:
-        """Get current game ID as property (bot interface compatibility)"""
-        with self._lock:
-            return self._state.get('game_id')
-
-    @property
-    def _current_tick_index(self) -> int:
-        """Get current tick index (bot interface compatibility)"""
-        with self._lock:
-            return self._state.get('current_tick', 0)
-
-    @property
-    def _current_game(self) -> List:
-        """Get current game (bot interface compatibility)"""
-        # Return empty list as replay engine manages this
-        return []
-
-    @property
-    def _last_sidebet_resolved_tick(self) -> Optional[int]:
-        """Get last sidebet resolved tick (bot interface compatibility)"""
-        with self._lock:
-            # Track this in state if needed
-            return self._state.get('last_sidebet_resolved_tick')
+    # ========== Test Helpers ==========
 
     def get_position_history(self) -> List:
-        """Get history of closed positions (returns Position objects)"""
+        """Get history of closed positions (returns Position objects) - Used by Tests"""
         with self._lock:
             from models import Position
             # Track closed positions separately for backwards compatibility

@@ -1,10 +1,12 @@
 """
-Browser Executor - Phase 8.5
+Browser Executor - Phase 9.1 (CDP Update)
 
-Bridges REPLAYER bot to live browser automation via Playwright.
-Uses locally imported browser automation modules from browser_automation/.
+Bridges REPLAYER bot to live browser automation via Playwright CDP.
+Uses CDP (Chrome DevTools Protocol) for reliable wallet persistence.
 
 Key Features:
+- CDP connection to running Chrome (not Playwright's Chromium)
+- Wallet and profile persistence across sessions
 - Async browser control methods (click BUY, SELL, SIDEBET)
 - State synchronization (read balance, position from DOM)
 - Execution validation (verify action effect)
@@ -14,20 +16,38 @@ Key Features:
 
 import asyncio
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from decimal import Decimal
 from dataclasses import dataclass, field
 
+# Add repository root to path for browser_automation imports
+_repo_root = Path(__file__).parent.parent.parent  # src/bot -> src -> repo root
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+# Phase 9.1: Use CDP Browser Manager for reliable wallet persistence
+try:
+    from browser_automation.cdp_browser_manager import CDPBrowserManager, CDPStatus
+    CDP_MANAGER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"CDPBrowserManager not available: {e}")
+    CDPBrowserManager = None
+    CDPStatus = None
+    CDP_MANAGER_AVAILABLE = False
+
+# Legacy fallback (deprecated - kept for compatibility)
 try:
     from browser_automation.rugs_browser import RugsBrowserManager, BrowserStatus
-    BROWSER_MANAGER_AVAILABLE = True
-except ImportError as e:
-    logging.warning(f"RugsBrowserManager not available: {e}")
+    LEGACY_MANAGER_AVAILABLE = True
+except ImportError:
     RugsBrowserManager = None
     BrowserStatus = None
-    BROWSER_MANAGER_AVAILABLE = False
+    LEGACY_MANAGER_AVAILABLE = False
+
+BROWSER_MANAGER_AVAILABLE = CDP_MANAGER_AVAILABLE or LEGACY_MANAGER_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -208,21 +228,26 @@ class BrowserExecutor:
         'button[data-action="max"]',
     ]
 
-    def __init__(self, profile_name: str = "rugs_fun_phantom"):
+    def __init__(self, profile_name: str = "rugs_bot", use_cdp: bool = True):
         """
         Initialize browser executor
 
         Args:
-            profile_name: Name of persistent browser profile (default: rugs_fun_phantom)
+            profile_name: Name of persistent browser profile (default: rugs_bot)
+            use_cdp: Use CDP connection (default: True, recommended)
         """
         if not BROWSER_MANAGER_AVAILABLE:
             raise RuntimeError(
-                "RugsBrowserManager not available. "
+                "No browser manager available. "
                 "Check browser_automation/ directory is present."
             )
 
         self.profile_name = profile_name
-        self.browser_manager: Optional[RugsBrowserManager] = None
+        self.use_cdp = use_cdp and CDP_MANAGER_AVAILABLE
+
+        # Phase 9.1: CDP is the default and recommended approach
+        self.cdp_manager: Optional[CDPBrowserManager] = None if self.use_cdp else None
+        self.browser_manager: Optional[RugsBrowserManager] = None  # Legacy fallback
 
         # Execution tracking
         self.last_action = None
@@ -244,11 +269,16 @@ class BrowserExecutor:
         self.browser_stop_timeout = 10.0  # seconds
         self.click_timeout = 10.0  # seconds
 
-        logger.info(f"BrowserExecutor initialized (profile: {profile_name})")
+        mode = "CDP" if self.use_cdp else "Legacy"
+        logger.info(f"BrowserExecutor initialized ({mode} mode, profile: {profile_name})")
 
     async def start_browser(self) -> bool:
         """
         Start browser and connect to Rugs.fun
+
+        Phase 9.1: Uses CDP connection by default for reliable wallet persistence.
+        CDP connects to YOUR Chrome browser (not Playwright's Chromium), ensuring
+        Phantom wallet and profile persist across sessions.
 
         AUDIT FIX: All browser operations wrapped in asyncio.wait_for() with timeouts
         to prevent deadlocks if browser freezes.
@@ -257,74 +287,150 @@ class BrowserExecutor:
             True if browser started successfully, False otherwise
         """
         try:
-            logger.info("Starting browser...")
-
-            # Create browser manager
-            self.browser_manager = RugsBrowserManager(profile_name=self.profile_name)
-
-            # AUDIT FIX: Wrap start_browser in timeout to prevent deadlock
-            try:
-                start_result = await asyncio.wait_for(
-                    self.browser_manager.start_browser(),
-                    timeout=self.browser_start_timeout
-                )
-                if not start_result:
-                    logger.error("Failed to start browser")
-                    return False
-            except asyncio.TimeoutError:
-                logger.error(f"Browser start timeout after {self.browser_start_timeout}s")
-                return False
-
-            logger.info("Browser started successfully")
-
-            # Navigate to game FIRST (before wallet connection)
-            logger.info("Navigating to rugs.fun...")
-            # AUDIT FIX: Wrap navigation in timeout
-            try:
-                nav_result = await asyncio.wait_for(
-                    self.browser_manager.navigate_to_game(),
-                    timeout=15.0  # 15 seconds for page load
-                )
-                if not nav_result:
-                    logger.warning("Navigation to rugs.fun unclear - continuing anyway")
-                    # Don't fail here - browser might still work
-            except asyncio.TimeoutError:
-                logger.warning("Navigation timeout - continuing anyway")
-
-            logger.info("Page loaded")
-
-            # Connect wallet (now that we're on rugs.fun)
-            logger.info("Connecting Phantom wallet...")
-            # AUDIT FIX: Wrap wallet connection in timeout
-            try:
-                wallet_result = await asyncio.wait_for(
-                    self.browser_manager.connect_wallet(),
-                    timeout=20.0  # 20 seconds for wallet connection (may require user approval)
-                )
-                if not wallet_result:
-                    logger.warning("Wallet connection unclear - please verify in browser")
-                    # Don't fail here - user can connect manually
-                else:
-                    logger.info("Wallet connected successfully!")
-            except asyncio.TimeoutError:
-                logger.warning("Wallet connection timeout - may need manual approval")
-
-            logger.info("Browser ready for live trading!")
-            return True
+            if self.use_cdp:
+                return await self._start_browser_cdp()
+            else:
+                return await self._start_browser_legacy()
 
         except Exception as e:
             logger.error(f"Error starting browser: {e}", exc_info=True)
             return False
 
+    async def _start_browser_cdp(self) -> bool:
+        """
+        Start browser using CDP connection (Phase 9.1)
+
+        Benefits:
+        - Uses YOUR Chrome browser (not Playwright's Chromium)
+        - Wallet and profile persist across sessions
+        - Extensions work natively (no MV3 issues)
+        """
+        # AUDIT FIX: Defensive check for CDP availability
+        if not CDP_MANAGER_AVAILABLE or CDPBrowserManager is None:
+            logger.error("CDP Manager not available - check browser_automation imports")
+            return False
+
+        logger.info("Starting browser via CDP connection...")
+
+        # Create CDP browser manager
+        self.cdp_manager = CDPBrowserManager(profile_name=self.profile_name)
+
+        # Connect (will launch Chrome if needed)
+        try:
+            connect_result = await asyncio.wait_for(
+                self.cdp_manager.connect(),
+                timeout=self.browser_start_timeout
+            )
+            if not connect_result:
+                logger.error("Failed to connect via CDP")
+                return False
+        except asyncio.TimeoutError:
+            logger.error(f"CDP connection timeout after {self.browser_start_timeout}s")
+            return False
+
+        logger.info(f"CDP connected! Current URL: {self.cdp_manager.page.url if self.cdp_manager.page else 'N/A'}")
+
+        # Navigate to rugs.fun if not already there
+        try:
+            nav_result = await asyncio.wait_for(
+                self.cdp_manager.navigate_to_game(),
+                timeout=15.0
+            )
+            if not nav_result:
+                logger.warning("Navigation unclear - check browser")
+        except asyncio.TimeoutError:
+            logger.warning("Navigation timeout - check browser")
+
+        logger.info("Browser ready for live trading via CDP!")
+        logger.info("NOTE: Wallet should already be connected in your Chrome profile")
+        return True
+
+    async def _start_browser_legacy(self) -> bool:
+        """
+        Start browser using legacy RugsBrowserManager (deprecated)
+
+        DEPRECATED: Use CDP mode instead for reliable wallet persistence.
+        """
+        logger.warning("Using legacy browser manager (CDP recommended)")
+
+        # Create browser manager
+        self.browser_manager = RugsBrowserManager(profile_name=self.profile_name)
+
+        # AUDIT FIX: Wrap start_browser in timeout to prevent deadlock
+        try:
+            start_result = await asyncio.wait_for(
+                self.browser_manager.start_browser(),
+                timeout=self.browser_start_timeout
+            )
+            if not start_result:
+                logger.error("Failed to start browser")
+                return False
+        except asyncio.TimeoutError:
+            logger.error(f"Browser start timeout after {self.browser_start_timeout}s")
+            return False
+
+        logger.info("Browser started successfully")
+
+        # Navigate to game FIRST (before wallet connection)
+        logger.info("Navigating to rugs.fun...")
+        # AUDIT FIX: Wrap navigation in timeout
+        try:
+            nav_result = await asyncio.wait_for(
+                self.browser_manager.navigate_to_game(),
+                timeout=15.0  # 15 seconds for page load
+            )
+            if not nav_result:
+                logger.warning("Navigation to rugs.fun unclear - continuing anyway")
+                # Don't fail here - browser might still work
+        except asyncio.TimeoutError:
+            logger.warning("Navigation timeout - continuing anyway")
+
+        logger.info("Page loaded")
+
+        # Connect wallet (now that we're on rugs.fun)
+        logger.info("Connecting Phantom wallet...")
+        # AUDIT FIX: Wrap wallet connection in timeout
+        try:
+            wallet_result = await asyncio.wait_for(
+                self.browser_manager.connect_wallet(),
+                timeout=20.0  # 20 seconds for wallet connection (may require user approval)
+            )
+            if not wallet_result:
+                logger.warning("Wallet connection unclear - please verify in browser")
+                # Don't fail here - user can connect manually
+            else:
+                logger.info("Wallet connected successfully!")
+        except asyncio.TimeoutError:
+            logger.warning("Wallet connection timeout - may need manual approval")
+
+        logger.info("Browser ready for live trading!")
+        return True
+
     async def stop_browser(self) -> None:
         """
         Stop browser and cleanup resources
 
+        Phase 9.1: For CDP mode, disconnects but leaves Chrome running.
+        For legacy mode, stops browser completely.
+
         AUDIT FIX: Wrapped in timeout to prevent deadlock during shutdown
         """
         try:
+            # CDP mode - disconnect (Chrome keeps running for persistence)
+            if self.cdp_manager:
+                try:
+                    await asyncio.wait_for(
+                        self.cdp_manager.disconnect(),
+                        timeout=self.browser_stop_timeout
+                    )
+                    logger.info("CDP disconnected (Chrome still running for persistence)")
+                except asyncio.TimeoutError:
+                    logger.error(f"CDP disconnect timeout after {self.browser_stop_timeout}s")
+                finally:
+                    self.cdp_manager = None
+
+            # Legacy mode - stop browser completely
             if self.browser_manager:
-                # AUDIT FIX: Wrap stop_browser in timeout to prevent deadlock
                 try:
                     await asyncio.wait_for(
                         self.browser_manager.stop_browser(),
@@ -333,7 +439,6 @@ class BrowserExecutor:
                     logger.info("Browser stopped")
                 except asyncio.TimeoutError:
                     logger.error(f"Browser stop timeout after {self.browser_stop_timeout}s - forcing cleanup")
-                    # Force cleanup even if timeout occurred
                 finally:
                     self.browser_manager = None
 
@@ -347,10 +452,24 @@ class BrowserExecutor:
         Returns:
             True if browser is ready, False otherwise
         """
-        if not self.browser_manager:
-            return False
+        # CDP mode
+        if self.cdp_manager:
+            return self.cdp_manager.is_ready()
 
-        return self.browser_manager.is_ready_for_observation()
+        # Legacy mode
+        if self.browser_manager:
+            return self.browser_manager.is_ready_for_observation()
+
+        return False
+
+    @property
+    def page(self):
+        """Get the active browser page (CDP or legacy)"""
+        if self.cdp_manager and self.cdp_manager.page:
+            return self.cdp_manager.page
+        if self.browser_manager and self.browser_manager.page:
+            return self.browser_manager.page
+        return None
 
     # ========================================================================
     # BROWSER ACTION METHODS (Phase 8.5)
@@ -374,7 +493,7 @@ class BrowserExecutor:
                 logger.error("Browser not ready for BUY action")
                 return False
 
-            page = self.browser_manager.page
+            page = self.page  # Use property (CDP or legacy)
 
             # Set bet amount if provided (Phase A.3: use incremental clicking)
             if amount is not None:
@@ -423,7 +542,7 @@ class BrowserExecutor:
                 logger.error("Browser not ready for SELL action")
                 return False
 
-            page = self.browser_manager.page
+            page = self.page  # Use property (CDP or legacy)
 
             # Set sell percentage if provided
             if percentage is not None:
@@ -476,7 +595,7 @@ class BrowserExecutor:
                 logger.error("Browser not ready for SIDEBET action")
                 return False
 
-            page = self.browser_manager.page
+            page = self.page  # Use property (CDP or legacy)
 
             # Set bet amount if provided (Phase A.3: use incremental clicking)
             if amount is not None:
@@ -525,7 +644,7 @@ class BrowserExecutor:
             True if successful, False otherwise
         """
         try:
-            page = self.browser_manager.page
+            page = self.page  # Use property (CDP or legacy)
 
             # Find bet amount input
             for selector in self.BET_AMOUNT_INPUT_SELECTORS:
@@ -562,7 +681,7 @@ class BrowserExecutor:
             True if successful, False otherwise
         """
         try:
-            page = self.browser_manager.page
+            page = self.page  # Use property (CDP or legacy)
 
             # Map percentage to button text
             percentage_text = {
@@ -629,7 +748,7 @@ class BrowserExecutor:
             return False
 
         try:
-            page = self.browser_manager.page
+            page = self.page  # Use property (CDP or legacy)
 
             # Map button type to selectors
             selector_map = {
@@ -764,7 +883,7 @@ class BrowserExecutor:
         Returns:
             Balance in SOL, or None if not available
         """
-        if not self.browser_manager or not self.browser_manager.page:
+        if not self.page:
             logger.warning("Cannot read balance: browser not started")
             return None
 
@@ -780,7 +899,7 @@ class BrowserExecutor:
             for selector in balance_selectors:
                 try:
                     element = await asyncio.wait_for(
-                        self.browser_manager.page.query_selector(selector),
+                        self.page.query_selector(selector),
                         timeout=2.0
                     )
                     if element:
@@ -814,7 +933,7 @@ class BrowserExecutor:
         Returns:
             Position dict with entry_price, amount, status; or None if no position
         """
-        if not self.browser_manager or not self.browser_manager.page:
+        if not self.page:
             logger.warning("Cannot read position: browser not started")
             return None
 
@@ -829,7 +948,7 @@ class BrowserExecutor:
             for selector in position_selectors:
                 try:
                     element = await asyncio.wait_for(
-                        self.browser_manager.page.query_selector(selector),
+                        self.page.query_selector(selector),
                         timeout=2.0
                     )
                     if element:

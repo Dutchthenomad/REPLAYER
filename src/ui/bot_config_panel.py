@@ -232,6 +232,35 @@ class BotConfigPanel:
         strategy_combo.pack(side=tk.LEFT)
 
         # ========================================================================
+        # BALANCE CONFIGURATION (Phase 9.1)
+        # ========================================================================
+
+        balance_frame = ttk.LabelFrame(main_frame, text="Balance Configuration", padding="10")
+        balance_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Default balance label and entry
+        default_balance_label = ttk.Label(balance_frame, text="Default balance (SOL):")
+        default_balance_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+
+        self.default_balance_var = tk.StringVar(value=str(self.config.get('default_balance_sol', 0.01)))
+
+        default_balance_entry = ttk.Entry(
+            balance_frame,
+            textvariable=self.default_balance_var,
+            width=12
+        )
+        default_balance_entry.grid(row=0, column=1, sticky=tk.W, pady=5)
+
+        # Help text
+        help_text = ttk.Label(
+            balance_frame,
+            text="Initial balance for new sessions (can be overridden with balance lock toggle)",
+            font=('TkDefaultFont', 8),
+            foreground='gray'
+        )
+        help_text.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+
+        # ========================================================================
         # BOT ENABLE/DISABLE
         # ========================================================================
 
@@ -337,6 +366,17 @@ class BotConfigPanel:
         self.config['bot_enabled'] = self.bot_enabled_var.get()
         self.config['button_depress_duration_ms'] = self.button_depress_duration_var.get()  # Phase A.7
         self.config['inter_click_pause_ms'] = self.inter_click_pause_var.get()  # Phase A.7
+
+        # Phase 9.1: Save default balance
+        try:
+            default_balance = float(self.default_balance_var.get())
+            if default_balance < 0:
+                messagebox.showerror("Invalid Value", "Default balance must be >= 0")
+                return
+            self.config['default_balance_sol'] = default_balance
+        except ValueError:
+            messagebox.showerror("Invalid Value", "Default balance must be a number")
+            return
 
         # Save config to file
         if self._save_config():
