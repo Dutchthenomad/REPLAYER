@@ -61,17 +61,8 @@ class ChartWidget(Canvas):
         self.min_price = Decimal('1.0')
         self.max_price = Decimal('2.0')
 
-        # Colors
-        self.colors = {
-            'grid': '#1a1a1a',
-            'grid_major': '#2a2a2a',
-            'text': '#666666',
-            'text_bright': '#ffffff',
-            'price_up': '#00ff88',
-            'price_down': '#ff3366',
-            'price_neutral': '#ffcc00',
-            'background': '#0a0a0a'
-        }
+        # Colors (Phase 5: Theme-aware)
+        self.colors = self._get_theme_colors()
 
         # Log scale parameters
         self.log_base = 10
@@ -80,6 +71,93 @@ class ChartWidget(Canvas):
         self.bind('<Configure>', self._on_resize)
 
         logger.info(f"ChartWidget initialized ({width}x{height}, log scale)")
+
+    def _get_theme_colors(self):
+        """
+        Get chart colors based on current theme
+        Phase 5: Theme-aware chart colors
+        """
+        try:
+            import ttkbootstrap as ttk
+            from tkinter import ttk as tkttk
+
+            # Get current theme name
+            style = ttk.Style()
+            theme = style.theme_use()
+
+            # Theme-specific color palettes
+            theme_colors = {
+                'cyborg': {
+                    'grid': '#1a1a1a',
+                    'grid_major': '#2a2a2a',
+                    'text': '#77B7D7',
+                    'text_bright': '#ffffff',
+                    'price_up': '#2A9FD6',
+                    'price_down': '#ff3366',
+                    'price_neutral': '#ffcc00',
+                    'background': '#060606'
+                },
+                'darkly': {
+                    'grid': '#2a2a2a',
+                    'grid_major': '#3a3a3a',
+                    'text': '#AAAAAA',
+                    'text_bright': '#ffffff',
+                    'price_up': '#375A7F',
+                    'price_down': '#ff3366',
+                    'price_neutral': '#ffcc00',
+                    'background': '#222222'
+                },
+                'superhero': {
+                    'grid': '#2a2a2a',
+                    'grid_major': '#3a3a3a',
+                    'text': '#AAAAAA',
+                    'text_bright': '#ffffff',
+                    'price_up': '#4F9FE0',
+                    'price_down': '#DF6919',
+                    'price_neutral': '#ECA400',
+                    'background': '#2B3E50'
+                },
+                # Default colors for other themes
+                'default': {
+                    'grid': '#1a1a1a',
+                    'grid_major': '#2a2a2a',
+                    'text': '#666666',
+                    'text_bright': '#ffffff',
+                    'price_up': '#00ff88',
+                    'price_down': '#ff3366',
+                    'price_neutral': '#ffcc00',
+                    'background': '#0a0a0a'
+                }
+            }
+
+            # Get colors for current theme or use default
+            colors = theme_colors.get(theme, theme_colors['default'])
+            logger.debug(f"Using chart colors for theme: {theme}")
+            return colors
+
+        except Exception as e:
+            logger.warning(f"Could not get theme colors: {e}, using defaults")
+            # Fallback to default colors
+            return {
+                'grid': '#1a1a1a',
+                'grid_major': '#2a2a2a',
+                'text': '#666666',
+                'text_bright': '#ffffff',
+                'price_up': '#00ff88',
+                'price_down': '#ff3366',
+                'price_neutral': '#ffcc00',
+                'background': '#0a0a0a'
+            }
+
+    def update_theme_colors(self):
+        """
+        Update chart colors to match current theme
+        Call this after theme changes
+        Phase 5: Theme coordination
+        """
+        self.colors = self._get_theme_colors()
+        self.config(bg=self.colors['background'])
+        self.draw()  # Redraw with new colors
 
     def _on_resize(self, event):
         """

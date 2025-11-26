@@ -2077,7 +2077,7 @@ GAME RULES:
     def _change_theme(self, theme_name: str):
         """
         Switch UI theme and save preference
-        Phase 3: UI Theming
+        Phase 3: UI Theming + Phase 5: Chart color coordination
         """
         try:
             import ttkbootstrap as ttk
@@ -2092,6 +2092,10 @@ GAME RULES:
 
             # Apply the theme
             style.theme_use(theme_name)
+
+            # Phase 5: Update chart colors to match new theme
+            if hasattr(self, 'chart'):
+                self.chart.update_theme_colors()
 
             # Save preference
             self._save_theme_preference(theme_name)
