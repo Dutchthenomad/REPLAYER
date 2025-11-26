@@ -26,57 +26,50 @@ class StatusPanel(Panel):
         self._create_widgets()
 
     def _create_widgets(self):
-        """Create status display widgets"""
+        """Create status display widgets - Phase 4: Upgraded to ttk"""
         # Tick display
-        self.tick_label = tk.Label(
+        self.tick_label = ttk.Label(
             self.frame,
             text="Tick: 0",
-            font=('Arial', 12),
-            bg=self.config.background,
-            fg='white'
+            font=('Arial', 12)
         )
         self.tick_label.pack(side=tk.LEFT, padx=10)
 
-        # Price display (prominent)
-        self.price_label = tk.Label(
+        # Price display (prominent) - keep semantic color
+        self.price_label = ttk.Label(
             self.frame,
             text="Price: 1.0000x",
             font=('Arial', 14, 'bold'),
-            bg=self.config.background,
-            fg='#00ff88'
+            foreground='#00ff88'
         )
         self.price_label.pack(side=tk.LEFT, padx=10)
 
-        # Phase display
-        self.phase_label = tk.Label(
+        # Phase display - keep semantic color
+        self.phase_label = ttk.Label(
             self.frame,
             text="Phase: UNKNOWN",
             font=('Arial', 12),
-            bg=self.config.background,
-            fg='#ffcc00'
+            foreground='#ffcc00'
         )
         self.phase_label.pack(side=tk.LEFT, padx=10)
 
         # Separator
-        tk.Frame(self.frame, width=2, bg='#444444').pack(side=tk.LEFT, fill=tk.Y, padx=20)
+        ttk.Separator(self.frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=20, pady=5)
 
         # Balance display
-        self.balance_label = tk.Label(
+        self.balance_label = ttk.Label(
             self.frame,
             text="Balance: 0.1000 SOL",
-            font=('Arial', 12, 'bold'),
-            bg=self.config.background,
-            fg='white'
+            font=('Arial', 12, 'bold')
         )
         self.balance_label.pack(side=tk.LEFT, padx=10)
 
-        # P&L display
-        self.pnl_label = tk.Label(
+        # P&L display - semantic color applied in update()
+        self.pnl_label = ttk.Label(
             self.frame,
             text="P&L: +0.0000 SOL",
             font=('Arial', 12),
-            bg=self.config.background,
-            fg='#00ff88'
+            foreground='#00ff88'
         )
         self.pnl_label.pack(side=tk.LEFT, padx=10)
 
@@ -88,10 +81,10 @@ class StatusPanel(Panel):
         self.phase_label.config(text=f"Phase: {phase}")
         self.balance_label.config(text=f"Balance: {balance:.4f} SOL")
 
-        # Color-code P&L
+        # Color-code P&L (Phase 4: ttk uses foreground= not fg=)
         pnl_color = '#00ff88' if pnl >= 0 else '#ff3366'
         pnl_text = f"P&L: {'+' if pnl >= 0 else ''}{pnl:.4f} SOL"
-        self.pnl_label.config(text=pnl_text, fg=pnl_color)
+        self.pnl_label.config(text=pnl_text, foreground=pnl_color)
 
 
 class ChartPanel(Panel):
@@ -106,41 +99,32 @@ class ChartPanel(Panel):
         self._create_widgets()
 
     def _create_widgets(self):
-        """Create chart and controls"""
+        """Create chart and controls - Phase 4: Upgraded to ttk"""
         # Chart widget
         self.chart = ChartWidget(self.frame, width=self.chart_width, height=self.chart_height)
         self.chart.pack(pady=5)
 
         # Chart controls
-        controls_frame = tk.Frame(self.frame, bg=self.config.background)
+        controls_frame = ttk.Frame(self.frame)
         controls_frame.pack(fill=tk.X, pady=5)
 
         # Zoom buttons
-        tk.Button(
+        ttk.Button(
             controls_frame,
             text="🔍+ Zoom In",
-            command=self.chart.zoom_in,
-            bg='#444444',
-            fg='white',
-            font=('Arial', 9)
+            command=self.chart.zoom_in
         ).pack(side=tk.LEFT, padx=5)
 
-        tk.Button(
+        ttk.Button(
             controls_frame,
             text="🔍- Zoom Out",
-            command=self.chart.zoom_out,
-            bg='#444444',
-            fg='white',
-            font=('Arial', 9)
+            command=self.chart.zoom_out
         ).pack(side=tk.LEFT, padx=5)
 
-        tk.Button(
+        ttk.Button(
             controls_frame,
             text="↺ Reset Zoom",
-            command=self.chart.reset_zoom,
-            bg='#444444',
-            fg='white',
-            font=('Arial', 9)
+            command=self.chart.reset_zoom
         ).pack(side=tk.LEFT, padx=5)
 
     def update_chart(self, ticks, current_index=None):
@@ -167,59 +151,51 @@ class TradingPanel(Panel):
         self._create_widgets()
 
     def _create_widgets(self):
-        """Create trading controls"""
+        """Create trading controls - Phase 4: Upgraded to ttk"""
         # Title
-        title = tk.Label(
+        title = ttk.Label(
             self.frame,
             text="TRADING CONTROLS",
             font=('Arial', 11, 'bold'),
-            bg=self.config.background,
-            fg='#00ff88'
+            foreground='#00ff88'
         )
         title.pack(pady=(0, 5))
 
         # Amount input
-        input_frame = tk.Frame(self.frame, bg=self.config.background)
+        input_frame = ttk.Frame(self.frame)
         input_frame.pack(fill=tk.X, pady=5)
 
-        tk.Label(
+        ttk.Label(
             input_frame,
             text="Amount (SOL):",
-            font=('Arial', 10),
-            bg=self.config.background,
-            fg='white'
+            font=('Arial', 10)
         ).pack(side=tk.LEFT, padx=5)
 
-        self.amount_entry = tk.Entry(
+        self.amount_entry = ttk.Entry(
             input_frame,
             font=('Arial', 10),
-            bg='#333333',
-            fg='white',
-            insertbackground='white',
             width=10
         )
         self.amount_entry.pack(side=tk.LEFT, padx=5)
         self.amount_entry.insert(0, "0.001")
 
         # Quick amount buttons
-        quick_frame = tk.Frame(self.frame, bg=self.config.background)
+        quick_frame = ttk.Frame(self.frame)
         quick_frame.pack(fill=tk.X, pady=5)
 
         for amount in ["0.001", "0.005", "0.010", "0.050"]:
-            tk.Button(
+            ttk.Button(
                 quick_frame,
                 text=amount,
                 command=lambda a=amount: self.set_amount(a),
-                bg='#444444',
-                fg='white',
-                font=('Arial', 8),
                 width=6
             ).pack(side=tk.LEFT, padx=2)
 
-        # Action buttons
-        buttons_frame = tk.Frame(self.frame, bg=self.config.background)
+        # Action buttons (keep tk.Button for semantic colors)
+        buttons_frame = ttk.Frame(self.frame)
         buttons_frame.pack(fill=tk.X, pady=5)
 
+        # Keep action buttons as tk.Button to preserve semantic colors
         self.buy_button = tk.Button(
             buttons_frame,
             text="🟢 BUY (B)",
@@ -310,18 +286,17 @@ class BotPanel(Panel):
         self._create_widgets()
 
     def _create_widgets(self):
-        """Create bot controls"""
+        """Create bot controls - Phase 4: Upgraded to ttk"""
         # Title
-        title = tk.Label(
+        title = ttk.Label(
             self.frame,
             text="BOT CONTROLS",
             font=('Arial', 11, 'bold'),
-            bg=self.config.background,
-            fg='#3366ff'
+            foreground='#3366ff'
         )
         title.pack(pady=(0, 5))
 
-        # Toggle button
+        # Toggle button (keep tk.Button for color control)
         self.toggle_button = tk.Button(
             self.frame,
             text="🤖 ENABLE BOT (SPACE)",
@@ -335,15 +310,13 @@ class BotPanel(Panel):
         self.toggle_button.pack(pady=5)
 
         # Strategy selector
-        strategy_frame = tk.Frame(self.frame, bg=self.config.background)
+        strategy_frame = ttk.Frame(self.frame)
         strategy_frame.pack(fill=tk.X, pady=5)
 
-        tk.Label(
+        ttk.Label(
             strategy_frame,
             text="Strategy:",
-            font=('Arial', 10),
-            bg=self.config.background,
-            fg='white'
+            font=('Arial', 10)
         ).pack(side=tk.LEFT, padx=5)
 
         self.strategy_var = tk.StringVar(value=self.strategies[0] if self.strategies else "")
@@ -358,12 +331,11 @@ class BotPanel(Panel):
         self.strategy_dropdown.bind('<<ComboboxSelected>>', lambda e: self.on_strategy_change(self.strategy_var.get()))
 
         # Bot status
-        self.status_label = tk.Label(
+        self.status_label = ttk.Label(
             self.frame,
             text="Status: Disabled",
             font=('Arial', 9),
-            bg=self.config.background,
-            fg='#666666'
+            foreground='#666666'
         )
         self.status_label.pack(pady=5)
 
@@ -374,7 +346,7 @@ class BotPanel(Panel):
         self._update_ui()
 
     def _update_ui(self):
-        """Update UI based on bot state"""
+        """Update UI based on bot state - Phase 4: ttk compatibility"""
         if self.bot_enabled:
             self.toggle_button.config(
                 text="🤖 DISABLE BOT (SPACE)",
@@ -382,7 +354,7 @@ class BotPanel(Panel):
             )
             self.status_label.config(
                 text=f"Status: Active ({self.strategy_var.get()})",
-                fg='#00ff88'
+                foreground='#00ff88'
             )
         else:
             self.toggle_button.config(
@@ -391,7 +363,7 @@ class BotPanel(Panel):
             )
             self.status_label.config(
                 text="Status: Disabled",
-                fg='#666666'
+                foreground='#666666'
             )
 
     def set_enabled(self, enabled: bool):
@@ -415,21 +387,21 @@ class ControlsPanel(Panel):
         self._create_widgets()
 
     def _create_widgets(self):
-        """Create replay controls"""
+        """Create replay controls - Phase 4: Upgraded to ttk"""
         # Title
-        title = tk.Label(
+        title = ttk.Label(
             self.frame,
             text="REPLAY CONTROLS",
             font=('Arial', 11, 'bold'),
-            bg=self.config.background,
-            fg='#ffcc00'
+            foreground='#ffcc00'
         )
         title.pack(pady=(0, 5))
 
         # Control buttons
-        buttons_frame = tk.Frame(self.frame, bg=self.config.background)
+        buttons_frame = ttk.Frame(self.frame)
         buttons_frame.pack(fill=tk.X, pady=5)
 
+        # Keep control buttons as tk.Button for color control
         self.play_pause_button = tk.Button(
             buttons_frame,
             text="▶ PLAY (P)",
@@ -453,38 +425,30 @@ class ControlsPanel(Panel):
         self.load_button.pack(side=tk.LEFT, padx=5)
 
         # Speed control
-        speed_frame = tk.Frame(self.frame, bg=self.config.background)
+        speed_frame = ttk.Frame(self.frame)
         speed_frame.pack(fill=tk.X, pady=5)
 
-        tk.Label(
+        ttk.Label(
             speed_frame,
             text="Speed:",
-            font=('Arial', 10),
-            bg=self.config.background,
-            fg='white'
+            font=('Arial', 10)
         ).pack(side=tk.LEFT, padx=5)
 
         self.speed_var = tk.DoubleVar(value=1.0)
-        self.speed_scale = tk.Scale(
+        self.speed_scale = ttk.Scale(
             speed_frame,
             from_=0.1,
             to=5.0,
-            resolution=0.1,
-            orient=tk.HORIZONTAL,
             variable=self.speed_var,
-            bg=self.config.background,
-            fg='white',
-            highlightthickness=0,
+            orient=tk.HORIZONTAL,
             length=200
         )
         self.speed_scale.pack(side=tk.LEFT, padx=5)
 
-        self.speed_label = tk.Label(
+        self.speed_label = ttk.Label(
             speed_frame,
             text="1.0x",
             font=('Arial', 10),
-            bg=self.config.background,
-            fg='white',
             width=5
         )
         self.speed_label.pack(side=tk.LEFT, padx=5)
