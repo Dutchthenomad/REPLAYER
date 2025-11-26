@@ -61,9 +61,12 @@ class Application:
         # Setup event handlers
         self._setup_event_handlers()
 
-        # Create UI with ttkbootstrap theming (Phase: UI Theming)
-        # Using 'cyborg' theme for HUD-style gaming aesthetic
-        self.root = ttk.Window(themename='cyborg')
+        # Create UI with ttkbootstrap theming (Phase 3: UI Theming)
+        # Load saved theme preference or use 'cyborg' as default
+        from ui.main_window import MainWindow
+        saved_theme = MainWindow.load_theme_preference()
+        self.root = ttk.Window(themename=saved_theme)
+        self.logger.info(f"Using theme: {saved_theme}")
         self.main_window = None
 
         # Configure root window

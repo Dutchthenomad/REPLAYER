@@ -23,6 +23,7 @@ from bot.async_executor import AsyncBotExecutor
 from bot.execution_mode import ExecutionMode  # Phase 8.4
 from bot.ui_controller import BotUIController  # Phase 8.4
 from bot.browser_executor import BrowserExecutor  # Phase 8.5
+from bot.browser_bridge import get_browser_bridge, BridgeStatus  # Phase 9.3
 from sources import WebSocketFeed
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,11 @@ class MainWindow:
         except Exception as e:
             logger.warning(f"BrowserExecutor not available: {e}")
             # Graceful degradation - Browser menu will show "Not Available"
+
+        # Phase 9.3: Initialize browser bridge for UI button -> browser sync
+        self.browser_bridge = get_browser_bridge()
+        self.browser_bridge.on_status_change = self._on_bridge_status_change
+        logger.info("BrowserBridge initialized for UI-to-browser button sync")
 
         # Initialize replay engine and trade manager
         self.replay_engine = ReplayEngine(state)
@@ -197,53 +203,67 @@ class MainWindow:
             command=self._toggle_live_feed_from_menu
         )
 
-        # ========== BROWSER MENU (Phase 8.5) ==========
+        # ========== BROWSER MENU (Phase 9.3: CDP Bridge) ==========
         browser_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Browser", menu=browser_menu)
 
-        # Check if browser executor available
-        if self.browser_executor:
-            # Connect command (enabled)
-            browser_menu.add_command(
-                label="Connect Browser...",
-                command=lambda: self.root.after(0, self._show_browser_connection_dialog)
-            )
+        # Phase 9.3: Browser Bridge menu (uses CDP connection)
+        browser_menu.add_command(
+            label="Connect to Browser",
+            command=lambda: self.root.after(0, self._connect_browser_bridge)
+        )
 
-            browser_menu.add_separator()
+        browser_menu.add_separator()
 
-            # Status indicators (disabled, display only)
-            browser_menu.add_command(
-                label="⚫ Status: Not Connected",
-                state=tk.DISABLED
-            )
+        # Status indicators (disabled, display only)
+        browser_menu.add_command(
+            label="⚫ Status: Disconnected",
+            state=tk.DISABLED
+        )
 
-            browser_menu.add_command(
-                label="Profile: rugs_fun_phantom",
-                state=tk.DISABLED
-            )
+        browser_menu.add_command(
+            label="Profile: rugs_bot",
+            state=tk.DISABLED
+        )
 
-            browser_menu.add_separator()
+        browser_menu.add_separator()
 
-            # Disconnect command (initially disabled)
-            browser_menu.add_command(
-                label="Disconnect Browser",
-                command=self._disconnect_browser,
-                state=tk.DISABLED
-            )
+        # Disconnect command (initially disabled)
+        browser_menu.add_command(
+            label="Disconnect Browser",
+            command=lambda: self.root.after(0, self._disconnect_browser_bridge),
+            state=tk.DISABLED
+        )
 
-            # Store menu references for status updates
-            self.browser_menu = browser_menu
-            self.browser_status_item_index = 2  # "⚫ Status: Not Connected"
-            self.browser_disconnect_item_index = 5  # "Disconnect Browser"
-        else:
-            # Browser not available
-            browser_menu.add_command(
-                label="Browser automation not available",
-                state=tk.DISABLED
-            )
-            browser_menu.add_command(
-                label="(Check browser_automation/ directory)",
-                state=tk.DISABLED
+        # Store menu references for status updates
+        self.browser_menu = browser_menu
+        self.browser_status_item_index = 2  # "⚫ Status: Disconnected"
+        self.browser_disconnect_item_index = 5  # "Disconnect Browser"
+        self.browser_connect_item_index = 0  # "Connect to Browser"
+
+        # View Menu (Phase 3: UI Theming)
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="View", menu=view_menu)
+
+        # Theme submenu
+        theme_menu = tk.Menu(view_menu, tearoff=0)
+        view_menu.add_cascade(label="Theme", menu=theme_menu)
+
+        # Available themes with descriptions
+        themes = [
+            ('cyborg', 'Cyborg - Neon gaming style'),
+            ('darkly', 'Darkly - Professional dark'),
+            ('superhero', 'Superhero - Bold & vibrant'),
+            ('cosmo', 'Cosmo - Light professional'),
+            ('flatly', 'Flatly - Modern flat design'),
+            ('solar', 'Solar - Warm dark theme'),
+        ]
+
+        # Add theme selection commands
+        for theme_id, theme_label in themes:
+            theme_menu.add_command(
+                label=theme_label,
+                command=lambda t=theme_id: self._change_theme(t)
             )
 
         # Help Menu
@@ -467,13 +487,13 @@ class MainWindow:
         self.increment_1_button = tk.Button(bet_center, text="+1", command=lambda: self.increment_bet_amount(Decimal('1')), bg='#333333', fg='white', **bet_btn_style)
         self.increment_1_button.pack(side=tk.LEFT, padx=2)
 
-        self.half_button = tk.Button(bet_center, text="1/2", command=lambda: self.set_bet_amount(Decimal(self.bet_entry.get())/2), bg='#333333', fg='white', **bet_btn_style)
+        self.half_button = tk.Button(bet_center, text="1/2", command=self.half_bet_amount, bg='#333333', fg='white', **bet_btn_style)
         self.half_button.pack(side=tk.LEFT, padx=2)
 
-        self.double_button = tk.Button(bet_center, text="X2", command=lambda: self.set_bet_amount(Decimal(self.bet_entry.get())*2), bg='#333333', fg='white', **bet_btn_style)
+        self.double_button = tk.Button(bet_center, text="X2", command=self.double_bet_amount, bg='#333333', fg='white', **bet_btn_style)
         self.double_button.pack(side=tk.LEFT, padx=2)
 
-        self.max_button = tk.Button(bet_center, text="MAX", command=lambda: self.set_bet_amount(self.state.get('balance')), bg='#333333', fg='white', **bet_btn_style)
+        self.max_button = tk.Button(bet_center, text="MAX", command=self.max_bet_amount, bg='#333333', fg='white', **bet_btn_style)
         self.max_button.pack(side=tk.LEFT, padx=2)
 
         # Right - wallet balance
@@ -503,7 +523,7 @@ class MainWindow:
             command=self.execute_sidebet,
             bg='#3399ff',
             fg='white',
-            state=tk.DISABLED,
+            state=tk.NORMAL,  # Always enabled for testing browser forwarding
             **large_btn_style
         )
         self.sidebet_button.pack(side=tk.LEFT, padx=5)
@@ -514,7 +534,7 @@ class MainWindow:
             command=self.execute_buy,
             bg='#00ff66',
             fg='black',
-            state=tk.DISABLED,
+            state=tk.NORMAL,  # Always enabled for testing browser forwarding
             **large_btn_style
         )
         self.buy_button.pack(side=tk.LEFT, padx=5)
@@ -525,7 +545,7 @@ class MainWindow:
             command=self.execute_sell,
             bg='#ff3399',
             fg='white',
-            state=tk.DISABLED,
+            state=tk.NORMAL,  # Always enabled for testing browser forwarding
             **large_btn_style
         )
         self.sell_button.pack(side=tk.LEFT, padx=5)
@@ -897,10 +917,14 @@ class MainWindow:
         self.log(f"Playback speed set to {speed}x")
     
     def execute_buy(self):
-        """Execute buy action using TradeManager"""
+        """Execute buy action using TradeManager (Phase 9.3: syncs to browser)"""
+        # Phase 9.3: ALWAYS click BUY in browser first - browser is source of truth
+        # This happens regardless of REPLAYER's internal state/validation
+        self.browser_bridge.on_buy_clicked()
+
         amount = self.get_bet_amount()
         if amount is None:
-            return  # Validation failed (toast already shown)
+            return  # Validation failed (toast already shown), but browser click already sent
 
         result = self.trade_manager.execute_buy(amount)
 
@@ -912,7 +936,10 @@ class MainWindow:
             self.toast.show(f"Buy failed: {result['reason']}", "error")
     
     def execute_sell(self):
-        """Execute sell action using TradeManager (Phase 8.2: supports partial sells)"""
+        """Execute sell action using TradeManager (Phase 8.2: supports partial sells, Phase 9.3: syncs to browser)"""
+        # Phase 9.3: Also click SELL in browser if connected
+        self.browser_bridge.on_sell_clicked()
+
         result = self.trade_manager.execute_sell()
 
         if result['success']:
@@ -934,10 +961,13 @@ class MainWindow:
             self.toast.show(f"Sell failed: {result['reason']}", "error")
     
     def execute_sidebet(self):
-        """Execute sidebet using TradeManager"""
+        """Execute sidebet using TradeManager (Phase 9.3: syncs to browser)"""
+        # Phase 9.3: ALWAYS click SIDEBET in browser first - browser is source of truth
+        self.browser_bridge.on_sidebet_clicked()
+
         amount = self.get_bet_amount()
         if amount is None:
-            return  # Validation failed (toast already shown)
+            return  # Validation failed (toast already shown), but browser click already sent
 
         result = self.trade_manager.execute_sidebet(amount)
 
@@ -958,11 +988,15 @@ class MainWindow:
         Set the sell percentage (user clicked a percentage button)
 
         Phase 8.2: Radio-button style selector for partial sells
+        Phase 9.3: Syncs to browser
 
         Args:
             percentage: 0.1 (10%), 0.25 (25%), 0.5 (50%), or 1.0 (100%)
         """
         from decimal import Decimal
+
+        # Phase 9.3: Also click percentage button in browser if connected
+        self.browser_bridge.on_percentage_clicked(percentage)
 
         # Update GameState with new percentage
         success = self.state.set_sell_percentage(Decimal(str(percentage)))
@@ -1338,7 +1372,13 @@ class MainWindow:
         logger.debug(f"Bet amount set to {amount}")
 
     def increment_bet_amount(self, amount: Decimal):
-        """Increment bet amount by specified amount"""
+        """Increment bet amount by specified amount (Phase 9.3: syncs to browser)"""
+        # Phase 9.3: ALWAYS click increment button in browser FIRST
+        # Map Decimal amount to button text: 0.001 -> '+0.001', 0.01 -> '+0.01', etc.
+        button_text = f"+{amount}"
+        self.browser_bridge.on_increment_clicked(button_text)
+
+        # Then update local UI
         try:
             current_amount = Decimal(self.bet_entry.get())
         except Exception:
@@ -1350,10 +1390,56 @@ class MainWindow:
         logger.debug(f"Bet amount incremented by {amount} to {new_amount}")
 
     def clear_bet_amount(self):
-        """Clear bet amount to zero"""
+        """Clear bet amount to zero (Phase 9.3: syncs to browser)"""
+        # Phase 9.3: ALWAYS click X (clear) button in browser FIRST
+        self.browser_bridge.on_clear_clicked()
+
+        # Then update local UI
         self.bet_entry.delete(0, tk.END)
         self.bet_entry.insert(0, "0")
         logger.debug("Bet amount cleared to 0")
+
+    def half_bet_amount(self):
+        """Halve bet amount (1/2 button) - Phase 9.3: syncs to browser"""
+        # Phase 9.3: ALWAYS click 1/2 button in browser FIRST
+        self.browser_bridge.on_increment_clicked('1/2')
+
+        # Then update local UI
+        try:
+            current = Decimal(self.bet_entry.get())
+            new_amount = current / 2
+            self.bet_entry.delete(0, tk.END)
+            self.bet_entry.insert(0, str(new_amount))
+            logger.debug(f"Bet amount halved to {new_amount}")
+        except Exception:
+            pass
+
+    def double_bet_amount(self):
+        """Double bet amount (X2 button) - Phase 9.3: syncs to browser"""
+        # Phase 9.3: ALWAYS click X2 button in browser FIRST
+        self.browser_bridge.on_increment_clicked('X2')
+
+        # Then update local UI
+        try:
+            current = Decimal(self.bet_entry.get())
+            new_amount = current * 2
+            self.bet_entry.delete(0, tk.END)
+            self.bet_entry.insert(0, str(new_amount))
+            logger.debug(f"Bet amount doubled to {new_amount}")
+        except Exception:
+            pass
+
+    def max_bet_amount(self):
+        """Set bet to max (MAX button) - Phase 9.3: syncs to browser"""
+        # Phase 9.3: ALWAYS click MAX button in browser FIRST
+        self.browser_bridge.on_increment_clicked('MAX')
+
+        # Then update local UI
+        balance = self.state.get('balance')
+        if balance:
+            self.bet_entry.delete(0, tk.END)
+            self.bet_entry.insert(0, str(balance))
+            logger.debug(f"Bet amount set to MAX: {balance}")
 
     def get_bet_amount(self) -> Optional[Decimal]:
         """
@@ -1898,6 +1984,81 @@ GAME RULES:
                 lambda: self.browser_status_label.config(text=text, fg=fg_color)
             )
 
+    # ========================================================================
+    # BROWSER BRIDGE METHODS (Phase 9.3)
+    # ========================================================================
+
+    def _connect_browser_bridge(self):
+        """
+        Connect to browser via CDP bridge (Phase 9.3)
+
+        Non-blocking - actual connection happens in background thread.
+        """
+        self.log("Connecting to browser via CDP...")
+        self.toast.show("Connecting to browser...", "info")
+        self.browser_bridge.connect()
+
+    def _disconnect_browser_bridge(self):
+        """
+        Disconnect from browser via CDP bridge (Phase 9.3)
+        """
+        self.log("Disconnecting browser bridge...")
+        self.browser_bridge.disconnect()
+
+    def _on_bridge_status_change(self, status: BridgeStatus):
+        """
+        Callback when browser bridge status changes (Phase 9.3)
+
+        This is called from the bridge's background thread, so we need to
+        marshal UI updates to the main thread.
+
+        Args:
+            status: BridgeStatus enum (DISCONNECTED, CONNECTING, CONNECTED, ERROR)
+        """
+        # Map BridgeStatus to display strings
+        status_map = {
+            BridgeStatus.DISCONNECTED: ('⚫', 'Disconnected', '#888888'),
+            BridgeStatus.CONNECTING: ('🟡', 'Connecting...', '#ffcc00'),
+            BridgeStatus.CONNECTED: ('🟢', 'Connected', '#00ff88'),
+            BridgeStatus.ERROR: ('🔴', 'Error', '#ff3366'),
+        }
+
+        icon, text, color = status_map.get(status, ('⚫', 'Unknown', '#888888'))
+        menu_label = f"{icon} Status: {text}"
+
+        def update_ui():
+            # Update menu status item
+            if hasattr(self, 'browser_menu'):
+                self.browser_menu.entryconfig(
+                    self.browser_status_item_index,
+                    label=menu_label
+                )
+
+                # Enable/disable connect/disconnect based on status
+                if status == BridgeStatus.CONNECTED:
+                    self.browser_menu.entryconfig(self.browser_connect_item_index, state=tk.DISABLED)
+                    self.browser_menu.entryconfig(self.browser_disconnect_item_index, state=tk.NORMAL)
+                elif status == BridgeStatus.DISCONNECTED or status == BridgeStatus.ERROR:
+                    self.browser_menu.entryconfig(self.browser_connect_item_index, state=tk.NORMAL)
+                    self.browser_menu.entryconfig(self.browser_disconnect_item_index, state=tk.DISABLED)
+                else:  # CONNECTING
+                    self.browser_menu.entryconfig(self.browser_connect_item_index, state=tk.DISABLED)
+                    self.browser_menu.entryconfig(self.browser_disconnect_item_index, state=tk.DISABLED)
+
+            # Update status bar label if exists
+            self._update_browser_status(status.value)
+
+            # Show toast on connection success/failure
+            if status == BridgeStatus.CONNECTED:
+                self.toast.show("Browser connected! UI clicks will sync to game.", "success")
+                self.log("Browser bridge connected - UI clicks will sync to live game")
+            elif status == BridgeStatus.ERROR:
+                self.toast.show("Browser connection failed", "error")
+                self.log("Browser bridge connection failed")
+
+        # Marshal to UI thread
+        self.ui_dispatcher.submit(update_ui)
+
     def _toggle_live_feed_from_menu(self):
         """
         Toggle live feed connection from menu (syncs with actual state)
@@ -1910,6 +2071,88 @@ GAME RULES:
 
         # AUDIT FIX: Defensive - ensure always runs in main thread
         self.root.after(0, do_toggle)
+
+    # ========== THEME MANAGEMENT (Phase 3: UI Theming) ==========
+
+    def _change_theme(self, theme_name: str):
+        """
+        Switch UI theme and save preference
+        Phase 3: UI Theming
+        """
+        try:
+            import ttkbootstrap as ttk
+
+            # Get the style from the root window
+            # Since root is now ttk.Window, we can use its style
+            if hasattr(self.root, 'style'):
+                style = self.root.style
+            else:
+                # Fallback: create style object
+                style = ttk.Style()
+
+            # Apply the theme
+            style.theme_use(theme_name)
+
+            # Save preference
+            self._save_theme_preference(theme_name)
+
+            logger.info(f"Theme changed to: {theme_name}")
+
+            # Show toast notification
+            if hasattr(self, 'toast_notification'):
+                self.toast_notification.show(
+                    f"Theme changed to: {theme_name.title()}",
+                    duration=2000
+                )
+        except Exception as e:
+            logger.error(f"Failed to change theme to {theme_name}: {e}")
+            messagebox.showerror(
+                "Theme Error",
+                f"Failed to change theme:\n{str(e)}"
+            )
+
+    def _save_theme_preference(self, theme_name: str):
+        """Save theme preference to config file"""
+        try:
+            config_dir = Path.home() / '.config' / 'replayer'
+            config_dir.mkdir(parents=True, exist_ok=True)
+
+            config_file = config_dir / 'ui_config.json'
+
+            # Load existing config or create new
+            config_data = {}
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config_data = json.load(f)
+
+            # Update theme
+            config_data['theme'] = theme_name
+
+            # Save config
+            with open(config_file, 'w') as f:
+                json.dump(config_data, f, indent=2)
+
+            logger.debug(f"Saved theme preference: {theme_name}")
+        except Exception as e:
+            logger.error(f"Failed to save theme preference: {e}")
+
+    @staticmethod
+    def load_theme_preference() -> str:
+        """Load saved theme preference, default to 'cyborg'"""
+        try:
+            config_file = Path.home() / '.config' / 'replayer' / 'ui_config.json'
+
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config_data = json.load(f)
+                    theme = config_data.get('theme', 'cyborg')
+                    logger.debug(f"Loaded theme preference: {theme}")
+                    return theme
+        except Exception as e:
+            logger.debug(f"Could not load theme preference: {e}")
+
+        # Default theme
+        return 'cyborg'
 
     def _show_about(self):
         """Show about dialog with application information"""
