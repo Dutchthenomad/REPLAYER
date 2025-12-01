@@ -113,7 +113,8 @@ class TestBotControllerStrategyChange:
         # Try to change to invalid strategy
         try:
             bot_controller.change_strategy("nonexistent")
-        except:
+        except (KeyError, ValueError, AttributeError):
+            # AUDIT FIX: Catch specific exceptions
             pass  # May raise exception or fail silently
 
         # Strategy should remain unchanged or be handled gracefully
@@ -154,14 +155,14 @@ class TestBotPlaythrough:
         replay_engine.load_game(price_series, 'test-game')
         bot_controller = BotController(bot_interface, "conservative")
 
-        initial_balance = game_state.balance
+        initial_balance = game_state.get('balance')
 
         # Play through game
         for i in range(len(price_series)):
             replay_engine.set_tick_index(i)
             bot_controller.execute_step()
 
-        final_balance = game_state.balance
+        final_balance = game_state.get('balance')
 
         # Balance should have changed (may be higher or lower)
         # Just verify it's a valid decimal
@@ -178,7 +179,7 @@ class TestBotPlaythrough:
             bot_controller.execute_step()
 
         stats = bot_controller.get_stats()
-        final_balance = game_state.balance
+        final_balance = game_state.get('balance')
         pnl = final_balance - Decimal('0.100')
 
         # Verify stats exist

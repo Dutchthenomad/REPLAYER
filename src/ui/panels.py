@@ -5,6 +5,7 @@ Specialized panels for different UI sections
 
 import tkinter as tk
 from tkinter import ttk
+import decimal
 from decimal import Decimal
 from typing import Optional, Dict, Callable
 import logging
@@ -237,7 +238,8 @@ class TradingPanel(Panel):
         """Get current amount from entry"""
         try:
             return Decimal(self.amount_entry.get())
-        except:
+        except (decimal.InvalidOperation, ValueError):
+            # AUDIT FIX: Catch specific Decimal conversion exceptions
             return None
 
     def set_amount(self, amount: str):

@@ -145,7 +145,8 @@ class FileDirectorySource(ReplaySource):
         try:
             filepath = self._resolve_path(identifier)
             return filepath.exists()
-        except:
+        except (OSError, ValueError):
+            # AUDIT FIX: Catch specific exceptions for path resolution
             return False
 
     def list_available(self) -> List[str]:

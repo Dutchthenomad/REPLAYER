@@ -145,7 +145,8 @@ class RecorderSink:
                 test_file.write_bytes(test_data)
                 test_file.unlink()
                 return True
-            except:
+            except (OSError, IOError, PermissionError):
+                # AUDIT FIX: Catch specific filesystem exceptions
                 return False
 
     def start_recording(self, game_id: Optional[str] = None) -> Path:
@@ -222,7 +223,8 @@ class RecorderSink:
                 if temp_handle:
                     try:
                         temp_handle.close()
-                    except:
+                    except (OSError, IOError):
+                        # AUDIT FIX: Catch specific I/O exceptions
                         pass
                 raise RecordingError(f"Failed to start recording: {e}")
 
@@ -315,19 +317,45 @@ class RecorderSink:
         # Force flush every 10 seconds to prevent data loss
         return (datetime.now() - self.last_flush_time).total_seconds() > 10
 
+    def _is_file_handle_valid(self) -> bool:
+        """
+        AUDIT FIX Phase 2.5: Validate file handle is still usable.
+
+        Returns:
+            True if file handle is open and valid
+        """
+        if not self.file_handle:
+            return False
+        try:
+            # Check if file handle is still valid
+            if self.file_handle.closed:
+                return False
+            # Try to get file descriptor (will fail if invalid)
+            self.file_handle.fileno()
+            return True
+        except (ValueError, OSError, IOError):
+            return False
+
     def _flush(self):
         """
         Flush buffer to disk with error recovery
         Note: Called with lock held
+
+        AUDIT FIX Phase 2.5: Added file handle validation before operations
         """
         if not self.buffer or not self.file_handle:
             return
+
+        # AUDIT FIX Phase 2.5: Validate file handle before writing
+        if not self._is_file_handle_valid():
+            logger.error("File handle is invalid/closed, cannot flush")
+            raise RecordingError("File handle is no longer valid")
 
         try:
             # Check disk space before writing
             if not self._check_disk_space(min_free_mb=10):
                 raise RecordingError("Insufficient disk space during flush")
-            
+
             # Write all buffered ticks
             for tick_json in self.buffer:
                 bytes_written = self.file_handle.write(tick_json + '\n')
@@ -335,11 +363,11 @@ class RecorderSink:
 
             self.file_handle.flush()
             os.fsync(self.file_handle.fileno())  # Force OS flush
-            
+
             self.buffer = []
             self.last_flush_time = datetime.now()
             self.error_count = 0  # Reset error count on successful flush
-            
+
         except Exception as e:
             logger.error(f"Flush failed: {e}")
             # Don't clear buffer on error - will retry on next flush
@@ -363,20 +391,26 @@ class RecorderSink:
                 if self.buffer:
                     with self._safe_file_operation():
                         self._flush()
-                
-                # Write end metadata
-                end_metadata = {
-                    '_metadata': {
-                        'end_time': datetime.now().isoformat(),
-                        'tick_count': self.tick_count,
-                        'total_bytes': self.total_bytes_written
+
+                # AUDIT FIX Phase 2.5: Validate handle before writing end metadata
+                if self._is_file_handle_valid():
+                    # Write end metadata
+                    end_metadata = {
+                        '_metadata': {
+                            'end_time': datetime.now().isoformat(),
+                            'tick_count': self.tick_count,
+                            'total_bytes': self.total_bytes_written
+                        }
                     }
-                }
-                self.file_handle.write(json.dumps(end_metadata) + '\n')
-                
+                    self.file_handle.write(json.dumps(end_metadata) + '\n')
+                else:
+                    logger.warning("File handle invalid, skipping end metadata write")
+
                 # Get file size before closing
-                self.file_handle.flush()
-                file_size = self.current_file.stat().st_size if self.current_file.exists() else 0
+                # AUDIT FIX Phase 2.5: Validate handle before flush
+                if self._is_file_handle_valid():
+                    self.file_handle.flush()
+                file_size = self.current_file.stat().st_size if self.current_file and self.current_file.exists() else 0
                 
                 summary = {
                     'filepath': str(self.current_file),
@@ -399,7 +433,8 @@ class RecorderSink:
                 try:
                     if self.file_handle:
                         self.file_handle.close()
-                except:
+                except (OSError, IOError):
+                    # AUDIT FIX: Catch specific I/O exceptions
                     pass
                     
                 # Reset state
@@ -472,5 +507,6 @@ class RecorderSink:
         try:
             if not self._closed:
                 self.close()
-        except:
+        except Exception:
+            # AUDIT FIX: Catch Exception (not bare except) in destructor
             pass

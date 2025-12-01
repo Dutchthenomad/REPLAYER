@@ -119,11 +119,7 @@ def validate_buy(
     Returns:
         Tuple of (is_valid, error_message)
     """
-    # Check for active position
-    if has_position:
-        return False, "Cannot buy: position already active"
-
-    # Check trading allowed
+    # Allow adding to an active position (DCA) — only block when trading disabled
     is_valid, error = validate_trading_allowed(tick, "BUY")
     if not is_valid:
         return False, error

@@ -70,5 +70,21 @@ temp/
 # ML Models (large binary files - commented to track in git for now)
 # models/*.pkl
 
-# Test recordings (generated during tests)
-src/rugs_recordings/*.jsonl
+# Game recordings (large data files - symlink to /home/nomad/rugs_recordings)
+src/rugs_recordings/
+
+# Code review reports
+review_report_*.txt
+review_report_*.md
+
+# Debug screenshots and extracted data
+debug_screenshots/
+extracted_selectors.json
+extracted_selectors.py
+
+# Temporary demo environments
+.demo_venv/
+
+# Config backups
+bot_config.json.bak
+*.json.bak

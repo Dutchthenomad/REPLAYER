@@ -56,8 +56,8 @@ def test_load_file_resets_state(tmp_path):
     _write_game_file(game_file, game_id="game-live")
 
     assert engine.load_file(game_file) is True
-    assert game_state.current_game_id == "game-live"
-    assert game_state.has_active_position() is False
+    assert game_state.get('game_id') == "game-live"
+    assert game_state.get('position') is None
 
 
 def test_progress_reaches_100_percent_at_final_tick(tmp_path):

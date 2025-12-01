@@ -3,12 +3,12 @@ Game State Management Module
 Centralized state management with observer pattern for reactive updates
 """
 
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, Deque
 from dataclasses import dataclass, field
 from decimal import Decimal
 from datetime import datetime
 import threading
-from collections import defaultdict
+from collections import defaultdict, deque
 import logging
 from enum import Enum
 
@@ -74,10 +74,10 @@ class GameState:
             'games_played': 0,
         }
 
-        # History
-        self._history: List[StateSnapshot] = []
-        self._transaction_log: List[Dict] = []
-        self._closed_positions: List[Dict] = []  # Track closed positions for compatibility
+        # History - AUDIT FIX: Use deque with maxlen for O(1) bounded memory
+        self._history: Deque[StateSnapshot] = deque(maxlen=MAX_HISTORY_SIZE)
+        self._transaction_log: Deque[Dict] = deque(maxlen=MAX_TRANSACTION_LOG_SIZE)
+        self._closed_positions: Deque[Dict] = deque(maxlen=MAX_CLOSED_POSITIONS_SIZE)
         
         # Observer pattern
         self._observers: Dict[StateEvents, List[Callable]] = defaultdict(list)
@@ -147,6 +147,25 @@ class GameState:
                     'bot_enabled': self._state['bot_enabled']
                 }
             )
+
+    def get_current_tick(self):
+        """
+        Get current tick as a GameTick object (for TradeManager compatibility)
+        Constructs a GameTick from current state data
+        """
+        from models import GameTick
+        with self._lock:
+            return GameTick.from_dict({
+                'game_id': self._state.get('game_id', 'unknown'),
+                'tick': self._state.get('current_tick', 0),
+                'timestamp': '',  # Not tracked in state (used for JSONL only)
+                'price': float(self._state.get('current_price', Decimal('1.0'))),
+                'phase': self._state.get('current_phase', 'UNKNOWN'),
+                'active': self._state.get('game_active', False),
+                'rugged': self._state.get('rug_detected', False),  # Fixed field name
+                'cooldown_timer': 0,  # Not tracked in state
+                'trade_count': 0,  # Not tracked in state
+            })
     
     # ========== State Mutation Methods ==========
     
@@ -172,10 +191,8 @@ class GameState:
                     self._state = old_state
                     return False
                 
-                # Record history (AUDIT FIX: bounded)
+                # Record history (AUDIT FIX: deque auto-evicts when maxlen reached)
                 self._history.append(self.get_snapshot())
-                if len(self._history) > MAX_HISTORY_SIZE:
-                    self._history = self._history[-MAX_HISTORY_SIZE:]
                 
                 # Notify observers of changes
                 self._notify_changes(old_state, self._state)
@@ -200,6 +217,7 @@ class GameState:
             self._state['balance'] = new_balance
 
             # Log transaction (AUDIT FIX: bounded)
+            # AUDIT FIX: deque auto-evicts when maxlen reached
             self._transaction_log.append({
                 'timestamp': datetime.now(),
                 'type': 'balance_change',
@@ -208,8 +226,6 @@ class GameState:
                 'new_balance': new_balance,
                 'reason': reason
             })
-            if len(self._transaction_log) > MAX_TRANSACTION_LOG_SIZE:
-                self._transaction_log = self._transaction_log[-MAX_TRANSACTION_LOG_SIZE:]
 
             # Update statistics
             # Track session P&L (cumulative balance changes)
@@ -329,10 +345,8 @@ class GameState:
             
             self._emit(StateEvents.POSITION_CLOSED, position)
 
-            # Add to closed positions history (AUDIT FIX: bounded)
+            # Add to closed positions history (AUDIT FIX: deque auto-evicts when maxlen reached)
             self._closed_positions.append(position.copy())
-            if len(self._closed_positions) > MAX_CLOSED_POSITIONS_SIZE:
-                self._closed_positions = self._closed_positions[-MAX_CLOSED_POSITIONS_SIZE:]
 
             # Clear active position
             self._state['position'] = None
@@ -620,18 +634,20 @@ class GameState:
     # ========== History and Analytics ==========
     
     def get_history(self, limit: Optional[int] = None) -> List[StateSnapshot]:
-        """Get state history"""
+        """Get state history (AUDIT FIX: works with deque)"""
         with self._lock:
+            history_list = list(self._history)
             if limit:
-                return self._history[-limit:]
-            return self._history.copy()
-    
+                return history_list[-limit:]
+            return history_list
+
     def get_transaction_log(self, limit: Optional[int] = None) -> List[Dict]:
-        """Get transaction log"""
+        """Get transaction log (AUDIT FIX: works with deque)"""
         with self._lock:
+            log_list = list(self._transaction_log)
             if limit:
-                return self._transaction_log[-limit:]
-            return self._transaction_log.copy()
+                return log_list[-limit:]
+            return log_list
     
     def calculate_metrics(self) -> Dict[str, Any]:
         """Calculate performance metrics"""

@@ -20,8 +20,8 @@ Usage:
 
 import socketio
 import time
-from typing import Dict, Any, Optional, Callable, List
-from dataclasses import dataclass, field
+import threading
+from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 import logging
 from decimal import Decimal
@@ -31,177 +31,508 @@ from collections import deque  # AUDIT FIX: For efficient latency tracking
 from models import GameTick
 
 
-@dataclass
-class GameSignal:
-    """Clean game state signal (9 fields + metadata)"""
-    # Core identifiers
-    gameId: str
+class LatencySpikeDetector:
+    """
+    Detects latency spikes in WebSocket signal delivery.
 
-    # State flags
-    active: bool
-    rugged: bool
+    PHASE 3.5 AUDIT FIX: Alerts when latency exceeds threshold.
 
-    # Game progress
-    tickCount: int
-    price: Decimal  # AUDIT FIX: Use Decimal for financial precision
+    Uses rolling statistics to detect anomalous latency values.
+    """
 
-    # Timing
-    cooldownTimer: int
+    def __init__(
+        self,
+        window_size: int = 100,
+        spike_threshold_std: float = 2.0,
+        absolute_threshold_ms: float = 2000.0
+    ):
+        """
+        Initialize spike detector.
 
-    # Trading
-    allowPreRoundBuys: bool
-    tradeCount: int
+        Args:
+            window_size: Number of samples for rolling statistics
+            spike_threshold_std: Standard deviations above mean to trigger spike
+            absolute_threshold_ms: Absolute threshold (ms) that always triggers spike
+        """
+        self.window_size = window_size
+        self.spike_threshold_std = spike_threshold_std
+        self.absolute_threshold_ms = absolute_threshold_ms
 
-    # Post-game data
-    gameHistory: Optional[List[Dict[str, Any]]]
+        self.latencies: deque = deque(maxlen=window_size)
+        self._lock = threading.Lock()
 
-    # Metadata (added by collector)
-    phase: str = "UNKNOWN"
-    isValid: bool = True
-    timestamp: int = field(default_factory=lambda: int(time.time() * 1000))
-    latency: float = 0.0
+        # Statistics
+        self.total_samples = 0
+        self.total_spikes = 0
+        self.last_spike_time: Optional[float] = None
+        self.last_spike_value: Optional[float] = None
+
+    def record(self, latency_ms: float) -> Optional[Dict[str, Any]]:
+        """
+        Record a latency sample and check for spike.
+
+        Args:
+            latency_ms: Latency in milliseconds
+
+        Returns:
+            Spike info dict if spike detected, None otherwise
+        """
+        with self._lock:
+            self.latencies.append(latency_ms)
+            self.total_samples += 1
+
+            # Need minimum samples for statistics
+            if len(self.latencies) < 10:
+                return None
+
+            # Calculate rolling statistics
+            mean = sum(self.latencies) / len(self.latencies)
+            variance = sum((x - mean) ** 2 for x in self.latencies) / len(self.latencies)
+            std = variance ** 0.5 if variance > 0 else 0
+
+            # Check for spike
+            is_spike = False
+            spike_reason = None
+
+            # Check absolute threshold
+            if latency_ms > self.absolute_threshold_ms:
+                is_spike = True
+                spike_reason = f"Absolute threshold exceeded: {latency_ms:.0f}ms > {self.absolute_threshold_ms:.0f}ms"
+
+            # Check standard deviation threshold
+            elif std > 0:
+                z_score = (latency_ms - mean) / std
+                if z_score > self.spike_threshold_std:
+                    is_spike = True
+                    spike_reason = f"Statistical spike: {z_score:.1f} std devs above mean ({mean:.0f}ms)"
+
+            if is_spike:
+                self.total_spikes += 1
+                self.last_spike_time = time.time()
+                self.last_spike_value = latency_ms
+
+                return {
+                    'latency_ms': latency_ms,
+                    'mean_ms': mean,
+                    'std_ms': std,
+                    'reason': spike_reason,
+                    'spike_count': self.total_spikes,
+                    'timestamp': self.last_spike_time
+                }
+
+            return None
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get spike detector statistics"""
+        with self._lock:
+            if self.latencies:
+                mean = sum(self.latencies) / len(self.latencies)
+                max_lat = max(self.latencies)
+                min_lat = min(self.latencies)
+            else:
+                mean = max_lat = min_lat = 0
+
+            return {
+                'total_samples': self.total_samples,
+                'total_spikes': self.total_spikes,
+                'spike_rate': (self.total_spikes / self.total_samples * 100)
+                    if self.total_samples > 0 else 0.0,
+                'mean_latency_ms': mean,
+                'max_latency_ms': max_lat,
+                'min_latency_ms': min_lat,
+                'last_spike_time': self.last_spike_time,
+                'last_spike_value_ms': self.last_spike_value
+            }
 
 
-class GameStateMachine:
-    """Validates game state transitions and detects phases"""
+class ConnectionHealth:
+    """
+    Connection health status enum.
 
-    def __init__(self):
-        self.current_phase = "UNKNOWN"
-        self.current_game_id = None
-        self.last_tick_count = -1
-        self.transition_history = []
-        self.anomaly_count = 0
+    PHASE 3.2 AUDIT FIX: Track connection quality.
+    """
+    HEALTHY = "HEALTHY"          # Connected, receiving signals
+    DEGRADED = "DEGRADED"        # Connected but high latency/drops
+    STALE = "STALE"              # Connected but no recent signals
+    DISCONNECTED = "DISCONNECTED"  # Not connected
+    UNKNOWN = "UNKNOWN"          # Initial state
 
-    def detect_phase(self, data: Dict[str, Any]) -> str:
-        """Detect game phase from raw data"""
-        # RUG EVENT - gameHistory ONLY appears during rug events
-        if data.get('gameHistory'):
-            if data.get('active') and data.get('rugged'):
-                return 'RUG_EVENT_1'  # Seed reveal
-            if not data.get('active') and data.get('rugged'):
-                return 'RUG_EVENT_2'  # New game setup
 
-        # PRESALE - 10-second window before game starts
-        cooldown = data.get('cooldownTimer', 0)
-        if (0 < cooldown <= 10000 and
-            data.get('allowPreRoundBuys', False)):
-            return 'PRESALE'
+class ConnectionHealthMonitor:
+    """
+    Monitors WebSocket connection health.
 
-        # COOLDOWN - 5-second settlement buffer
-        if (cooldown > 10000 and
-            data.get('rugged', False) and
-            not data.get('active', True)):
-            return 'COOLDOWN'
+    PHASE 3.2 AUDIT FIX: Detects connection issues before they cause problems.
 
-        # ACTIVE GAMEPLAY - Main game phase
-        if (data.get('active', False) and
-            data.get('tickCount', 0) > 0 and
-            not data.get('rugged', False)):
-            return 'ACTIVE_GAMEPLAY'
+    Metrics tracked:
+    - Time since last signal
+    - Average latency
+    - Error rate
+    - Drop rate
+    """
 
-        # GAME ACTIVATION - Instant transition from presale
-        if (data.get('active', False) and
-            data.get('tickCount', 0) == 0 and
-            not data.get('rugged', False)):
-            return 'GAME_ACTIVATION'
+    def __init__(
+        self,
+        stale_threshold_sec: float = 10.0,
+        latency_threshold_ms: float = 1000.0,
+        error_rate_threshold: float = 5.0
+    ):
+        """
+        Initialize health monitor.
 
-        # Log unknown states for debugging
-        logging.debug(f"UNKNOWN state detected - active:{data.get('active')} rugged:{data.get('rugged')} tick:{data.get('tickCount')} cooldown:{cooldown}")
+        Args:
+            stale_threshold_sec: Seconds without signal before STALE
+            latency_threshold_ms: Avg latency (ms) threshold for DEGRADED
+            error_rate_threshold: Error rate (%) threshold for DEGRADED
+        """
+        self.stale_threshold_sec = stale_threshold_sec
+        self.latency_threshold_ms = latency_threshold_ms
+        self.error_rate_threshold = error_rate_threshold
 
-        # If we can't determine state but game is active, stay in current phase
-        # This handles brief moments where data might be in transition
-        if self.current_phase in ['ACTIVE_GAMEPLAY', 'GAME_ACTIVATION'] and data.get('active', False):
-            return self.current_phase
+        self.last_signal_time: Optional[float] = None
+        self.is_connected = False
+        self._lock = threading.Lock()
 
-        return 'UNKNOWN'
+    def record_signal(self):
+        """Record that a signal was received"""
+        with self._lock:
+            self.last_signal_time = time.time()
 
-    def validate_transition(self, new_phase: str, data: Dict[str, Any]) -> bool:
-        """Validate state transition is legal"""
-        # First state is always valid
-        if self.current_phase == 'UNKNOWN':
-            return True
+    def set_connected(self, connected: bool):
+        """Update connection state"""
+        with self._lock:
+            self.is_connected = connected
+            if connected:
+                self.last_signal_time = time.time()
 
-        # Transitioning TO unknown is allowed (data ambiguity, not an error)
-        # But log it for monitoring
-        if new_phase == 'UNKNOWN':
-            logging.debug(f"Transitioning from {self.current_phase} to UNKNOWN (data ambiguity)")
-            return True
+    def get_signal_age(self) -> Optional[float]:
+        """Get seconds since last signal, or None if never received"""
+        with self._lock:
+            if self.last_signal_time is None:
+                return None
+            return time.time() - self.last_signal_time
 
-        # Legal transition map
-        legal_transitions = {
-            'GAME_ACTIVATION': ['ACTIVE_GAMEPLAY', 'RUG_EVENT_1'],
-            'ACTIVE_GAMEPLAY': ['ACTIVE_GAMEPLAY', 'RUG_EVENT_1'],
-            'RUG_EVENT_1': ['RUG_EVENT_2'],
-            'RUG_EVENT_2': ['COOLDOWN'],
-            'COOLDOWN': ['PRESALE'],
-            'PRESALE': ['PRESALE', 'GAME_ACTIVATION', 'ACTIVE_GAMEPLAY'],  # FIX: Allow direct PRESALE → ACTIVE_GAMEPLAY
-            'UNKNOWN': ['GAME_ACTIVATION', 'ACTIVE_GAMEPLAY', 'PRESALE', 'COOLDOWN']
-        }
+    def check_health(
+        self,
+        avg_latency_ms: float = 0.0,
+        error_rate: float = 0.0,
+        drop_rate: float = 0.0
+    ) -> Dict[str, Any]:
+        """
+        Check connection health status.
 
-        allowed_next = legal_transitions.get(self.current_phase, [])
-        is_legal = new_phase in allowed_next or new_phase == self.current_phase
+        Args:
+            avg_latency_ms: Average latency in milliseconds
+            error_rate: Error rate percentage
+            drop_rate: Drop rate percentage (from rate limiter)
 
-        if not is_legal:
-            logging.warning(f"Illegal transition: {self.current_phase} → {new_phase} (allowed: {allowed_next})")
-            return False
+        Returns:
+            Dict with status, issues list, and metrics
+        """
+        with self._lock:
+            issues = []
+            status = ConnectionHealth.UNKNOWN
 
-        # Validate tick progression in active gameplay
-        if new_phase == 'ACTIVE_GAMEPLAY' and self.current_phase == 'ACTIVE_GAMEPLAY':
-            game_id = data.get('gameId')
-            tick_count = data.get('tickCount', 0)
+            # Check connection
+            if not self.is_connected:
+                return {
+                    'status': ConnectionHealth.DISCONNECTED,
+                    'issues': ['Not connected to server'],
+                    'signal_age_sec': None,
+                    'avg_latency_ms': avg_latency_ms,
+                    'error_rate': error_rate,
+                    'drop_rate': drop_rate
+                }
 
-            if game_id == self.current_game_id:
-                if tick_count <= self.last_tick_count:
-                    logging.warning(f"Tick regression detected: {self.last_tick_count} → {tick_count}")
-                    return False
+            # Check signal freshness
+            signal_age = None
+            if self.last_signal_time:
+                signal_age = time.time() - self.last_signal_time
 
-        return True
+                if signal_age > self.stale_threshold_sec:
+                    issues.append(f'No signals for {signal_age:.1f}s')
+                    status = ConnectionHealth.STALE
 
-    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process game state update and return validation result"""
-        phase = self.detect_phase(data)
-        is_valid = self.validate_transition(phase, data)
+            # Check latency
+            if avg_latency_ms > self.latency_threshold_ms:
+                issues.append(f'High latency: {avg_latency_ms:.0f}ms')
+                if status != ConnectionHealth.STALE:
+                    status = ConnectionHealth.DEGRADED
 
-        if not is_valid:
-            self.anomaly_count += 1
-            logging.warning(f"Invalid state transition detected (anomaly #{self.anomaly_count})")
+            # Check error rate
+            if error_rate > self.error_rate_threshold:
+                issues.append(f'High error rate: {error_rate:.1f}%')
+                if status != ConnectionHealth.STALE:
+                    status = ConnectionHealth.DEGRADED
 
-        # Track transition
-        previous_phase = self.current_phase
-        if phase != self.current_phase:
-            self.transition_history.append({
-                'from': self.current_phase,
-                'to': phase,
-                'gameId': data.get('gameId'),
-                'tick': data.get('tickCount', 0),
-                'timestamp': int(time.time() * 1000)
-            })
+            # Check drop rate
+            if drop_rate > 10.0:  # More than 10% drops
+                issues.append(f'High drop rate: {drop_rate:.1f}%')
+                if status != ConnectionHealth.STALE:
+                    status = ConnectionHealth.DEGRADED
 
-            # Keep only last 20 transitions
-            if len(self.transition_history) > 20:
-                self.transition_history.pop(0)
+            # If no issues, we're healthy
+            if not issues:
+                status = ConnectionHealth.HEALTHY
 
-        # Update state
-        self.current_phase = phase
-        self.current_game_id = data.get('gameId')
-        self.last_tick_count = data.get('tickCount', 0)
+            return {
+                'status': status,
+                'issues': issues,
+                'signal_age_sec': signal_age,
+                'avg_latency_ms': avg_latency_ms,
+                'error_rate': error_rate,
+                'drop_rate': drop_rate
+            }
 
-        return {
-            'phase': phase,
-            'isValid': is_valid,
-            'previousPhase': previous_phase
-        }
+
+class OperatingMode:
+    """
+    Operating mode for graceful degradation.
+
+    PHASE 3.6 AUDIT FIX: Defines system operating states.
+    """
+    NORMAL = "NORMAL"              # Full functionality
+    DEGRADED = "DEGRADED"          # Reduced functionality (high latency/errors)
+    MINIMAL = "MINIMAL"            # Minimal functionality (severe issues)
+    OFFLINE = "OFFLINE"            # No connection
+
+
+class GracefulDegradationManager:
+    """
+    Manages graceful degradation based on system health.
+
+    PHASE 3.6 AUDIT FIX: Reduces functionality when issues detected to maintain stability.
+
+    Degradation levels:
+    - NORMAL: Full processing, all features enabled
+    - DEGRADED: Skip non-critical processing, log warnings
+    - MINIMAL: Only essential processing, buffer aggressively
+    - OFFLINE: No processing, queue for retry
+    """
+
+    def __init__(
+        self,
+        error_threshold: int = 10,
+        spike_threshold: int = 5,
+        recovery_window_sec: float = 60.0
+    ):
+        """
+        Initialize degradation manager.
+
+        Args:
+            error_threshold: Errors in window before degradation
+            spike_threshold: Latency spikes in window before degradation
+            recovery_window_sec: Seconds without issues before recovery
+        """
+        self.error_threshold = error_threshold
+        self.spike_threshold = spike_threshold
+        self.recovery_window_sec = recovery_window_sec
+
+        self.current_mode = OperatingMode.NORMAL
+        self.mode_history: deque = deque(maxlen=20)
+
+        # Tracking
+        self.errors_in_window = 0
+        self.spikes_in_window = 0
+        self.last_issue_time: Optional[float] = None
+        self.degradation_start_time: Optional[float] = None
+        self._lock = threading.Lock()
+
+        # Callbacks
+        self.on_mode_change: Optional[Callable] = None
+
+    def record_error(self):
+        """Record an error occurrence"""
+        with self._lock:
+            self.errors_in_window += 1
+            self.last_issue_time = time.time()
+            self._evaluate_mode()
+
+    def record_spike(self):
+        """Record a latency spike"""
+        with self._lock:
+            self.spikes_in_window += 1
+            self.last_issue_time = time.time()
+            self._evaluate_mode()
+
+    def record_disconnect(self):
+        """Record a disconnect event"""
+        with self._lock:
+            self._set_mode(OperatingMode.OFFLINE)
+
+    def record_reconnect(self):
+        """Record a reconnect event"""
+        with self._lock:
+            # Start in DEGRADED after reconnect, will recover to NORMAL if stable
+            if self.current_mode == OperatingMode.OFFLINE:
+                self._set_mode(OperatingMode.DEGRADED)
+
+    def check_recovery(self):
+        """Check if system has recovered and can return to normal mode"""
+        with self._lock:
+            if self.current_mode == OperatingMode.NORMAL:
+                return  # Already normal
+
+            if self.current_mode == OperatingMode.OFFLINE:
+                return  # Can't recover without reconnect
+
+            if self.last_issue_time is None:
+                return  # No issues recorded
+
+            elapsed = time.time() - self.last_issue_time
+            if elapsed >= self.recovery_window_sec:
+                # No issues for recovery window - recover
+                self.errors_in_window = 0
+                self.spikes_in_window = 0
+                self._set_mode(OperatingMode.NORMAL)
+
+    def _evaluate_mode(self):
+        """Evaluate current conditions and set appropriate mode"""
+        if self.current_mode == OperatingMode.OFFLINE:
+            return  # Stay offline until reconnect
+
+        # Check for MINIMAL conditions (severe)
+        if self.errors_in_window >= self.error_threshold * 2:
+            self._set_mode(OperatingMode.MINIMAL)
+            return
+
+        # Check for DEGRADED conditions
+        if (self.errors_in_window >= self.error_threshold or
+            self.spikes_in_window >= self.spike_threshold):
+            self._set_mode(OperatingMode.DEGRADED)
+            return
+
+    def _set_mode(self, new_mode: str):
+        """Set operating mode with history tracking"""
+        if new_mode == self.current_mode:
+            return
+
+        old_mode = self.current_mode
+        self.current_mode = new_mode
+
+        # Record in history
+        self.mode_history.append({
+            'from': old_mode,
+            'to': new_mode,
+            'timestamp': time.time(),
+            'errors': self.errors_in_window,
+            'spikes': self.spikes_in_window
+        })
+
+        # Track degradation start
+        if new_mode != OperatingMode.NORMAL and old_mode == OperatingMode.NORMAL:
+            self.degradation_start_time = time.time()
+        elif new_mode == OperatingMode.NORMAL:
+            self.degradation_start_time = None
+
+        # Call callback if set
+        if self.on_mode_change:
+            try:
+                self.on_mode_change(old_mode, new_mode)
+            except Exception:
+                pass  # Don't let callback errors affect degradation logic
+
+    def should_skip_non_critical(self) -> bool:
+        """Check if non-critical processing should be skipped"""
+        return self.current_mode in [OperatingMode.DEGRADED, OperatingMode.MINIMAL]
+
+    def should_buffer_aggressively(self) -> bool:
+        """Check if aggressive buffering is needed"""
+        return self.current_mode == OperatingMode.MINIMAL
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get current degradation status"""
+        with self._lock:
+            degradation_duration = None
+            if self.degradation_start_time:
+                degradation_duration = time.time() - self.degradation_start_time
+
+            return {
+                'mode': self.current_mode,
+                'errors_in_window': self.errors_in_window,
+                'spikes_in_window': self.spikes_in_window,
+                'last_issue_time': self.last_issue_time,
+                'degradation_duration_sec': degradation_duration,
+                'recent_transitions': list(self.mode_history)[-5:]
+            }
+
+
+class TokenBucketRateLimiter:
+    """
+    Token bucket rate limiter for WebSocket flood protection.
+
+    PHASE 3.1 AUDIT FIX: Prevents data floods from overwhelming the system.
+
+    Args:
+        rate: Maximum tokens per second (signals/sec)
+        burst: Maximum burst capacity (default: 2x rate)
+    """
+
+    def __init__(self, rate: float = 20.0, burst: int = None):
+        self.rate = rate
+        self.burst = burst if burst is not None else int(rate * 2)
+        self.tokens = float(self.burst)
+        self.last_update = time.time()
+        self._lock = threading.Lock()
+
+        # Statistics
+        self.total_requests = 0
+        self.total_allowed = 0
+        self.total_dropped = 0
+
+    def acquire(self) -> bool:
+        """
+        Attempt to acquire a token.
+
+        Returns:
+            True if token acquired (request allowed), False if rate limited
+        """
+        with self._lock:
+            now = time.time()
+            elapsed = now - self.last_update
+            self.last_update = now
+
+            # Refill tokens based on elapsed time
+            self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+            self.total_requests += 1
+
+            if self.tokens >= 1.0:
+                self.tokens -= 1.0
+                self.total_allowed += 1
+                return True
+            else:
+                self.total_dropped += 1
+                return False
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get rate limiter statistics"""
+        with self._lock:
+            return {
+                'rate': self.rate,
+                'burst': self.burst,
+                'tokens_available': self.tokens,
+                'total_requests': self.total_requests,
+                'total_allowed': self.total_allowed,
+                'total_dropped': self.total_dropped,
+                'drop_rate': (self.total_dropped / self.total_requests * 100)
+                    if self.total_requests > 0 else 0.0
+            }
+
+# Phase 3 refactoring: GameSignal and GameStateMachine extracted to own module
+from sources.game_state_machine import GameSignal, GameStateMachine
 
 
 class WebSocketFeed:
     """Real-time WebSocket feed for Rugs.fun game state"""
 
-    def __init__(self, log_level: str = 'INFO'):
+    def __init__(self, log_level: str = 'INFO', rate_limit: float = 20.0):
         """
         Initialize WebSocket feed
 
         Args:
             log_level: Logging level (DEBUG, INFO, WARN, ERROR)
+            rate_limit: Max signals per second (PHASE 3.1 AUDIT FIX)
         """
         self.server_url = 'https://backend.rugs.fun?frontend-version=1.0'
 
@@ -216,6 +547,19 @@ class WebSocketFeed:
         )
         self.state_machine = GameStateMachine()
 
+        # PHASE 3.1 AUDIT FIX: Rate limiter to prevent data floods
+        self.rate_limiter = TokenBucketRateLimiter(rate=rate_limit)
+
+        # PHASE 3.2 AUDIT FIX: Connection health monitor
+        self.health_monitor = ConnectionHealthMonitor()
+
+        # PHASE 3.5 AUDIT FIX: Latency spike detector
+        self.spike_detector = LatencySpikeDetector()
+
+        # PHASE 3.6 AUDIT FIX: Graceful degradation manager
+        self.degradation_manager = GracefulDegradationManager()
+        self.degradation_manager.on_mode_change = self._on_mode_change
+
         # Metrics
         self.metrics = {
             'start_time': time.time(),
@@ -226,7 +570,9 @@ class WebSocketFeed:
             'latencies': deque(maxlen=100),  # AUDIT FIX: O(1) operations, auto-evicts oldest
             'phase_transitions': 0,
             'anomalies': 0,
-            'errors': 0  # AUDIT FIX: Track callback errors
+            'errors': 0,  # AUDIT FIX: Track callback errors
+            'rate_limited': 0,  # PHASE 3.1: Track rate-limited signals
+            'latency_spikes': 0  # PHASE 3.5: Track latency spikes
         }
 
         # State
@@ -250,6 +596,21 @@ class WebSocketFeed:
         # Setup Socket.IO event handlers
         self._setup_event_listeners()
 
+    def _on_mode_change(self, old_mode: str, new_mode: str):
+        """
+        PHASE 3.6: Handle operating mode changes.
+
+        Args:
+            old_mode: Previous operating mode
+            new_mode: New operating mode
+        """
+        self.logger.warning(f'🔄 Operating mode changed: {old_mode} → {new_mode}')
+        self._emit_event('mode_change', {
+            'old_mode': old_mode,
+            'new_mode': new_mode,
+            'status': self.degradation_manager.get_status()
+        })
+
     def _setup_event_listeners(self):
         """
         Setup Socket.IO event listeners
@@ -270,6 +631,8 @@ class WebSocketFeed:
             # AUDIT FIX: Error boundary for connection handler
             try:
                 self.is_connected = True
+                # PHASE 3.2: Update health monitor
+                self.health_monitor.set_connected(True)
                 self.logger.info('✅ Connected to Rugs.fun backend')
                 self.logger.info(f'   Socket ID: {self.sio.sid}')
                 self._emit_event('connected', {'socketId': self.sio.sid})
@@ -282,8 +645,14 @@ class WebSocketFeed:
             # AUDIT FIX: Error boundary for disconnect handler
             try:
                 self.is_connected = False
+                # PHASE 3.2: Update health monitor
+                self.health_monitor.set_connected(False)
+                # PHASE 3.4: Initiate state machine recovery
+                recovery_info = self.state_machine.recover_from_disconnect()
+                # PHASE 3.6: Notify degradation manager
+                self.degradation_manager.record_disconnect()
                 self.logger.warning('❌ Disconnected from backend')
-                self._emit_event('disconnected', {})
+                self._emit_event('disconnected', {'recovery_info': recovery_info})
                 # AUDIT FIX: Clear handlers on disconnect to prevent memory leaks
                 # Note: Don't clear Socket.IO internal handlers, only our custom handlers
                 # self.clear_handlers()  # Commented out - handlers are intentionally persistent
@@ -307,8 +676,18 @@ class WebSocketFeed:
             """Handle successful reconnection"""
             try:
                 self.is_connected = True
+                # PHASE 3.2: Update health monitor
+                self.health_monitor.set_connected(True)
+                # PHASE 3.4: Log state machine recovery status
+                state_summary = self.state_machine.get_state_summary()
+                # PHASE 3.6: Notify degradation manager
+                self.degradation_manager.record_reconnect()
                 self.logger.info('🔄 Reconnected to Rugs.fun backend')
-                self._emit_event('reconnected', {'socketId': self.sio.sid})
+                self.logger.info(f'   State machine: phase={state_summary["phase"]}, game={state_summary["game_id"]}')
+                self._emit_event('reconnected', {
+                    'socketId': self.sio.sid,
+                    'state_summary': state_summary
+                })
             except Exception as e:
                 self.logger.error(f"Error in reconnect handler: {e}", exc_info=True)
                 self.metrics['errors'] += 1
@@ -358,12 +737,38 @@ class WebSocketFeed:
         """Handle gameStateUpdate event - PRIMARY SIGNAL SOURCE"""
         receive_time = time.time() * 1000  # milliseconds
 
+        # PHASE 3.1 AUDIT FIX: Apply rate limiting
+        if not self.rate_limiter.acquire():
+            self.metrics['rate_limited'] += 1
+            # Log every 100th rate-limited signal to avoid log spam
+            if self.metrics['rate_limited'] % 100 == 1:
+                self.logger.warning(
+                    f"Rate limiting active: {self.metrics['rate_limited']} signals dropped "
+                    f"(drop rate: {self.rate_limiter.get_stats()['drop_rate']:.1f}%)"
+                )
+            return  # Drop this signal
+
         # Calculate tick interval
         if self.last_tick_time:
             tick_interval = receive_time - self.last_tick_time
             # AUDIT FIX: deque auto-evicts oldest when maxlen exceeded (O(1) operation)
             self.metrics['latencies'].append(tick_interval)
+
+            # PHASE 3.5: Check for latency spike
+            spike_info = self.spike_detector.record(tick_interval)
+            if spike_info:
+                self.metrics['latency_spikes'] += 1
+                self.logger.warning(f"⚠️ Latency spike detected: {spike_info['reason']}")
+                # PHASE 3.6: Notify degradation manager
+                self.degradation_manager.record_spike()
+                self._emit_event('latency_spike', spike_info)
         self.last_tick_time = receive_time
+
+        # PHASE 3.2: Record signal reception for health monitoring
+        self.health_monitor.record_signal()
+
+        # PHASE 3.6: Check for recovery from degraded state
+        self.degradation_manager.check_recovery()
 
         # Extract signal (9 fields only)
         signal_dict = self._extract_signal(raw_data)
@@ -590,6 +995,9 @@ class WebSocketFeed:
             if self.metrics['latencies'] else 0
         )
 
+        # PHASE 3.1: Include rate limiter stats
+        rate_stats = self.rate_limiter.get_stats()
+
         return {
             'uptime': f'{uptime:.1f}s',
             'totalSignals': self.metrics['total_signals'],
@@ -602,8 +1010,76 @@ class WebSocketFeed:
             'signalsPerSecond': f'{self.metrics["total_signals"] / uptime:.2f}' if uptime > 0 else '0',
             'currentPhase': self.state_machine.current_phase,
             'currentGameId': self.state_machine.current_game_id or 'N/A',
-            'lastPrice': f'{self.last_signal.price:.4f}x' if self.last_signal else 'N/A'
+            'lastPrice': f'{self.last_signal.price:.4f}x' if self.last_signal else 'N/A',
+            # PHASE 3.1: Rate limiting stats
+            'rateLimited': self.metrics['rate_limited'],
+            'rateLimitDropRate': f'{rate_stats["drop_rate"]:.1f}%',
+            'errors': self.metrics['errors']
         }
+
+    def get_health(self) -> Dict[str, Any]:
+        """
+        Get connection health status.
+
+        PHASE 3.2 AUDIT FIX: Provides health check for monitoring.
+
+        Returns:
+            Dict with status, issues, and health metrics
+        """
+        # Calculate metrics for health check
+        avg_latency = (
+            sum(self.metrics['latencies']) / len(self.metrics['latencies'])
+            if self.metrics['latencies'] else 0
+        )
+
+        total_signals = self.metrics['total_signals']
+        error_rate = (
+            (self.metrics['errors'] / total_signals * 100)
+            if total_signals > 0 else 0.0
+        )
+
+        rate_stats = self.rate_limiter.get_stats()
+        drop_rate = rate_stats['drop_rate']
+
+        return self.health_monitor.check_health(
+            avg_latency_ms=avg_latency,
+            error_rate=error_rate,
+            drop_rate=drop_rate
+        )
+
+    def is_healthy(self) -> bool:
+        """
+        Quick health check.
+
+        PHASE 3.2 AUDIT FIX: Simple boolean for health checks.
+
+        Returns:
+            True if connection is healthy
+        """
+        health = self.get_health()
+        return health['status'] == ConnectionHealth.HEALTHY
+
+    def get_operating_mode(self) -> str:
+        """
+        Get current operating mode.
+
+        PHASE 3.6 AUDIT FIX: Returns current degradation state.
+
+        Returns:
+            Operating mode string (NORMAL, DEGRADED, MINIMAL, OFFLINE)
+        """
+        return self.degradation_manager.current_mode
+
+    def get_degradation_status(self) -> Dict[str, Any]:
+        """
+        Get full degradation status.
+
+        PHASE 3.6 AUDIT FIX: Provides detailed degradation info.
+
+        Returns:
+            Dict with mode, error counts, and history
+        """
+        return self.degradation_manager.get_status()
 
     def print_metrics(self):
         """Print metrics summary"""

@@ -18,6 +18,7 @@ from services import event_bus, Events
 from .game_state import GameState
 from .recorder_sink import RecorderSink
 from .live_ring_buffer import LiveRingBuffer
+from .replay_playback_controller import PlaybackController
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ class ReplayEngine:
     - Thread-safe operations with correct lock ordering
     - Memory-bounded live feed handling
     - Graceful error handling and recovery
+
+    Phase 2 Refactoring:
+    - Playback control delegated to PlaybackController
     """
 
     def __init__(self, game_state: GameState, replay_source=None):
@@ -48,16 +52,13 @@ class ReplayEngine:
         self.current_index = 0
         self.game_id: Optional[str] = None
 
-        # Playback control
-        self.is_playing = False
-        self.playback_speed = 1.0
-        self.playback_thread: Optional[threading.Thread] = None
+        # Multi-game mode flag
         self.multi_game_mode = False
 
         # Validate configuration before using
         ring_buffer_size = max(1, config.LIVE_FEED.get('ring_buffer_size', 5000))
         recording_buffer_size = max(1, config.LIVE_FEED.get('recording_buffer_size', 100))
-        
+
         # Live feed infrastructure with validated settings
         self.live_ring_buffer = LiveRingBuffer(max_size=ring_buffer_size)
         self.recorder_sink = RecorderSink(
@@ -70,6 +71,10 @@ class ReplayEngine:
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._cleanup_registered = False
+        self._shutting_down = False  # PHASE 3.3: Track shutdown state for logging safety
+
+        # Phase 2 Refactoring: Delegate playback control to PlaybackController
+        self._playback = PlaybackController(self, self._lock, self._stop_event)
 
         # Callbacks for UI updates
         self.on_tick_callback: Optional[Callable] = None
@@ -86,40 +91,56 @@ class ReplayEngine:
             atexit.register(self.cleanup)
             self._cleanup_registered = True
 
+    def _safe_log(self, level: str, message: str, exc_info: bool = False):
+        """
+        PHASE 3.3 AUDIT FIX: Safe logging that handles shutdown state.
+
+        During Python interpreter shutdown, logging streams may be closed
+        before atexit handlers run. This method silently ignores logging
+        errors during shutdown to prevent spurious error messages.
+
+        Args:
+            level: Log level ('info', 'warning', 'error', 'debug')
+            message: Message to log
+            exc_info: Whether to include exception info
+        """
+        if self._shutting_down:
+            return  # Don't log during shutdown
+
+        try:
+            log_func = getattr(logger, level, logger.info)
+            if exc_info:
+                log_func(message, exc_info=True)
+            else:
+                log_func(message)
+        except (ValueError, OSError, AttributeError):
+            # Logging system is in an inconsistent state
+            pass
+
     def cleanup(self):
         """Clean up resources (called on shutdown)"""
+        # PHASE 3.3: Set shutdown flag to prevent logging errors
+        self._shutting_down = True
+
         try:
             # Signal threads to stop
             self._stop_event.set()
 
-            # Stop playback
-            if self.is_playing:
-                self.stop()
-
-            # Wait for playback thread to finish
-            if self.playback_thread and self.playback_thread.is_alive():
-                self.playback_thread.join(timeout=2.0)
+            # Phase 2: Clean up playback controller
+            if hasattr(self, '_playback'):
+                self._playback.cleanup()
 
             # Stop recording if active
             if self.recorder_sink.is_recording():
                 summary = self.recorder_sink.stop_recording()
-                try:
-                    logger.info(f"Stopped recording on cleanup: {summary}")
-                except (ValueError, OSError):
-                    pass  # Logging may be shutdown at exit
+                self._safe_log('info', f"Stopped recording on cleanup: {summary}")
 
             # Clear buffers
             self.live_ring_buffer.clear()
 
-            try:
-                logger.info("ReplayEngine cleanup completed")
-            except (ValueError, OSError):
-                pass  # Logging may be shutdown at exit
+            self._safe_log('info', "ReplayEngine cleanup completed")
         except Exception as e:
-            try:
-                logger.error(f"Error during cleanup: {e}", exc_info=True)
-            except (ValueError, OSError):
-                pass  # Logging may be shutdown at exit
+            self._safe_log('error', f"Error during cleanup: {e}", exc_info=True)
 
     @contextmanager
     def _acquire_lock(self, timeout=5.0):
@@ -138,6 +159,32 @@ class ReplayEngine:
         if self.is_live_mode:
             return self.live_ring_buffer.get_all()
         return self.file_mode_ticks
+
+    # Phase 2 Refactoring: Properties for backwards compatibility
+    @property
+    def is_playing(self) -> bool:
+        """Check if playback is active (delegates to PlaybackController)"""
+        return self._playback.is_playing
+
+    @is_playing.setter
+    def is_playing(self, value: bool):
+        """Set playback state (delegates to PlaybackController)"""
+        self._playback.is_playing = value
+
+    @property
+    def playback_speed(self) -> float:
+        """Get playback speed (delegates to PlaybackController)"""
+        return self._playback.playback_speed
+
+    @playback_speed.setter
+    def playback_speed(self, value: float):
+        """Set playback speed (delegates to PlaybackController)"""
+        self._playback.playback_speed = value
+
+    @property
+    def playback_thread(self) -> Optional[threading.Thread]:
+        """Get playback thread (delegates to PlaybackController)"""
+        return self._playback.playback_thread
 
     # ========================================================================
     # FILE LOADING
@@ -376,168 +423,48 @@ class ReplayEngine:
             return False
 
     # ========================================================================
-    # PLAYBACK CONTROL
+    # PLAYBACK CONTROL (Phase 2: Delegates to PlaybackController)
     # ========================================================================
 
     def play(self):
-        """Start auto-playback"""
-        with self._acquire_lock():
-            if self.is_playing:
-                logger.warning("Already playing")
-                return
-
-            if not self.ticks:
-                logger.warning("No game loaded")
-                return
-
-            self.is_playing = True
-            self._stop_event.clear()
-
-            # Start playback thread
-            self.playback_thread = threading.Thread(
-                target=self._playback_loop,
-                name="ReplayEngine-Playback",
-                daemon=True
-            )
-            self.playback_thread.start()
-
-            event_bus.publish(Events.REPLAY_STARTED, {'game_id': self.game_id})
-            logger.info("Playback started")
+        """Start auto-playback (delegates to PlaybackController)"""
+        self._playback.play()
 
     def pause(self):
-        """Pause auto-playback"""
-        with self._acquire_lock():
-            if not self.is_playing:
-                return
-
-            self.is_playing = False
-
-        # AUDIT FIX: Only join thread if NOT called from within the thread itself
-        # (prevents deadlock when auto-play reaches end of game)
-        current_thread = threading.current_thread()
-        if self.playback_thread and self.playback_thread.is_alive():
-            if current_thread != self.playback_thread:
-                self.playback_thread.join(timeout=2.0)
-            # else: We're in the playback thread - don't join, just return
-
-        event_bus.publish(Events.REPLAY_PAUSED, {'game_id': self.game_id})
-        logger.info("Playback paused")
+        """Pause auto-playback (delegates to PlaybackController)"""
+        self._playback.pause()
 
     def stop(self):
-        """Stop playback and reset to start"""
-        # First pause playback
-        self.pause()
-
-        with self._acquire_lock():
-            self.current_index = 0
-
-        # Display first tick
-        if self.ticks:
-            self.display_tick(0)
-
-        event_bus.publish(Events.REPLAY_STOPPED, {'game_id': self.game_id})
-        logger.info("Playback stopped")
+        """Stop playback and reset to start (delegates to PlaybackController)"""
+        self._playback.stop()
 
     def reset(self):
-        """Reset game to initial state (stop playback, reset state, go to beginning)"""
-        # Stop playback
-        self.pause()
-
-        with self._acquire_lock():
-            self.current_index = 0
-
-        # Reset game state
-        self.state.reset()
-
-        # Update state with first tick if available
-        if self.ticks:
-            first_tick = self.ticks[0]
-            self.state.update(
-                game_id=self.game_id,
-                current_tick=first_tick.tick,
-                current_price=first_tick.price,
-                current_phase=first_tick.phase,
-                game_active=first_tick.active,
-                rugged=first_tick.rugged
-            )
-            self.display_tick(0)
-
-        event_bus.publish(Events.REPLAY_RESET, {'game_id': self.game_id})
-        logger.info("Game reset to initial state")
+        """Reset game to initial state (delegates to PlaybackController)"""
+        self._playback.reset()
 
     def step_forward(self) -> bool:
-        """Step forward one tick"""
-        with self._acquire_lock():
-            if not self.ticks:
-                return False
-
-            if self.current_index >= len(self.ticks) - 1:
-                self._handle_game_end()
-                return False
-
-            self.current_index += 1
-
-        self.display_tick(self.current_index)
-        return True
+        """Step forward one tick (delegates to PlaybackController)"""
+        return self._playback.step_forward()
 
     def step_backward(self) -> bool:
-        """Step backward one tick (not available in live mode)"""
-        if self.is_live_mode:
-            logger.warning("Cannot step backward in live mode")
-            return False
-
-        with self._acquire_lock():
-            if not self.ticks or self.current_index <= 0:
-                return False
-
-            self.current_index -= 1
-
-        self.display_tick(self.current_index)
-        return True
+        """Step backward one tick (delegates to PlaybackController)"""
+        return self._playback.step_backward()
 
     def jump_to_tick(self, tick_number: int) -> bool:
-        """Jump to specific tick number (not available in live mode)"""
-        if self.is_live_mode:
-            logger.warning("Cannot jump to tick in live mode")
-            return False
-
-        with self._acquire_lock():
-            if not self.ticks:
-                return False
-
-            # Find tick with matching number
-            for i, tick in enumerate(self.ticks):
-                if tick.tick == tick_number:
-                    self.current_index = i
-                    self.display_tick(i)
-                    return True
-
-        logger.warning(f"Tick {tick_number} not found")
-        return False
+        """Jump to specific tick number (delegates to PlaybackController)"""
+        return self._playback.jump_to_tick(tick_number)
 
     def jump_to_index(self, index: int) -> bool:
-        """Jump to specific index in tick list"""
-        with self._acquire_lock():
-            if not self.ticks or index < 0 or index >= len(self.ticks):
-                return False
-
-            self.current_index = index
-
-        self.display_tick(index)
-        return True
+        """Jump to specific index in tick list (delegates to PlaybackController)"""
+        return self._playback.jump_to_index(index)
 
     def set_tick_index(self, index: int) -> bool:
         """Backwards-compatible alias for jump_to_index()"""
-        return self.jump_to_index(index)
+        return self._playback.set_tick_index(index)
 
     def set_speed(self, speed: float):
-        """Set playback speed multiplier"""
-        with self._acquire_lock():
-            self.playback_speed = max(0.1, min(10.0, speed))
-            new_speed = self.playback_speed
-
-        event_bus.publish(Events.REPLAY_SPEED_CHANGED, {'speed': new_speed})
-        logger.info(f"Playback speed set to {new_speed}x")
+        """Set playback speed multiplier (delegates to PlaybackController)"""
+        self._playback.set_speed(speed)
 
     # ========================================================================
     # DISPLAY & UPDATES
@@ -636,40 +563,7 @@ class ReplayEngine:
 
         logger.info(f"Game ended. Final metrics: {metrics}")
 
-    # ========================================================================
-    # BACKGROUND PLAYBACK
-    # ========================================================================
-
-    def _playback_loop(self):
-        """Background thread for auto-playback"""
-        logger.debug("Playback loop started")
-        
-        try:
-            while not self._stop_event.is_set():
-                # Check if still playing
-                with self._lock:
-                    if not self.is_playing:
-                        break
-                    speed = self.playback_speed
-
-                # Step forward
-                if not self.step_forward():
-                    break
-
-                # Calculate delay based on speed
-                delay = 0.25 / speed
-
-                # Wait with timeout for responsive shutdown
-                if self._stop_event.wait(timeout=delay):
-                    break
-
-        except Exception as e:
-            logger.error(f"Error in playback loop: {e}", exc_info=True)
-        finally:
-            # Ensure flag is cleared
-            with self._lock:
-                self.is_playing = False
-            logger.debug("Playback loop ended")
+    # Note: _playback_loop moved to PlaybackController (Phase 2 refactoring)
 
     # ========================================================================
     # STATUS QUERIES
@@ -799,5 +693,6 @@ class ReplayEngine:
         """Destructor to ensure cleanup"""
         try:
             self.cleanup()
-        except:
-            pass
+        except Exception as e:
+            # AUDIT FIX: Log error safely instead of silent pass
+            self._safe_log('error', f"Error in destructor: {e}")

@@ -24,14 +24,14 @@ class TestTradeManagerBuyOperation:
 
     def test_buy_success(self, loaded_game_state, trade_manager):
         """Test successful buy execution"""
-        initial_balance = loaded_game_state.balance
+        initial_balance = loaded_game_state.get('balance')
         result = trade_manager.execute_buy(Decimal('0.005'))
 
         assert result['success'] == True
         assert 'price' in result
         assert 'amount' in result
-        assert loaded_game_state.balance == initial_balance - Decimal('0.005')
-        assert loaded_game_state.has_active_position() == True
+        assert loaded_game_state.get('balance') == initial_balance - Decimal('0.005')
+        assert loaded_game_state.get('position') is not None
 
     def test_buy_insufficient_balance(self, loaded_game_state, trade_manager):
         """Test buy fails with insufficient balance"""
@@ -54,16 +54,24 @@ class TestTradeManagerBuyOperation:
         assert result['success'] == False
         assert 'reason' in result
 
-    def test_buy_with_active_position(self, loaded_game_state, trade_manager):
-        """Test buy fails when position already active"""
+    def test_buy_with_active_position_accumulates(self, loaded_game_state, trade_manager):
+        """Test subsequent buys add to active position (DCA)"""
+        initial_balance = loaded_game_state.get('balance')
+
         # First buy succeeds
         result1 = trade_manager.execute_buy(Decimal('0.005'))
-        assert result1['success'] == True
+        assert result1['success'] is True
 
-        # Second buy fails
+        # Second buy also succeeds and adds to position
         result2 = trade_manager.execute_buy(Decimal('0.005'))
-        assert result2['success'] == False
-        assert 'reason' in result2
+        assert result2['success'] is True
+
+        position = loaded_game_state.get('position')
+        assert position is not None
+        assert position['amount'] == Decimal('0.010')
+
+        # Balance should reflect both buys at price 1.0
+        assert loaded_game_state.get('balance') == initial_balance - Decimal('0.010')
 
 
 class TestTradeManagerSellOperation:
@@ -80,7 +88,7 @@ class TestTradeManagerSellOperation:
         assert result['success'] == True
         assert 'pnl_sol' in result
         assert 'pnl_percent' in result
-        assert loaded_game_state.has_active_position() == False
+        assert loaded_game_state.get('position') is None
 
     def test_sell_without_position(self, loaded_game_state, trade_manager):
         """Test sell fails without active position"""
@@ -114,14 +122,14 @@ class TestTradeManagerSidebetOperation:
 
     def test_sidebet_success(self, loaded_game_state, trade_manager):
         """Test successful sidebet placement"""
-        initial_balance = loaded_game_state.balance
+        initial_balance = loaded_game_state.get('balance')
         result = trade_manager.execute_sidebet(Decimal('0.002'))
 
         assert result['success'] == True
         assert 'amount' in result
         assert 'potential_win' in result
-        assert loaded_game_state.balance == initial_balance - Decimal('0.002')
-        assert loaded_game_state.has_active_sidebet() == True
+        assert loaded_game_state.get('balance') == initial_balance - Decimal('0.002')
+        assert loaded_game_state.get('sidebet') is not None
 
     def test_sidebet_insufficient_balance(self, loaded_game_state, trade_manager):
         """Test sidebet fails with insufficient balance"""
@@ -221,5 +229,5 @@ class TestTradeManagerEdgeCases:
         result2 = trade_manager.execute_sidebet(Decimal('0.002'))
         assert result2['success'] == True
 
-        assert loaded_game_state.has_active_position() == True
-        assert loaded_game_state.has_active_sidebet() == True
+        assert loaded_game_state.get('position') is not None
+        assert loaded_game_state.get('sidebet') is not None

@@ -237,7 +237,8 @@ class BotUIController:
                     original_relief = btn.cget('relief')
                     try:
                         original_bg = btn.cget('background')
-                    except:
+                    except tk.TclError:
+                        # AUDIT FIX: Catch specific Tkinter exception
                         original_bg = None
 
                     # Press button down (sunken relief + color change)

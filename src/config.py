@@ -6,6 +6,7 @@ Centralizes all constants, settings, and configuration with validation
 import os
 import json
 import logging
+import decimal
 from pathlib import Path
 from decimal import Decimal
 from typing import Dict, Any, Optional, Union
@@ -151,6 +152,13 @@ class Config:
         'retry_delay': 1,
         'websocket_heartbeat': 30,
     }
+
+    # ========== Browser Automation ==========
+    BROWSER = {
+        'chrome_binary': os.getenv('CHROME_BINARY', ''),
+        'profile_name': os.getenv('CHROME_PROFILE', 'rugs_bot'),
+        'cdp_port': int(os.getenv('CDP_PORT', '9222')),
+    }
     
     # ========== Color Themes ==========
     THEMES = {
@@ -288,7 +296,8 @@ class Config:
                         if isinstance(value, str) and '.' in value:
                             try:
                                 data[section][key] = Decimal(value)
-                            except:
+                            except (decimal.InvalidOperation, ValueError):
+                                # AUDIT FIX: Catch specific Decimal conversion exceptions
                                 pass
             
             self._custom_settings = data

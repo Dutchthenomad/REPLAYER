@@ -23,8 +23,10 @@ Usage:
 """
 
 import asyncio
+import json
 import logging
 import threading
+import time
 from typing import Optional, Callable
 from decimal import Decimal
 from enum import Enum
@@ -38,6 +40,7 @@ class BridgeStatus(Enum):
     CONNECTING = "connecting"
     CONNECTED = "connected"
     ERROR = "error"
+    RECONNECTING = "reconnecting"  # Reserved for future use / compatibility
 
 
 class BrowserBridge:
@@ -82,8 +85,10 @@ class BrowserBridge:
     # Updated: 2025-11-24 - Using CSS selectors instead of XPath (more reliable)
     BUTTON_CSS_SELECTORS = {
         'BUY': '#root > div > div.soapy-container.layout-horizontal.MuiBox-root.css-0 > div.soapy-container.MuiBox-root.css-0 > div > div._tradeControlsContainer_17syu_29 > div > div > div._buttonsRow_73g5s_247 > div:nth-child(1) > button',
-        # Note: Will add SELL and SIDEBET once user provides correct selectors
-        # Note: Increment and percentage buttons work fine with text matching
+        # Generic fallbacks for SELL / SIDEBET when text search fails
+        'SELL': '#root > div > div.soapy-container.layout-horizontal.MuiBox-root.css-0 > div.soapy-container.MuiBox-root.css-0 > div > div._tradeControlsContainer_17syu_29 > div > div > div._buttonsRow_73g5s_247 > div:nth-child(2) > button, button[data-action=\"sell\"], button[class*=\"sell\"]',
+        'SIDEBET': '#root > div > div.soapy-container.layout-horizontal.MuiBox-root.css-0 > div.soapy-container.MuiBox-root.css-0 > div > div._tradeControlsContainer_17syu_29 > div > div > div._buttonsRow_73g5s_247 > div:nth-child(3) > button, button[data-action=\"sidebet\"], button[class*=\"sidebet\"], button[class*=\"side-bet\"]',
+        # Note: Increment and percentage buttons generally work with text matching
     }
 
     def __init__(self):
@@ -165,8 +170,18 @@ class BrowserBridge:
 
     def _queue_action(self, action: dict):
         """Queue an action for the async loop"""
-        if not self._running or not self._loop:
+        if not self._running:
             logger.warning("Bridge not running, cannot queue action")
+            return
+
+        # Wait briefly for loop to initialize after start_async_loop
+        if not self._loop:
+            for _ in range(10):  # up to ~0.5s
+                time.sleep(0.05)
+                if self._loop:
+                    break
+        if not self._loop or not self._action_queue:
+            logger.warning("Bridge loop not ready, dropping action: %s", action.get('type'))
             return
 
         # Thread-safe queue put
@@ -190,6 +205,15 @@ class BrowserBridge:
 
         self._set_status(BridgeStatus.CONNECTING)
         self._queue_action({'type': 'connect'})
+
+    def connect_async(self):
+        """
+        Backwards-compatible alias for connect().
+
+        Some callers still expect connect_async; this simply delegates to
+        the non-blocking connect() to avoid runtime AttributeError.
+        """
+        self.connect()
 
     def disconnect(self):
         """
@@ -276,9 +300,6 @@ class BrowserBridge:
         """Actually connect to browser (async)"""
         try:
             # Import here to avoid circular imports
-            import sys
-            from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).parent.parent.parent))
             from browser_automation.cdp_browser_manager import CDPBrowserManager
 
             self.cdp_manager = CDPBrowserManager()
@@ -331,46 +352,64 @@ class BrowserBridge:
             page = self.cdp_manager.page
 
             # Use JavaScript to find and click the button
-            # Priority: exact match > starts with > contains (for uniqueness)
-            # AUDIT FIX: Better visibility check that handles position:fixed elements
-            clicked = await page.evaluate(f"""() => {{
-                const allButtons = Array.from(document.querySelectorAll('button'));
+            # Priority: normalized text -> data-action/aria -> class hints -> CSS fallback
+            clicked = await page.evaluate(f"""(selectorQuery) => {{
+                const allButtons = Array.from(document.querySelectorAll(selectorQuery));
 
-                // AUDIT FIX: Improved visibility check
-                // offsetParent is null for position:fixed elements, so we need a better check
+                const normalize = (txt = '') => txt.replace(/\\s+/g, '').toUpperCase();
+
+                // AUDIT FIX: Improved visibility check (handles position:fixed)
                 const isVisible = (el) => {{
                     const style = window.getComputedStyle(el);
                     const rect = el.getBoundingClientRect();
                     return style.display !== 'none' &&
                            style.visibility !== 'hidden' &&
                            rect.width > 0 &&
-                           rect.height > 0;
+                           rect.height > 0 &&
+                           style.pointerEvents !== 'none';
                 }};
 
                 const buttons = allButtons.filter(isVisible);
-                const searchText = '{button}';
+                const searchText = {json.dumps(button)};
+                const normalizedTarget = normalize(searchText);
 
-                // Try exact match first
-                let target = buttons.find(b => b.textContent.trim() === searchText);
-
-                // If no exact match, try finding button that starts with the text
-                // (useful for BUY button which shows "BUY+0.030 SOL")
+                // 1) Exact / startswith / contains on normalized text (handles "SIDE BET" vs "SIDEBET")
+                let target = buttons.find(b => normalize(b.textContent || '') === normalizedTarget);
                 if (!target) {{
-                    target = buttons.find(b => b.textContent.trim().startsWith(searchText));
+                    target = buttons.find(b => normalize(b.textContent || '').startsWith(normalizedTarget));
+                }}
+                if (!target && searchText.length > 1) {{
+                    target = buttons.find(b => normalize(b.textContent || '').includes(normalizedTarget));
                 }}
 
-                // Last resort: contains (but be careful with ambiguous matches)
-                // Skip contains for single-char buttons like 'X' to avoid X2 match
-                if (!target && searchText.length > 1) {{
-                    target = buttons.find(b => b.textContent.includes(searchText));
+                // 2) data-action / aria-label / data-testid fallbacks
+                if (!target) {{
+                    target = buttons.find(b => normalize(b.getAttribute('data-action') || '') === normalizedTarget);
+                }}
+                if (!target) {{
+                    target = buttons.find(b => normalize(b.getAttribute('aria-label') || '') === normalizedTarget);
+                }}
+                if (!target) {{
+                    target = buttons.find(b => normalize(b.getAttribute('data-testid') || '') === normalizedTarget);
+                }}
+                if (!target) {{
+                    target = buttons.find(b => normalize(b.getAttribute('data-qa') || '') === normalizedTarget);
+                }}
+
+                // 3) Class name hint (e.g., btn-sell, btn-sidebet)
+                if (!target) {{
+                    target = buttons.find(b => {{
+                        const classes = (b.className || '').split(/\\s+/).map(normalize);
+                        return classes.some(c => c === normalizedTarget || c.includes(normalizedTarget));
+                    }});
                 }}
 
                 if (target) {{
                     target.click();
-                    return {{ success: true, text: target.textContent.trim(), method: 'text' }};
+                    return {{ success: true, text: (target.textContent || '').trim(), method: 'text' }};
                 }}
-                return {{ success: false, availableButtons: buttons.slice(0, 15).map(b => b.textContent.trim().substring(0, 30)) }};
-            }}""")
+                return {{ success: false, availableButtons: buttons.slice(0, 15).map(b => (b.textContent || '').trim().substring(0, 30)) }};
+            }}""", "button, [role=\"button\"], [data-action], [data-testid], [data-qa], [class*=\"button\" i], [class*=\"Button\" i]")
 
             if clicked.get('success'):
                 logger.debug(f"Browser: Clicked '{button}' (found: '{clicked.get('text')}')")
@@ -382,7 +421,7 @@ class BrowserBridge:
                 logger.info(f"Browser: Text search failed for '{button}', trying CSS selector")
 
                 css_clicked = await page.evaluate(f"""() => {{
-                    const selector = `{selector}`;
+                    const selector = {json.dumps(selector)};
                     const element = document.querySelector(selector);
 
                     if (element) {{
@@ -407,17 +446,21 @@ class BrowserBridge:
 
 
 # Singleton instance for global access
-# AUDIT FIX: Thread-safe singleton pattern
+# PHASE 2 FIX: Corrected thread-safe singleton pattern
 _bridge_instance: Optional[BrowserBridge] = None
 _bridge_lock = threading.Lock()
 
 
 def get_browser_bridge() -> BrowserBridge:
-    """Get or create the singleton browser bridge instance (thread-safe)"""
+    """
+    Get or create the singleton browser bridge instance (thread-safe).
+
+    PHASE 2 FIX: Always acquire lock before checking instance.
+    The previous double-check pattern had a race window where the first
+    check outside the lock could see a partially constructed object.
+    """
     global _bridge_instance
-    if _bridge_instance is None:
-        with _bridge_lock:
-            # Double-check locking pattern
-            if _bridge_instance is None:
-                _bridge_instance = BrowserBridge()
-    return _bridge_instance
+    with _bridge_lock:
+        if _bridge_instance is None:
+            _bridge_instance = BrowserBridge()
+        return _bridge_instance

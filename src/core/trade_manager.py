@@ -46,12 +46,12 @@ class TradeManager:
         Returns:
             Result dictionary with success, reason, and new state
         """
-        tick = self.state.current_tick
+        tick = self.state.get_current_tick()
         if not tick:
             return self._error_result("No active game", "BUY")
 
         # Validate
-        is_valid, error = validate_buy(amount, self.state.balance, tick, self.state.has_active_position())
+        is_valid, error = validate_buy(amount, self.state.get("balance"), tick, self.state.get("position") is not None)
         if not is_valid:
             return self._error_result(error, "BUY")
 
@@ -99,19 +99,19 @@ class TradeManager:
         Returns:
             Result dictionary with success, reason, and P&L
         """
-        tick = self.state.current_tick
+        tick = self.state.get_current_tick()
         if not tick:
             return self._error_result("No active game", "SELL")
 
         # Validate
-        is_valid, error = validate_sell(self.state.has_active_position(), tick)
+        is_valid, error = validate_sell(self.state.get("position") is not None, tick)
         if not is_valid:
             return self._error_result(error, "SELL")
 
         # Get position info before closing
-        position = self.state.active_position
-        entry_price = position.entry_price
-        original_amount = position.amount
+        position = self.state.get("position")
+        entry_price = position['entry_price']
+        original_amount = position['amount']
 
         # Phase 8.1: Get current sell percentage
         sell_percentage = self.state.get_sell_percentage()
@@ -120,7 +120,9 @@ class TradeManager:
         amount_sold = original_amount * sell_percentage
 
         # Calculate P&L for the portion being sold
-        pnl_sol, pnl_percent = position.calculate_unrealized_pnl(tick.price)
+        price_change = tick.price / entry_price - Decimal('1')
+        pnl_sol = original_amount * price_change
+        pnl_percent = price_change * Decimal('100')
         # Adjust P&L for partial sell
         pnl_sol = pnl_sol * sell_percentage
 
@@ -212,17 +214,17 @@ class TradeManager:
         Returns:
             Result dictionary with success and details
         """
-        tick = self.state.current_tick
+        tick = self.state.get_current_tick()
         if not tick:
             return self._error_result("No active game", "SIDEBET")
 
         # Validate
         is_valid, error = validate_sidebet(
             amount,
-            self.state.balance,
+            self.state.get("balance"),
             tick,
-            self.state.has_active_sidebet(),
-            self.state._last_sidebet_resolved_tick
+            self.state.get("sidebet") is not None,
+            self.state.get("last_sidebet_resolved_tick")
         )
         if not is_valid:
             return self._error_result(error, "SIDEBET")
@@ -234,7 +236,7 @@ class TradeManager:
             return self._error_result("Failed to place sidebet", "SIDEBET")
 
         # Publish event
-        potential_win = amount * config.SIDEBET_MULTIPLIER
+        potential_win = amount * config.GAME_RULES['sidebet_multiplier']
         event_bus.publish(Events.TRADE_SIDEBET, {
             'amount': float(amount),
             'placed_tick': tick.tick,
@@ -274,24 +276,25 @@ class TradeManager:
         })
 
         # Check if we have active sidebet
-        if not self.state.has_active_sidebet():
+        # AUDIT FIX: Simplified double-negative logic
+        if self.state.get("sidebet") is None:
             return
 
-        sidebet = self.state.active_sidebet
+        sidebet = self.state.get("sidebet")
         ticks_since_placed = tick.tick - sidebet.placed_tick
 
         # Check if within window
-        if ticks_since_placed <= config.SIDEBET_WINDOW_TICKS:
+        if ticks_since_placed <= config.GAME_RULES['sidebet_window_ticks']:
             # WON sidebet (resolve_sidebet will update balance automatically)
             self.state.resolve_sidebet(won=True, tick=tick.tick)
 
-            payout = sidebet.amount * config.SIDEBET_MULTIPLIER
+            payout = sidebet.amount * config.GAME_RULES['sidebet_multiplier']
             logger.info(f"SIDEBET WON: {payout} SOL (placed at tick {sidebet.placed_tick}, rugged at {tick.tick})")
         else:
             # LOST sidebet (rugged after window)
             self.state.resolve_sidebet(won=False, tick=tick.tick)
 
-            logger.info(f"SIDEBET LOST: Rugged after {ticks_since_placed} ticks (window: {config.SIDEBET_WINDOW_TICKS})")
+            logger.info(f"SIDEBET LOST: Rugged after {ticks_since_placed} ticks (window: {config.GAME_RULES['sidebet_window_ticks']})")
 
     def check_sidebet_expiry(self, tick: GameTick):
         """
@@ -300,19 +303,20 @@ class TradeManager:
         Args:
             tick: Current game tick
         """
-        if not self.state.has_active_sidebet():
+        # AUDIT FIX: Simplified double-negative logic
+        if self.state.get("sidebet") is None:
             return
 
-        sidebet = self.state.active_sidebet
+        sidebet = self.state.get("sidebet")
         ticks_since_placed = tick.tick - sidebet.placed_tick
-        expiry_tick = sidebet.placed_tick + config.SIDEBET_WINDOW_TICKS
+        expiry_tick = sidebet.placed_tick + config.GAME_RULES['sidebet_window_ticks']
 
         # Check if expired
         if tick.tick > expiry_tick:
             # LOST sidebet (expired without rug)
             self.state.resolve_sidebet(won=False, tick=tick.tick)
 
-            logger.info(f"SIDEBET EXPIRED: Lost {sidebet.amount} SOL (no rug in {config.SIDEBET_WINDOW_TICKS} ticks)")
+            logger.info(f"SIDEBET EXPIRED: Lost {sidebet.amount} SOL (no rug in {config.GAME_RULES['sidebet_window_ticks']} ticks)")
 
     # ========================================================================
     # HELPER METHODS
@@ -335,7 +339,7 @@ class TradeManager:
             'price': float(price),
             'tick': tick.tick,
             'phase': tick.phase,
-            'new_balance': float(self.state.balance),
+            'new_balance': float(self.state.get("balance")),
             'balance_change': float(balance_change),
             'reason': f'{action} executed successfully'
         }
@@ -348,5 +352,5 @@ class TradeManager:
             'success': False,
             'action': action,
             'reason': reason,
-            'balance': float(self.state.balance)
+            'balance': float(self.state.get("balance"))
         }

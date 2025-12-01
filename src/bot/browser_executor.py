@@ -19,14 +19,21 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from decimal import Decimal
-from dataclasses import dataclass, field
 
-# Add repository root to path for browser_automation imports
-_repo_root = Path(__file__).parent.parent.parent  # src/bot -> src -> repo root
-if str(_repo_root) not in sys.path:
-    sys.path.insert(0, str(_repo_root))
+# Phase 1 Refactoring: Extracted modules
+from bot.browser_timing import ExecutionTiming, TimingMetrics
+from bot.browser_selectors import (
+    BUY_BUTTON_SELECTORS,
+    SELL_BUTTON_SELECTORS,
+    SIDEBET_BUTTON_SELECTORS,
+    BET_AMOUNT_INPUT_SELECTORS,
+    INCREMENT_SELECTOR_MAP,
+    PERCENTAGE_TEXT_MAP,
+    BALANCE_SELECTORS,
+    POSITION_SELECTORS,
+)
 
 # Phase 9.1: Use CDP Browser Manager for reliable wallet persistence
 try:
@@ -52,93 +59,7 @@ BROWSER_MANAGER_AVAILABLE = CDP_MANAGER_AVAILABLE or LEGACY_MANAGER_AVAILABLE
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ExecutionTiming:
-    """
-    Timing metrics for a single action execution
-
-    Phase 8.6: Tracks realistic execution delays
-    """
-    action: str  # BUY, SELL, SIDEBET
-    decision_time: float  # When bot decided to act
-    click_time: float  # When click was sent
-    confirmation_time: float  # When state change confirmed
-    success: bool  # Whether execution succeeded
-
-    @property
-    def decision_to_click_ms(self) -> float:
-        """Time from decision to click (milliseconds)"""
-        return (self.click_time - self.decision_time) * 1000
-
-    @property
-    def click_to_confirmation_ms(self) -> float:
-        """Time from click to confirmation (milliseconds)"""
-        return (self.confirmation_time - self.click_time) * 1000
-
-    @property
-    def total_delay_ms(self) -> float:
-        """Total execution delay (milliseconds)"""
-        return (self.confirmation_time - self.decision_time) * 1000
-
-
-@dataclass
-class TimingMetrics:
-    """
-    Aggregated timing metrics for bot performance tracking
-
-    Phase 8.6: Statistical analysis of execution timing
-    """
-    executions: List[ExecutionTiming] = field(default_factory=list)
-    max_history: int = 100  # Keep last 100 executions
-
-    def add_execution(self, timing: ExecutionTiming) -> None:
-        """Add execution timing (bounded to max_history)"""
-        self.executions.append(timing)
-        if len(self.executions) > self.max_history:
-            self.executions.pop(0)  # Remove oldest
-
-    def get_stats(self) -> Dict[str, Any]:
-        """Calculate timing statistics"""
-        if not self.executions:
-            return {
-                'total_executions': 0,
-                'success_rate': 0.0,
-                'avg_total_delay_ms': 0.0,
-                'avg_click_delay_ms': 0.0,
-                'avg_confirmation_delay_ms': 0.0,
-                'p50_total_delay_ms': 0.0,
-                'p95_total_delay_ms': 0.0,
-            }
-
-        successful = [e for e in self.executions if e.success]
-        total_delays = [e.total_delay_ms for e in successful]
-        click_delays = [e.decision_to_click_ms for e in successful]
-        confirm_delays = [e.click_to_confirmation_ms for e in successful]
-
-        # Calculate percentiles safely (avoid index out of bounds)
-        if total_delays:
-            sorted_delays = sorted(total_delays)
-            n = len(sorted_delays)
-            # P50: Use index n//2, bounded to [0, n-1]
-            p50_index = max(0, min(n // 2, n - 1))
-            p50_value = sorted_delays[p50_index]
-            # P95: Use index int(n * 0.95), bounded to [0, n-1]
-            p95_index = max(0, min(int(n * 0.95), n - 1))
-            p95_value = sorted_delays[p95_index]
-        else:
-            p50_value = 0.0
-            p95_value = 0.0
-
-        return {
-            'total_executions': len(self.executions),
-            'successful_executions': len(successful),
-            'success_rate': len(successful) / len(self.executions),
-            'avg_total_delay_ms': sum(total_delays) / len(total_delays) if total_delays else 0.0,
-            'avg_click_delay_ms': sum(click_delays) / len(click_delays) if click_delays else 0.0,
-            'avg_confirmation_delay_ms': sum(confirm_delays) / len(confirm_delays) if confirm_delays else 0.0,
-            'p50_total_delay_ms': p50_value,
-            'p95_total_delay_ms': p95_value,
-        }
+# Note: ExecutionTiming and TimingMetrics moved to browser_timing.py (Phase 1 refactoring)
 
 
 class BrowserExecutor:
@@ -151,82 +72,15 @@ class BrowserExecutor:
     - Reads game state from browser (balance, position, price)
     - Validates execution (checks state changed)
     - Handles errors and retries
+
+    Phase 1 Refactoring:
+    - Selectors moved to browser_selectors.py
+    - Timing classes moved to browser_timing.py
+    - Action methods documented in browser_actions.py (reference)
+    - State reader methods documented in browser_state_reader.py (reference)
     """
 
-    # Button selectors for Rugs.fun (multiple fallbacks for robustness)
-    BUY_BUTTON_SELECTORS = [
-        'button:has-text("BUY")',
-        'button:has-text("Buy")',
-        'button[class*="buy"]',
-        '[data-action="buy"]',
-    ]
-
-    SELL_BUTTON_SELECTORS = [
-        'button:has-text("SELL")',
-        'button:has-text("Sell")',
-        'button[class*="sell"]',
-        '[data-action="sell"]',
-    ]
-
-    SIDEBET_BUTTON_SELECTORS = [
-        'button:has-text("SIDEBET")',
-        'button:has-text("Sidebet")',
-        'button:has-text("Side Bet")',
-        'button[class*="sidebet"]',
-        '[data-action="sidebet"]',
-    ]
-
-    BET_AMOUNT_INPUT_SELECTORS = [
-        'input[type="number"]',
-        'input[placeholder*="amount"]',
-        'input[class*="bet"]',
-        '[data-input="bet-amount"]',
-    ]
-
-    # Phase A.3: Increment button selectors for incremental clicking
-    CLEAR_BUTTON_SELECTORS = [
-        'button:has-text("X")',
-        'button[title*="clear"]',
-        '[data-action="clear-bet"]',
-    ]
-
-    INCREMENT_001_SELECTORS = [
-        'button:has-text("+0.001")',
-        'button[data-increment="0.001"]',
-    ]
-
-    INCREMENT_01_SELECTORS = [
-        'button:has-text("+0.01")',
-        'button[data-increment="0.01"]',
-    ]
-
-    INCREMENT_10_SELECTORS = [
-        'button:has-text("+0.1")',
-        'button[data-increment="0.1"]',
-    ]
-
-    INCREMENT_1_SELECTORS = [
-        'button:has-text("+1")',
-        'button[data-increment="1"]',
-    ]
-
-    HALF_BUTTON_SELECTORS = [
-        'button:has-text("1/2")',
-        'button:has-text("÷2")',
-        'button[data-action="half"]',
-    ]
-
-    DOUBLE_BUTTON_SELECTORS = [
-        'button:has-text("X2")',
-        'button:has-text("×2")',
-        'button[data-action="double"]',
-    ]
-
-    MAX_BUTTON_SELECTORS = [
-        'button:has-text("MAX")',
-        'button:has-text("All")',
-        'button[data-action="max"]',
-    ]
+    # Note: Selectors moved to browser_selectors.py (Phase 1 refactoring)
 
     def __init__(self, profile_name: str = "rugs_bot", use_cdp: bool = True):
         """
@@ -268,6 +122,13 @@ class BrowserExecutor:
         self.browser_start_timeout = 30.0  # seconds
         self.browser_stop_timeout = 10.0  # seconds
         self.click_timeout = 10.0  # seconds
+
+        # AUDIT FIX Phase 2.4: Reconnection configuration
+        self.reconnect_max_attempts = 5
+        self.reconnect_base_delay = 1.0  # seconds
+        self.reconnect_max_delay = 30.0  # seconds
+        self._reconnect_attempt = 0
+        self._is_reconnecting = False
 
         mode = "CDP" if self.use_cdp else "Legacy"
         logger.info(f"BrowserExecutor initialized ({mode} mode, profile: {profile_name})")
@@ -472,6 +333,102 @@ class BrowserExecutor:
         return None
 
     # ========================================================================
+    # AUDIT FIX Phase 2.4: BROWSER RECONNECTION LOGIC
+    # ========================================================================
+
+    async def ensure_connected(self) -> bool:
+        """
+        Ensure browser is connected, attempting reconnection if needed.
+
+        AUDIT FIX Phase 2.4: Added to handle dropped connections gracefully.
+        Uses exponential backoff for reconnection attempts.
+
+        Returns:
+            True if connected (or successfully reconnected), False otherwise
+        """
+        if self.is_ready():
+            # Reset reconnect counter on successful connection
+            self._reconnect_attempt = 0
+            return True
+
+        # Already in the process of reconnecting
+        if self._is_reconnecting:
+            logger.debug("Reconnection already in progress")
+            return False
+
+        # Attempt reconnection
+        return await self._attempt_reconnect()
+
+    async def _attempt_reconnect(self) -> bool:
+        """
+        Attempt to reconnect to browser with exponential backoff.
+
+        AUDIT FIX Phase 2.4: Implements robust reconnection with:
+        - Exponential backoff (1s, 2s, 4s, 8s, 16s, max 30s)
+        - Maximum attempts limit (5 by default)
+        - Graceful failure logging
+
+        Returns:
+            True if reconnection successful, False otherwise
+        """
+        if self._reconnect_attempt >= self.reconnect_max_attempts:
+            logger.error(
+                f"Max reconnection attempts ({self.reconnect_max_attempts}) reached. "
+                f"Browser connection lost."
+            )
+            return False
+
+        self._is_reconnecting = True
+
+        try:
+            self._reconnect_attempt += 1
+
+            # Calculate delay with exponential backoff
+            delay = min(
+                self.reconnect_base_delay * (2 ** (self._reconnect_attempt - 1)),
+                self.reconnect_max_delay
+            )
+
+            logger.warning(
+                f"Browser connection lost. Reconnection attempt "
+                f"{self._reconnect_attempt}/{self.reconnect_max_attempts} "
+                f"in {delay:.1f}s..."
+            )
+
+            await asyncio.sleep(delay)
+
+            # First, clean up any stale connection
+            await self.stop_browser()
+
+            # Attempt to reconnect
+            success = await self.start_browser()
+
+            if success:
+                logger.info(
+                    f"Reconnection successful after {self._reconnect_attempt} attempt(s)"
+                )
+                self._reconnect_attempt = 0
+                return True
+            else:
+                logger.warning(
+                    f"Reconnection attempt {self._reconnect_attempt} failed"
+                )
+                return False
+
+        except Exception as e:
+            logger.error(f"Reconnection error: {e}", exc_info=True)
+            return False
+
+        finally:
+            self._is_reconnecting = False
+
+    def reset_reconnect_counter(self):
+        """Reset the reconnection attempt counter (call after successful manual reconnect)"""
+        self._reconnect_attempt = 0
+        self._is_reconnecting = False
+        logger.debug("Reconnection counter reset")
+
+    # ========================================================================
     # BROWSER ACTION METHODS (Phase 8.5)
     # ========================================================================
 
@@ -489,8 +446,9 @@ class BrowserExecutor:
             True if successful, False otherwise
         """
         try:
-            if not self.is_ready():
-                logger.error("Browser not ready for BUY action")
+            # AUDIT FIX Phase 2.4: Use ensure_connected for auto-reconnect
+            if not await self.ensure_connected():
+                logger.error("Browser not ready for BUY action (reconnection failed)")
                 return False
 
             page = self.page  # Use property (CDP or legacy)
@@ -502,7 +460,7 @@ class BrowserExecutor:
                     return False
 
             # Find and click BUY button
-            for selector in self.BUY_BUTTON_SELECTORS:
+            for selector in BUY_BUTTON_SELECTORS:
                 try:
                     button = await page.wait_for_selector(
                         selector,
@@ -538,8 +496,9 @@ class BrowserExecutor:
             True if successful, False otherwise
         """
         try:
-            if not self.is_ready():
-                logger.error("Browser not ready for SELL action")
+            # AUDIT FIX Phase 2.4: Use ensure_connected for auto-reconnect
+            if not await self.ensure_connected():
+                logger.error("Browser not ready for SELL action (reconnection failed)")
                 return False
 
             page = self.page  # Use property (CDP or legacy)
@@ -551,7 +510,7 @@ class BrowserExecutor:
                     return False
 
             # Find and click SELL button
-            for selector in self.SELL_BUTTON_SELECTORS:
+            for selector in SELL_BUTTON_SELECTORS:
                 try:
                     button = await page.wait_for_selector(
                         selector,
@@ -591,8 +550,9 @@ class BrowserExecutor:
             True if successful, False otherwise
         """
         try:
-            if not self.is_ready():
-                logger.error("Browser not ready for SIDEBET action")
+            # AUDIT FIX Phase 2.4: Use ensure_connected for auto-reconnect
+            if not await self.ensure_connected():
+                logger.error("Browser not ready for SIDEBET action (reconnection failed)")
                 return False
 
             page = self.page  # Use property (CDP or legacy)
@@ -604,7 +564,7 @@ class BrowserExecutor:
                     return False
 
             # Find and click SIDEBET button
-            for selector in self.SIDEBET_BUTTON_SELECTORS:
+            for selector in SIDEBET_BUTTON_SELECTORS:
                 try:
                     button = await page.wait_for_selector(
                         selector,
@@ -647,7 +607,7 @@ class BrowserExecutor:
             page = self.page  # Use property (CDP or legacy)
 
             # Find bet amount input
-            for selector in self.BET_AMOUNT_INPUT_SELECTORS:
+            for selector in BET_AMOUNT_INPUT_SELECTORS:
                 try:
                     input_field = await page.wait_for_selector(
                         selector,
@@ -743,26 +703,16 @@ class BrowserExecutor:
         Example:
             _click_increment_button_in_browser('+0.001', 3)  # 0.0 → 0.003
         """
-        if not self.is_ready():
-            logger.error("Browser not ready for button clicking")
+        # AUDIT FIX Phase 2.4: Use ensure_connected for auto-reconnect
+        if not await self.ensure_connected():
+            logger.error("Browser not ready for button clicking (reconnection failed)")
             return False
 
         try:
             page = self.page  # Use property (CDP or legacy)
 
-            # Map button type to selectors
-            selector_map = {
-                'X': self.CLEAR_BUTTON_SELECTORS,
-                '+0.001': self.INCREMENT_001_SELECTORS,
-                '+0.01': self.INCREMENT_01_SELECTORS,
-                '+0.1': self.INCREMENT_10_SELECTORS,
-                '+1': self.INCREMENT_1_SELECTORS,
-                '1/2': self.HALF_BUTTON_SELECTORS,
-                'X2': self.DOUBLE_BUTTON_SELECTORS,
-                'MAX': self.MAX_BUTTON_SELECTORS,
-            }
-
-            selectors = selector_map.get(button_type)
+            # Use centralized selector map from browser_selectors module
+            selectors = INCREMENT_SELECTOR_MAP.get(button_type)
             if not selectors:
                 logger.error(f"Unknown button type: {button_type}")
                 return False

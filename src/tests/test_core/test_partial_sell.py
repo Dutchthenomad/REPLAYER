@@ -150,7 +150,7 @@ class TestPartialClosePosition:
         """Test partially closing 10% of position"""
         # Open position
         game_state.open_position(sample_position)
-        initial_balance = game_state.balance
+        initial_balance = game_state.get('balance')
 
         # Partially close 10% at 2.0x (100% profit)
         result = game_state.partial_close_position(
@@ -163,8 +163,8 @@ class TestPartialClosePosition:
         assert result['percentage'] == Decimal('0.1')
         assert result['amount_sold'] == Decimal('0.001')  # 10% of 0.01
         assert result['remaining_amount'] == Decimal('0.009')
-        assert game_state.has_active_position() == True
-        assert game_state.active_position.amount == Decimal('0.009')
+        assert game_state.get('position') is not None
+        assert game_state.get('position')['amount'] == Decimal('0.009')
 
         # Check P&L calculation (10% of position, 100% profit)
         assert result['pnl_sol'] == Decimal('0.001')  # 0.001 SOL profit
@@ -184,7 +184,7 @@ class TestPartialClosePosition:
         assert result['percentage'] == Decimal('0.5')
         assert result['amount_sold'] == Decimal('0.005')  # 50% of 0.01
         assert result['remaining_amount'] == Decimal('0.005')
-        assert game_state.active_position.amount == Decimal('0.005')
+        assert game_state.get('position')['amount'] == Decimal('0.005')
 
         # Check P&L (50% of position, 50% profit)
         assert result['pnl_sol'] == Decimal('0.0025')
@@ -202,8 +202,7 @@ class TestPartialClosePosition:
 
         # Should fully close position
         assert result is not None
-        assert game_state.has_active_position() == False
-        assert game_state.active_position is None
+        assert game_state.get('position') is None
 
     def test_partial_close_no_active_position_returns_none(self, game_state):
         """Test partial close with no active position returns None"""
@@ -227,12 +226,12 @@ class TestPartialClosePosition:
 
         assert result is None
         # Position should remain unchanged
-        assert game_state.active_position.amount == sample_position.amount
+        assert game_state.get('position')['amount'] == sample_position.amount
 
     def test_partial_close_updates_balance(self, game_state, sample_position):
         """Test partial close updates balance correctly"""
         game_state.open_position(sample_position)
-        balance_before = game_state.balance
+        balance_before = game_state.get('balance')
 
         # Partial close 50% at 2.0x (100% profit)
         game_state.partial_close_position(
@@ -243,7 +242,7 @@ class TestPartialClosePosition:
 
         # Expected proceeds: 0.005 SOL * 2.0x = 0.01 SOL
         expected_balance = balance_before + Decimal('0.01')
-        assert game_state.balance == expected_balance
+        assert game_state.get('balance') == expected_balance
 
     def test_partial_close_emits_position_reduced_event(self, game_state, sample_position):
         """Test partial close emits POSITION_REDUCED event"""
@@ -271,7 +270,6 @@ class TestTradeManagerPartialSell:
     def test_execute_sell_with_100_percent(self, game_state, trade_manager, sample_tick):
         """Test execute_sell with 100% sell percentage (full close)"""
         # Setup
-        game_state.current_tick = sample_tick
         game_state.open_position(Position(
             entry_price=Decimal('1.0'),
             amount=Decimal('0.01'),
@@ -280,8 +278,7 @@ class TestTradeManagerPartialSell:
         ))
 
         # Execute sell at 2.0x (100% profit)
-        game_state.update(current_tick=10, current_price=Decimal('2.0'))
-        game_state.current_tick = sample_tick
+        game_state.update(current_tick=10, current_price=Decimal('2.0'), game_active=True)
         sample_tick.price = Decimal('2.0')
         game_state.set_sell_percentage(Decimal('1.0'))
 
@@ -290,12 +287,11 @@ class TestTradeManagerPartialSell:
         assert result['success'] == True
         assert result['partial'] == False
         assert result['amount'] == 0.01  # Float in result dict
-        assert game_state.has_active_position() == False
+        assert game_state.get('position') is None
 
     def test_execute_sell_with_50_percent(self, game_state, trade_manager, sample_tick):
         """Test execute_sell with 50% sell percentage"""
         # Setup
-        game_state.current_tick = sample_tick
         game_state.open_position(Position(
             entry_price=Decimal('1.0'),
             amount=Decimal('0.01'),
@@ -304,6 +300,7 @@ class TestTradeManagerPartialSell:
         ))
 
         # Execute partial sell
+        game_state.update(current_tick=10, current_price=Decimal('2.0'), game_active=True)
         sample_tick.price = Decimal('2.0')
         game_state.set_sell_percentage(Decimal('0.5'))
 
@@ -314,12 +311,11 @@ class TestTradeManagerPartialSell:
         assert result['percentage'] == Decimal('0.5')
         assert result['amount'] == 0.005  # Float in result dict (50% of 0.01)
         assert result['remaining_amount'] == Decimal('0.005')
-        assert game_state.has_active_position() == True
+        assert game_state.get('position') is not None
 
     def test_execute_sell_with_25_percent(self, game_state, trade_manager, sample_tick):
         """Test execute_sell with 25% sell percentage"""
         # Setup
-        game_state.current_tick = sample_tick
         game_state.open_position(Position(
             entry_price=Decimal('1.0'),
             amount=Decimal('0.020'),
@@ -328,6 +324,7 @@ class TestTradeManagerPartialSell:
         ))
 
         # Execute partial sell
+        game_state.update(current_tick=10, current_price=Decimal('1.5'), game_active=True)
         sample_tick.price = Decimal('1.5')
         game_state.set_sell_percentage(Decimal('0.25'))
 
@@ -348,7 +345,6 @@ class TestTradeManagerPartialSell:
         event_bus.subscribe(Events.TRADE_SELL, handler, weak=False)
 
         # Setup partial sell
-        game_state.current_tick = sample_tick
         game_state.open_position(Position(
             entry_price=Decimal('1.0'),
             amount=Decimal('0.01'),
@@ -356,6 +352,7 @@ class TestTradeManagerPartialSell:
             entry_tick=0
         ))
 
+        game_state.update(current_tick=10, current_price=Decimal('1.5'), game_active=True)
         sample_tick.price = Decimal('1.5')
         game_state.set_sell_percentage(Decimal('0.5'))
 
@@ -377,7 +374,6 @@ class TestPartialSellIntegration:
     def test_multiple_partial_sells(self, game_state, trade_manager, sample_tick):
         """Test multiple sequential partial sells"""
         # Setup
-        game_state.current_tick = sample_tick
         game_state.open_position(Position(
             entry_price=Decimal('1.0'),
             amount=Decimal('0.100'),
@@ -386,25 +382,28 @@ class TestPartialSellIntegration:
         ))
 
         # First partial sell: 25%
+        game_state.update(current_tick=10, current_price=Decimal('1.5'), game_active=True)
         sample_tick.price = Decimal('1.5')
         game_state.set_sell_percentage(Decimal('0.25'))
         trade_manager.execute_sell()
 
-        assert game_state.active_position.amount == Decimal('0.075')
+        assert game_state.get('position')['amount'] == Decimal('0.075')
 
         # Second partial sell: 50% of remaining
+        game_state.update(current_tick=20, current_price=Decimal('2.0'), game_active=True)
         sample_tick.price = Decimal('2.0')
         game_state.set_sell_percentage(Decimal('0.5'))
         trade_manager.execute_sell()
 
-        assert game_state.active_position.amount == Decimal('0.0375')
+        assert game_state.get('position')['amount'] == Decimal('0.0375')
 
         # Third partial sell: 100% (close remaining)
+        game_state.update(current_tick=30, current_price=Decimal('2.5'), game_active=True)
         sample_tick.price = Decimal('2.5')
         game_state.set_sell_percentage(Decimal('1.0'))
         trade_manager.execute_sell()
 
-        assert game_state.has_active_position() == False
+        assert game_state.get('position') is None
 
     def test_sell_percentage_persists_across_sells(self, game_state):
         """Test that sell_percentage persists until explicitly changed"""

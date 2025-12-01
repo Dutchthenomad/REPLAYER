@@ -9,6 +9,7 @@ import threading
 import queue
 import logging
 import weakref
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -102,24 +103,46 @@ class EventBus:
             logger.info("EventBus started")
     
     def stop(self):
-        """Stop event processing"""
+        """
+        Stop event processing
+
+        AUDIT FIX: Improved shutdown with retry loop to prevent hangs.
+        Uses multiple attempts with queue draining to ensure sentinel delivery.
+        """
         if not self._processing:
             return
 
-        try:
-            self._queue.put(None, timeout=1)  # Sentinel to wake thread
-        except queue.Full:
-            # Drain one item to make space, then retry
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                pass
-            self._queue.put(None)
-
-        if self._thread:
-            self._thread.join(timeout=2)
-
+        # Signal processing to stop (allows _process_events to exit on timeout)
         self._processing = False
+
+        # AUDIT FIX: Retry loop with timeout for reliable sentinel insertion
+        max_attempts = 10
+        sentinel_sent = False
+
+        for attempt in range(max_attempts):
+            try:
+                self._queue.put(None, timeout=0.2)  # Sentinel to wake thread
+                sentinel_sent = True
+                break
+            except queue.Full:
+                # Drain one item to make space, then retry
+                try:
+                    self._queue.get_nowait()
+                    logger.debug(f"Drained queue item on shutdown attempt {attempt + 1}")
+                except queue.Empty:
+                    pass
+                # Small delay before retry
+                time.sleep(0.05)
+
+        if not sentinel_sent:
+            logger.warning("Failed to send shutdown sentinel after max attempts")
+
+        # Wait for processing thread to finish
+        if self._thread:
+            self._thread.join(timeout=3.0)
+            if self._thread.is_alive():
+                logger.error("EventBus thread did not stop cleanly within timeout")
+
         logger.info("EventBus stopped")
     
     def subscribe(self, event: Events, callback: Callable, weak: bool = True):
