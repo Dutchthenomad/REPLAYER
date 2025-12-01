@@ -65,6 +65,21 @@ class Application:
             self.modern_ui = modern_ui
             self.logger.info(f"UI Style: {'modern' if modern_ui else 'standard'} (from command line)")
 
+        # PRODUCTION FIX: Validate configuration at startup
+        # Catches invalid settings before they cause runtime errors
+        try:
+            config.validate()
+            self.logger.info("Configuration validated successfully")
+        except Exception as e:
+            self.logger.critical(f"Configuration validation failed: {e}")
+            # Show error dialog before exiting
+            import tkinter.messagebox as messagebox
+            messagebox.showerror(
+                "Configuration Error",
+                f"Invalid configuration detected:\n\n{e}\n\nPlease check your config.py settings."
+            )
+            sys.exit(1)
+
         # Initialize core components
         self.config = config
         self.state = GameState(config.FINANCIAL['initial_balance'])

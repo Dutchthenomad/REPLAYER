@@ -86,13 +86,19 @@ class LiveFeedController:
             self.parent.live_feed = WebSocketFeed(log_level='WARN')
 
             # Register event handlers (THREAD-SAFE with root.after)
+            # PRODUCTION FIX: All handlers capture values via default arguments
+            # to prevent race conditions when signals arrive faster than processing
             @self.parent.live_feed.on('signal')
             def on_signal(signal):
-                # Marshal to Tkinter main thread
-                def process_signal():
+                # CRITICAL FIX: Create immutable snapshot to prevent race condition
+                # Without this, 'signal' could change before process_signal() runs
+                signal_snapshot = dict(signal) if hasattr(signal, 'items') else signal
+
+                # Marshal to Tkinter main thread with captured value
+                def process_signal(captured_signal=signal_snapshot):
                     try:
                         # Convert GameSignal to GameTick
-                        tick = self.parent.live_feed.signal_to_game_tick(signal)
+                        tick = self.parent.live_feed.signal_to_game_tick(captured_signal)
 
                         # Push to replay engine (auto-records if enabled)
                         self.replay_engine.push_tick(tick)
@@ -107,9 +113,12 @@ class LiveFeedController:
 
             @self.parent.live_feed.on('connected')
             def on_connected(info):
-                # Marshal to Tkinter main thread
-                def handle_connected():
-                    socket_id = info.get('socketId')
+                # PRODUCTION FIX: Capture info snapshot
+                info_snapshot = dict(info) if hasattr(info, 'items') else {'socketId': getattr(info, 'socketId', None)}
+
+                # Marshal to Tkinter main thread with captured value
+                def handle_connected(captured_info=info_snapshot):
+                    socket_id = captured_info.get('socketId')
 
                     # Skip first connection event (Socket ID not yet assigned)
                     # Socket.IO fires 'connect' twice during handshake - ignore the first one
@@ -132,12 +141,16 @@ class LiveFeedController:
 
             @self.parent.live_feed.on('disconnected')
             def on_disconnected(info):
-                # Marshal to Tkinter main thread
-                def handle_disconnected():
+                # PRODUCTION FIX: Capture info snapshot
+                info_snapshot = dict(info) if hasattr(info, 'items') else {}
+
+                # Marshal to Tkinter main thread with captured value
+                def handle_disconnected(captured_info=info_snapshot):
+                    reason = captured_info.get('reason', 'unknown')
                     self.parent.live_feed_connected = False
                     # Sync menu checkbox state (disconnected)
                     self.live_feed_var.set(False)
-                    self.log("❌ Live feed disconnected")
+                    self.log(f"❌ Live feed disconnected: {reason}")
                     if self.toast:
                         self.toast.show("Live feed disconnected", "error")
                     if hasattr(self.parent, 'phase_label'):
@@ -147,9 +160,12 @@ class LiveFeedController:
 
             @self.parent.live_feed.on('gameComplete')
             def on_game_complete(data):
-                # Marshal to Tkinter main thread
-                def handle_game_complete():
-                    game_num = data.get('gameNumber', 0)
+                # PRODUCTION FIX: Capture data snapshot
+                data_snapshot = dict(data) if hasattr(data, 'items') else {}
+
+                # Marshal to Tkinter main thread with captured value
+                def handle_game_complete(captured_data=data_snapshot):
+                    game_num = captured_data.get('gameNumber', 0)
                     self.log(f"💥 Game {game_num} complete")
 
                 self.root.after(0, handle_game_complete)

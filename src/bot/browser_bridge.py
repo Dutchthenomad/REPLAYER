@@ -1,35 +1,33 @@
 """
-Browser Bridge - Phase 9.3
+Browser Bridge - Phase 9.3 PRODUCTION FIX
 
 Bridges REPLAYER UI button clicks to the live browser game.
+
+CRITICAL FIXES (Audit 2025-11-30):
+1. Multi-strategy selector system (text -> contains -> CSS -> role-based)
+2. Proper visibility detection for position:fixed elements
+3. Timeout handling to prevent deadlocks
+4. Pre-click state verification
+5. Retry with exponential backoff
+6. Comprehensive logging for debugging
 
 When enabled, every button click in REPLAYER simultaneously executes
 in the live browser, enabling real trading with the same interface.
 
-Key Features:
-- Async-safe bridging (UI is Tkinter, browser is async)
-- One-way sync: UI -> Browser (browser is the "slave")
-- Non-blocking: UI never waits for browser response
-- Graceful degradation: If browser action fails, UI action still works
-
 Usage:
     bridge = BrowserBridge()
     await bridge.connect()  # Connect to browser
-
-    # When UI button clicked:
-    bridge.on_increment_clicked('+0.001')  # Async-queues browser click
-    bridge.on_buy_clicked()
-    bridge.on_sell_clicked()
+    bridge.on_buy_clicked()  # Async-queues browser click
 """
 
 import asyncio
-import json
 import logging
 import threading
 import time
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict, Any, List
 from decimal import Decimal
 from enum import Enum
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +38,117 @@ class BridgeStatus(Enum):
     CONNECTING = "connecting"
     CONNECTED = "connected"
     ERROR = "error"
-    RECONNECTING = "reconnecting"  # Reserved for future use / compatibility
+
+
+@dataclass
+class ClickResult:
+    """Result of a button click attempt"""
+    success: bool
+    method: str = ""  # Which selector strategy worked
+    button_text: str = ""  # Actual button text found
+    error: str = ""
+    attempt: int = 0
+
+
+class SelectorStrategy:
+    """
+    Multi-strategy selector system for robust button finding.
+
+    Priority order:
+    1. Starts-with text match (handles "BUY" -> "BUY+0.030 SOL")
+    2. Contains text match (backup)
+    3. CSS selector (structural fallback)
+    4. Role + text match (ARIA fallback)
+    5. Class name pattern match
+    """
+
+    # Primary selectors - starts-with matching for dynamic text
+    # These handle cases where button text is "BUY+0.030 SOL" but we search for "BUY"
+    BUTTON_TEXT_PATTERNS = {
+        'BUY': ['BUY', 'Buy', 'buy'],
+        'SELL': ['SELL', 'Sell', 'sell'],
+        'SIDEBET': ['SIDEBET', 'SIDE', 'Side', 'sidebet', 'side'],
+        'X': ['×', '✕', 'X', 'x', '✖'],  # Clear button variants
+        '+0.001': ['+0.001', '+ 0.001'],
+        '+0.01': ['+0.01', '+ 0.01'],
+        '+0.1': ['+0.1', '+ 0.1'],
+        '+1': ['+1', '+ 1'],
+        '1/2': ['1/2', '½', '0.5x', 'Half'],
+        'X2': ['X2', 'x2', '2x', '2X', 'Double'],
+        'MAX': ['MAX', 'Max', 'max', 'ALL'],
+        '10%': ['10%', '10 %'],
+        '25%': ['25%', '25 %'],
+        '50%': ['50%', '50 %'],
+        '100%': ['100%', '100 %', 'ALL'],
+    }
+
+    # CSS Selectors - structural fallback when text matching fails
+    # These are more brittle but work when text matching completely fails
+    # UPDATED: Include SELL and SIDEBET (missing in original)
+    BUTTON_CSS_SELECTORS = {
+        'BUY': [
+            # Primary: Button container with buy-related classes
+            'button[class*="buy" i]',
+            'button[class*="Buy" i]',
+            # Trade controls area - buy is typically first button
+            '[class*="tradeControls"] button:first-of-type',
+            '[class*="buttonsRow"] button:first-child',
+            # MUI specific patterns
+            '.MuiButton-root[class*="buy" i]',
+            # Data attribute fallback
+            '[data-action="buy"]',
+            '[data-testid="buy-button"]',
+        ],
+        'SELL': [
+            'button[class*="sell" i]',
+            'button[class*="Sell" i]',
+            # Sell is typically second button in trade controls
+            '[class*="tradeControls"] button:nth-of-type(2)',
+            '[class*="buttonsRow"] button:nth-child(2)',
+            '.MuiButton-root[class*="sell" i]',
+            '[data-action="sell"]',
+            '[data-testid="sell-button"]',
+        ],
+        'SIDEBET': [
+            'button[class*="side" i]',
+            'button[class*="Side" i]',
+            'button[class*="sidebet" i]',
+            # Sidebet is typically third button
+            '[class*="tradeControls"] button:nth-of-type(3)',
+            '[class*="buttonsRow"] button:nth-child(3)',
+            '[data-action="sidebet"]',
+            '[data-action="side"]',
+            '[data-testid="sidebet-button"]',
+        ],
+        'X': [
+            # Clear button near input
+            'button[class*="clear" i]',
+            'input[type="number"] ~ button',
+            '[class*="inputGroup"] button:last-child',
+        ],
+    }
+
+    # Class name patterns for fallback matching
+    CLASS_PATTERNS = {
+        'BUY': ['buy', 'purchase', 'long', 'bid'],
+        'SELL': ['sell', 'exit', 'short', 'ask'],
+        'SIDEBET': ['side', 'sidebet', 'hedge', 'insurance'],
+    }
+
+    @classmethod
+    def get_text_patterns(cls, button: str) -> List[str]:
+        """Get text patterns for a button"""
+        return cls.BUTTON_TEXT_PATTERNS.get(button, [button])
+
+    @classmethod
+    def get_css_selectors(cls, button: str) -> List[str]:
+        """Get CSS selectors for a button"""
+        return cls.BUTTON_CSS_SELECTORS.get(button, [])
+
+    @classmethod
+    def get_class_patterns(cls, button: str) -> List[str]:
+        """Get class name patterns for a button"""
+        return cls.CLASS_PATTERNS.get(button, [button.lower()])
 
 
 class BrowserBridge:
@@ -52,44 +160,16 @@ class BrowserBridge:
     - Bridge queues async operations for the browser
     - Background async loop processes the queue
     - Browser clicks happen in parallel with UI updates
-
-    This ensures:
-    1. UI never blocks waiting for browser
-    2. Browser actions execute as fast as possible
-    3. Failures don't break the UI
     """
 
-    # Button text mappings for browser clicks (via JavaScript)
-    BUTTON_SELECTORS = {
-        # Increment buttons
-        'X': 'button:has-text("X"):near(input[type="number"])',
-        '+0.001': 'button:has-text("+0.001")',
-        '+0.01': 'button:has-text("+0.01")',
-        '+0.1': 'button:has-text("+0.1")',
-        '+1': 'button:has-text("+1")',
-        '1/2': 'button:has-text("1/2")',
-        'X2': 'button:has-text("X2")',
-        'MAX': 'button:has-text("MAX")',
-        # Action buttons
-        'BUY': 'button:has-text("BUY")',
-        'SELL': 'button:has-text("SELL")',
-        'SIDEBET': 'button:has-text("SIDEBET")',
-        # Percentage buttons
-        '10%': 'button:has-text("10%")',
-        '25%': 'button:has-text("25%")',
-        '50%': 'button:has-text("50%")',
-        '100%': 'button:has-text("100%")',
-    }
+    # Timeouts (in seconds)
+    CLICK_TIMEOUT = 10.0
+    CONNECT_TIMEOUT = 30.0
+    ACTION_TIMEOUT = 5.0
 
-    # CSS Selector fallback (used if text-based selection fails)
-    # Updated: 2025-11-24 - Using CSS selectors instead of XPath (more reliable)
-    BUTTON_CSS_SELECTORS = {
-        'BUY': '#root > div > div.soapy-container.layout-horizontal.MuiBox-root.css-0 > div.soapy-container.MuiBox-root.css-0 > div > div._tradeControlsContainer_17syu_29 > div > div > div._buttonsRow_73g5s_247 > div:nth-child(1) > button',
-        # Generic fallbacks for SELL / SIDEBET when text search fails
-        'SELL': '#root > div > div.soapy-container.layout-horizontal.MuiBox-root.css-0 > div.soapy-container.MuiBox-root.css-0 > div > div._tradeControlsContainer_17syu_29 > div > div > div._buttonsRow_73g5s_247 > div:nth-child(2) > button, button[data-action=\"sell\"], button[class*=\"sell\"]',
-        'SIDEBET': '#root > div > div.soapy-container.layout-horizontal.MuiBox-root.css-0 > div.soapy-container.MuiBox-root.css-0 > div > div._tradeControlsContainer_17syu_29 > div > div > div._buttonsRow_73g5s_247 > div:nth-child(3) > button, button[data-action=\"sidebet\"], button[class*=\"sidebet\"], button[class*=\"side-bet\"]',
-        # Note: Increment and percentage buttons generally work with text matching
-    }
+    # Retry configuration
+    MAX_RETRIES = 3
+    RETRY_BASE_DELAY = 0.5  # Exponential backoff base
 
     def __init__(self):
         """Initialize browser bridge"""
@@ -105,11 +185,19 @@ class BrowserBridge:
         # Callback for status changes
         self.on_status_change: Optional[Callable[[BridgeStatus], None]] = None
 
-        logger.info("BrowserBridge initialized")
+        # Click statistics for debugging
+        self._click_stats: Dict[str, Dict[str, int]] = {}
+
+        logger.info("BrowserBridge initialized (PRODUCTION FIX)")
 
     def _set_status(self, status: BridgeStatus):
         """Update status and notify callback"""
+        old_status = self.status
         self.status = status
+
+        if old_status != status:
+            logger.info(f"Bridge status: {old_status.value} -> {status.value}")
+
         if self.on_status_change:
             try:
                 self.on_status_change(status)
@@ -122,7 +210,11 @@ class BrowserBridge:
             return
 
         self._running = True
-        self._thread = threading.Thread(target=self._run_async_loop, daemon=True)
+        self._thread = threading.Thread(
+            target=self._run_async_loop,
+            daemon=True,
+            name="BrowserBridge-AsyncLoop"
+        )
         self._thread.start()
         logger.info("Browser bridge async loop started")
 
@@ -135,7 +227,7 @@ class BrowserBridge:
         try:
             self._loop.run_until_complete(self._process_actions())
         except Exception as e:
-            logger.error(f"Async loop error: {e}")
+            logger.error(f"Async loop error: {e}", exc_info=True)
         finally:
             self._loop.close()
             self._running = False
@@ -144,7 +236,7 @@ class BrowserBridge:
         """Process queued browser actions"""
         while self._running:
             try:
-                # Wait for action with timeout (allows checking _running flag)
+                # Wait for action with timeout
                 try:
                     action = await asyncio.wait_for(
                         self._action_queue.get(),
@@ -153,35 +245,37 @@ class BrowserBridge:
                 except asyncio.TimeoutError:
                     continue
 
-                # Execute the action
+                # Execute the action with timeout protection
                 action_type = action.get('type')
 
-                if action_type == 'connect':
-                    await self._do_connect()
-                elif action_type == 'disconnect':
-                    await self._do_disconnect()
-                elif action_type == 'click':
-                    await self._do_click(action.get('button'))
-                elif action_type == 'stop':
-                    break
+                try:
+                    if action_type == 'connect':
+                        await asyncio.wait_for(
+                            self._do_connect(),
+                            timeout=self.CONNECT_TIMEOUT
+                        )
+                    elif action_type == 'disconnect':
+                        await asyncio.wait_for(
+                            self._do_disconnect(),
+                            timeout=10.0
+                        )
+                    elif action_type == 'click':
+                        await asyncio.wait_for(
+                            self._do_click_with_retry(action.get('button')),
+                            timeout=self.CLICK_TIMEOUT
+                        )
+                    elif action_type == 'stop':
+                        break
+                except asyncio.TimeoutError:
+                    logger.error(f"Action '{action_type}' timed out")
 
             except Exception as e:
-                logger.error(f"Action processing error: {e}")
+                logger.error(f"Action processing error: {e}", exc_info=True)
 
     def _queue_action(self, action: dict):
         """Queue an action for the async loop"""
-        if not self._running:
+        if not self._running or not self._loop:
             logger.warning("Bridge not running, cannot queue action")
-            return
-
-        # Wait briefly for loop to initialize after start_async_loop
-        if not self._loop:
-            for _ in range(10):  # up to ~0.5s
-                time.sleep(0.05)
-                if self._loop:
-                    break
-        if not self._loop or not self._action_queue:
-            logger.warning("Bridge loop not ready, dropping action: %s", action.get('type'))
             return
 
         # Thread-safe queue put
@@ -195,11 +289,7 @@ class BrowserBridge:
     # ========================================================================
 
     def connect(self):
-        """
-        Connect to browser (non-blocking).
-
-        Call this from UI thread - actual connection happens async.
-        """
+        """Connect to browser (non-blocking)."""
         if not self._running:
             self.start_async_loop()
 
@@ -207,18 +297,11 @@ class BrowserBridge:
         self._queue_action({'type': 'connect'})
 
     def connect_async(self):
-        """
-        Backwards-compatible alias for connect().
-
-        Some callers still expect connect_async; this simply delegates to
-        the non-blocking connect() to avoid runtime AttributeError.
-        """
+        """Backwards-compatible alias for connect()."""
         self.connect()
 
     def disconnect(self):
-        """
-        Disconnect from browser (non-blocking).
-        """
+        """Disconnect from browser (non-blocking)."""
         self._queue_action({'type': 'disconnect'})
 
     def stop(self):
@@ -236,15 +319,9 @@ class BrowserBridge:
     # ========================================================================
 
     def on_increment_clicked(self, button_type: str):
-        """
-        Called when increment button clicked in UI.
-
-        Args:
-            button_type: '+0.001', '+0.01', '+0.1', '+1', '1/2', 'X2', 'MAX', 'X'
-        """
+        """Called when increment button clicked in UI."""
         if not self.is_connected():
             return
-
         self._queue_action({'type': 'click', 'button': button_type})
         logger.debug(f"Bridge: Queued {button_type} click")
 
@@ -256,7 +333,6 @@ class BrowserBridge:
         """Called when BUY button clicked in UI"""
         if not self.is_connected():
             return
-
         self._queue_action({'type': 'click', 'button': 'BUY'})
         logger.debug("Bridge: Queued BUY click")
 
@@ -264,7 +340,6 @@ class BrowserBridge:
         """Called when SELL button clicked in UI"""
         if not self.is_connected():
             return
-
         self._queue_action({'type': 'click', 'button': 'SELL'})
         logger.debug("Bridge: Queued SELL click")
 
@@ -272,20 +347,13 @@ class BrowserBridge:
         """Called when SIDEBET button clicked in UI"""
         if not self.is_connected():
             return
-
         self._queue_action({'type': 'click', 'button': 'SIDEBET'})
         logger.debug("Bridge: Queued SIDEBET click")
 
     def on_percentage_clicked(self, percentage: float):
-        """
-        Called when percentage button clicked in UI.
-
-        Args:
-            percentage: 0.1, 0.25, 0.5, or 1.0
-        """
+        """Called when percentage button clicked in UI."""
         if not self.is_connected():
             return
-
         pct_text = {0.1: '10%', 0.25: '25%', 0.5: '50%', 1.0: '100%'}
         button = pct_text.get(percentage)
         if button:
@@ -293,18 +361,21 @@ class BrowserBridge:
             logger.debug(f"Bridge: Queued {button} click")
 
     # ========================================================================
-    # ASYNC IMPLEMENTATIONS (run in background thread)
+    # ASYNC IMPLEMENTATIONS
     # ========================================================================
 
     async def _do_connect(self):
         """Actually connect to browser (async)"""
         try:
-            # Import here to avoid circular imports
+            import sys
+            from pathlib import Path
+            # Add parent directory for browser_automation imports
+            parent_dir = str(Path(__file__).parent.parent.parent)
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
             from browser_automation.cdp_browser_manager import CDPBrowserManager
 
             self.cdp_manager = CDPBrowserManager()
-
-            # Use the bulletproof connection sequence
             success = await self.cdp_manager.full_connect_sequence()
 
             if success:
@@ -315,7 +386,7 @@ class BrowserBridge:
                 logger.error("Browser bridge connection failed")
 
         except Exception as e:
-            logger.error(f"Connection error: {e}")
+            logger.error(f"Connection error: {e}", exc_info=True)
             self._set_status(BridgeStatus.ERROR)
 
     async def _do_disconnect(self):
@@ -329,138 +400,292 @@ class BrowserBridge:
             logger.info("Browser bridge disconnected")
 
         except Exception as e:
-            logger.error(f"Disconnect error: {e}")
+            logger.error(f"Disconnect error: {e}", exc_info=True)
             self._set_status(BridgeStatus.ERROR)
 
-    async def _do_click(self, button: str):
+    async def _do_click_with_retry(self, button: str) -> ClickResult:
+        """
+        Click button with retry logic and exponential backoff.
+
+        PRODUCTION FIX: Implements multi-strategy selector with retries.
+        """
+        last_result = ClickResult(success=False, error="No attempts made")
+
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            result = await self._do_click(button)
+            result.attempt = attempt
+
+            if result.success:
+                self._record_click_stat(button, 'success', result.method)
+                return result
+
+            last_result = result
+
+            if attempt < self.MAX_RETRIES:
+                delay = self.RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning(
+                    f"Click attempt {attempt} failed for '{button}': {result.error}. "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                await asyncio.sleep(delay)
+
+        self._record_click_stat(button, 'failure', last_result.error)
+        logger.error(f"All {self.MAX_RETRIES} click attempts failed for '{button}'")
+        return last_result
+
+    async def _do_click(self, button: str) -> ClickResult:
         """
         Actually click a button in the browser (async).
 
-        Uses JavaScript click to bypass visibility checks.
-        Strategy:
-        1. Text-based (exact match > starts with > contains)
-        2. CSS selector fallback (if text-based fails and selector exists)
-
-        AUDIT FIX: Improved visibility check to handle position:fixed elements
-        Updated 2025-11-24: Changed from XPath to CSS selectors (more reliable)
+        PRODUCTION FIX: Multi-strategy selector system
+        1. Starts-with text match (handles dynamic text like "BUY+0.030 SOL")
+        2. Contains text match (backup for variant text)
+        3. CSS structural selectors (fallback)
+        4. Class pattern matching (last resort)
         """
         if not self.cdp_manager or not self.cdp_manager.page:
-            logger.warning(f"Cannot click {button}: browser not connected")
-            return
+            return ClickResult(success=False, error="Browser not connected")
 
         try:
             page = self.cdp_manager.page
 
-            # Use JavaScript to find and click the button
-            # Priority: normalized text -> data-action/aria -> class hints -> CSS fallback
-            clicked = await page.evaluate(f"""(selectorQuery) => {{
-                const allButtons = Array.from(document.querySelectorAll(selectorQuery));
+            # Strategy 1: Text-based matching (starts-with for dynamic text)
+            result = await self._try_text_based_click(page, button)
+            if result.success:
+                return result
 
-                const normalize = (txt = '') => txt.replace(/\\s+/g, '').toUpperCase();
+            # Strategy 2: CSS selector fallback
+            result = await self._try_css_selector_click(page, button)
+            if result.success:
+                return result
 
-                // AUDIT FIX: Improved visibility check (handles position:fixed)
-                const isVisible = (el) => {{
-                    const style = window.getComputedStyle(el);
-                    const rect = el.getBoundingClientRect();
-                    return style.display !== 'none' &&
-                           style.visibility !== 'hidden' &&
-                           rect.width > 0 &&
-                           rect.height > 0 &&
-                           style.pointerEvents !== 'none';
-                }};
+            # Strategy 3: Class pattern matching
+            result = await self._try_class_pattern_click(page, button)
+            if result.success:
+                return result
 
-                const buttons = allButtons.filter(isVisible);
-                const searchText = {json.dumps(button)};
-                const normalizedTarget = normalize(searchText);
+            # All strategies failed - collect debug info
+            available = await self._get_available_buttons(page)
+            logger.warning(
+                f"All click strategies failed for '{button}'. "
+                f"Available buttons: {available[:10]}"
+            )
 
-                // 1) Exact / startswith / contains on normalized text (handles "SIDE BET" vs "SIDEBET")
-                let target = buttons.find(b => normalize(b.textContent || '') === normalizedTarget);
-                if (!target) {{
-                    target = buttons.find(b => normalize(b.textContent || '').startsWith(normalizedTarget));
-                }}
-                if (!target && searchText.length > 1) {{
-                    target = buttons.find(b => normalize(b.textContent || '').includes(normalizedTarget));
-                }}
-
-                // 2) data-action / aria-label / data-testid fallbacks
-                if (!target) {{
-                    target = buttons.find(b => normalize(b.getAttribute('data-action') || '') === normalizedTarget);
-                }}
-                if (!target) {{
-                    target = buttons.find(b => normalize(b.getAttribute('aria-label') || '') === normalizedTarget);
-                }}
-                if (!target) {{
-                    target = buttons.find(b => normalize(b.getAttribute('data-testid') || '') === normalizedTarget);
-                }}
-                if (!target) {{
-                    target = buttons.find(b => normalize(b.getAttribute('data-qa') || '') === normalizedTarget);
-                }}
-
-                // 3) Class name hint (e.g., btn-sell, btn-sidebet)
-                if (!target) {{
-                    target = buttons.find(b => {{
-                        const classes = (b.className || '').split(/\\s+/).map(normalize);
-                        return classes.some(c => c === normalizedTarget || c.includes(normalizedTarget));
-                    }});
-                }}
-
-                if (target) {{
-                    target.click();
-                    return {{ success: true, text: (target.textContent || '').trim(), method: 'text' }};
-                }}
-                return {{ success: false, availableButtons: buttons.slice(0, 15).map(b => (b.textContent || '').trim().substring(0, 30)) }};
-            }}""", "button, [role=\"button\"], [data-action], [data-testid], [data-qa], [class*=\"button\" i], [class*=\"Button\" i]")
-
-            if clicked.get('success'):
-                logger.debug(f"Browser: Clicked '{button}' (found: '{clicked.get('text')}')")
-                return
-
-            # Text-based selection failed - try CSS selector fallback
-            if button in self.BUTTON_CSS_SELECTORS:
-                selector = self.BUTTON_CSS_SELECTORS[button]
-                logger.info(f"Browser: Text search failed for '{button}', trying CSS selector")
-
-                css_clicked = await page.evaluate(f"""() => {{
-                    const selector = {json.dumps(selector)};
-                    const element = document.querySelector(selector);
-
-                    if (element) {{
-                        element.click();
-                        return {{ success: true, tag: element.tagName, text: element.textContent?.trim().substring(0, 30) }};
-                    }}
-                    return {{ success: false }};
-                }}""")
-
-                if css_clicked.get('success'):
-                    logger.info(f"Browser: CSS selector click succeeded for '{button}': {css_clicked.get('tag')} - {css_clicked.get('text')}")
-                    return
-                else:
-                    logger.warning(f"Browser: CSS selector click failed for '{button}': element not found")
-
-            # Both methods failed
-            available = clicked.get('availableButtons', [])
-            logger.warning(f"Browser: Button '{button}' not found via text or CSS selector. Available buttons: {available[:5]}")
+            return ClickResult(
+                success=False,
+                error=f"Button not found with any strategy. Available: {available[:5]}"
+            )
 
         except Exception as e:
-            logger.error(f"Click error for {button}: {e}")
+            logger.error(f"Click error for {button}: {e}", exc_info=True)
+            return ClickResult(success=False, error=str(e))
+
+    async def _try_text_based_click(self, page, button: str) -> ClickResult:
+        """
+        Try to click button using text-based matching.
+
+        PRODUCTION FIX: Uses starts-with matching to handle dynamic text
+        like "BUY+0.030 SOL" when searching for "BUY".
+        """
+        patterns = SelectorStrategy.get_text_patterns(button)
+
+        # JavaScript to find button by text patterns
+        js_code = """
+        (patterns) => {
+            const allButtons = Array.from(document.querySelectorAll('button'));
+
+            // Improved visibility check (handles position:fixed)
+            const isVisible = (el) => {
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none' &&
+                       style.visibility !== 'hidden' &&
+                       style.opacity !== '0' &&
+                       rect.width > 0 &&
+                       rect.height > 0 &&
+                       rect.top < window.innerHeight &&
+                       rect.bottom > 0;
+            };
+
+            // Check if button is enabled (not disabled)
+            const isEnabled = (el) => {
+                return !el.disabled &&
+                       !el.classList.contains('disabled') &&
+                       el.getAttribute('aria-disabled') !== 'true';
+            };
+
+            const visibleButtons = allButtons.filter(b => isVisible(b) && isEnabled(b));
+
+            for (const pattern of patterns) {
+                // Strategy 1: Starts with (handles "BUY" -> "BUY+0.030 SOL")
+                let target = visibleButtons.find(b => {
+                    const text = b.textContent.trim();
+                    return text.startsWith(pattern) || text.toUpperCase().startsWith(pattern.toUpperCase());
+                });
+
+                if (target) {
+                    target.click();
+                    return { success: true, text: target.textContent.trim(), method: 'starts-with' };
+                }
+
+                // Strategy 2: Contains (more flexible)
+                target = visibleButtons.find(b => {
+                    const text = b.textContent.trim().toUpperCase();
+                    return text.includes(pattern.toUpperCase());
+                });
+
+                if (target) {
+                    target.click();
+                    return { success: true, text: target.textContent.trim(), method: 'contains' };
+                }
+            }
+
+            return { success: false };
+        }
+        """
+
+        try:
+            result = await page.evaluate(js_code, patterns)
+
+            if result.get('success'):
+                logger.debug(
+                    f"Text-based click succeeded for '{button}': "
+                    f"found '{result.get('text')}' via {result.get('method')}"
+                )
+                return ClickResult(
+                    success=True,
+                    method=f"text-{result.get('method')}",
+                    button_text=result.get('text', '')
+                )
+
+            return ClickResult(success=False, error="No text match found")
+
+        except Exception as e:
+            return ClickResult(success=False, error=f"Text match error: {e}")
+
+    async def _try_css_selector_click(self, page, button: str) -> ClickResult:
+        """Try to click button using CSS selectors."""
+        selectors = SelectorStrategy.get_css_selectors(button)
+
+        for selector in selectors:
+            try:
+                element = await page.query_selector(selector)
+                if element:
+                    # Verify element is visible and enabled
+                    is_valid = await page.evaluate("""
+                        (el) => {
+                            const style = window.getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return !el.disabled &&
+                                   style.display !== 'none' &&
+                                   style.visibility !== 'hidden' &&
+                                   rect.width > 0 && rect.height > 0;
+                        }
+                    """, element)
+
+                    if is_valid:
+                        await element.click()
+                        text = await element.text_content()
+                        logger.debug(f"CSS selector click succeeded: '{selector}' -> '{text}'")
+                        return ClickResult(
+                            success=True,
+                            method=f"css:{selector[:30]}",
+                            button_text=text or ""
+                        )
+            except Exception:
+                continue
+
+        return ClickResult(success=False, error="No CSS selector matched")
+
+    async def _try_class_pattern_click(self, page, button: str) -> ClickResult:
+        """Try to click button by class name patterns."""
+        patterns = SelectorStrategy.get_class_patterns(button)
+
+        js_code = """
+        (patterns) => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+
+            for (const pattern of patterns) {
+                const target = buttons.find(b => {
+                    const classes = b.className.toLowerCase();
+                    return classes.includes(pattern) &&
+                           !b.disabled &&
+                           b.offsetParent !== null;
+                });
+
+                if (target) {
+                    target.click();
+                    return { success: true, text: target.textContent.trim(), class: target.className };
+                }
+            }
+            return { success: false };
+        }
+        """
+
+        try:
+            result = await page.evaluate(js_code, patterns)
+            if result.get('success'):
+                logger.debug(f"Class pattern click succeeded: {result.get('class')}")
+                return ClickResult(
+                    success=True,
+                    method="class-pattern",
+                    button_text=result.get('text', '')
+                )
+            return ClickResult(success=False, error="No class pattern matched")
+        except Exception as e:
+            return ClickResult(success=False, error=f"Class pattern error: {e}")
+
+    async def _get_available_buttons(self, page) -> List[str]:
+        """Get list of available button texts for debugging."""
+        try:
+            return await page.evaluate("""
+                () => {
+                    return Array.from(document.querySelectorAll('button'))
+                        .filter(b => b.offsetParent !== null)
+                        .map(b => b.textContent.trim().substring(0, 40))
+                        .filter(t => t.length > 0);
+                }
+            """)
+        except Exception:
+            return []
+
+    def _record_click_stat(self, button: str, outcome: str, detail: str):
+        """Record click statistics for monitoring."""
+        if button not in self._click_stats:
+            self._click_stats[button] = {'success': 0, 'failure': 0, 'methods': {}}
+
+        self._click_stats[button][outcome] = self._click_stats[button].get(outcome, 0) + 1
+
+        if outcome == 'success':
+            methods = self._click_stats[button]['methods']
+            methods[detail] = methods.get(detail, 0) + 1
+
+    def get_click_stats(self) -> Dict[str, Any]:
+        """Get click statistics for debugging."""
+        return self._click_stats.copy()
 
 
 # Singleton instance for global access
-# PHASE 2 FIX: Corrected thread-safe singleton pattern
+# PRODUCTION FIX: Thread-safe singleton with proper locking
 _bridge_instance: Optional[BrowserBridge] = None
 _bridge_lock = threading.Lock()
 
 
 def get_browser_bridge() -> BrowserBridge:
-    """
-    Get or create the singleton browser bridge instance (thread-safe).
+    """Get or create the singleton browser bridge instance (thread-safe)"""
+    global _bridge_instance
+    if _bridge_instance is None:
+        with _bridge_lock:
+            # Double-check locking pattern
+            if _bridge_instance is None:
+                _bridge_instance = BrowserBridge()
+    return _bridge_instance
 
-    PHASE 2 FIX: Always acquire lock before checking instance.
-    The previous double-check pattern had a race window where the first
-    check outside the lock could see a partially constructed object.
-    """
+
+def reset_browser_bridge():
+    """Reset the singleton instance (for testing)"""
     global _bridge_instance
     with _bridge_lock:
-        if _bridge_instance is None:
-            _bridge_instance = BrowserBridge()
-        return _bridge_instance
+        if _bridge_instance is not None:
+            _bridge_instance.stop()
+            _bridge_instance = None

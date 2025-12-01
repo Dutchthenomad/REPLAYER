@@ -556,6 +556,54 @@ class CDPBrowserManager:
         logger.info("✓ Full connection sequence complete - ready for automation!")
         return True
 
+    # ========================================================================
+    # PRODUCTION FIX: ASYNC CONTEXT MANAGER SUPPORT
+    # ========================================================================
+
+    async def __aenter__(self):
+        """
+        Async context manager entry.
+
+        Ensures proper resource acquisition with guaranteed cleanup.
+
+        Usage:
+            async with CDPBrowserManager() as manager:
+                await manager.page.click('button')
+                # ... automation code ...
+            # Automatically disconnects when exiting context
+
+        Returns:
+            self: The connected CDPBrowserManager instance
+
+        Raises:
+            RuntimeError: If connection fails
+        """
+        success = await self.connect()
+        if not success:
+            raise RuntimeError(f"Failed to connect to CDP on port {self.cdp_port}")
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """
+        Async context manager exit.
+
+        Ensures browser connection is properly cleaned up even if exceptions occur.
+
+        Args:
+            exc_type: Exception type (if any)
+            exc_val: Exception value (if any)
+            exc_tb: Exception traceback (if any)
+
+        Returns:
+            False: Don't suppress exceptions (let them propagate)
+        """
+        try:
+            await self.disconnect()
+        except Exception as e:
+            logger.error(f"Error during CDP cleanup: {e}")
+            # Don't re-raise - we're already in exception handling context
+        return False  # Don't suppress exceptions
+
 
 # Quick test function
 async def _test_cdp_manager():
