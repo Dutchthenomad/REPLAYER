@@ -5,46 +5,86 @@ DEPRECATED - DO NOT USE FOR CODE
 These absolute XPaths are BRITTLE and will break when Rugs.fun updates their UI.
 They are kept here for REFERENCE ONLY.
 
-USE INSTEAD: Text-based selectors in browser_executor.py
+USE INSTEAD: Text-based selectors in browser_selectors.py
 Example: 'button:has-text("BUY")' instead of absolute XPath
 
 Primary selectors are defined in:
-  /src/bot/browser_executor.py (BUY_BUTTON_SELECTORS, etc.)
+  /src/bot/browser_selectors.py (BUY_BUTTON_SELECTORS, etc.)
+  /src/bot/browser_bridge.py (SelectorStrategy class)
 
+================================================================================
+LAST UPDATED: 2025-12-01
 ================================================================================
 
 XPATHS (Reference Only - May Be Outdated)
 
-+ 0.001: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[1]/div/div/div/div[1]/button[1]
+--------------------------------------------------------------------------------
+CLEAR (X) BUTTON
+--------------------------------------------------------------------------------
+XPATH: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[1]/div/div/div/button
+CSS SELECTOR: ._clearButton_1lj20_77
+CSS PATH: html body.thanksgiving-cursor div#root div.viewport-container.layout-vertical.MuiBox-root.css-ylpzd div.soapy-container.layout-horizontal.MuiBox-root.css-0 div.soapy-container.MuiBox-root.css-0 div._standardPageContainer_q7zk6_1 div._tradeControlsContainer_q7zk6_29 div._tradeControlsContainer_73g5s_1 div._tradeControlsMain_73g5s_62 div._controlsRow_73g5s_234 div._buySection_1lj20_1 div._amountInputSection_1lj20_14 div._amountInputContainer_1lj20_20 div._inputActions_1lj20_63 button._clearButton_1lj20_77
 
+--------------------------------------------------------------------------------
+PERCENTAGE BUTTONS (10%, 25%, 50%, 100%)
+--------------------------------------------------------------------------------
+10%:
+XPATH: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[1]
+CSS SELECTOR: button._percentageBtn_1mzic_139:nth-child(1)
+CSS PATH: html body.thanksgiving-cursor div#root div.viewport-container.layout-vertical.MuiBox-root.css-ylpzd div.soapy-container.layout-horizontal.MuiBox-root.css-0 div.soapy-container.MuiBox-root.css-0 div._standardPageContainer_q7zk6_1 div._tradeControlsContainer_q7zk6_29 div._tradeControlsContainer_73g5s_1 div._tradeControlsMain_73g5s_62 div._controlsRow_73g5s_234 div._sellSection_1mzic_1 div._amountInputSection_1mzic_9 div._amountInputContainer_1mzic_284 div._sellControlButtonsContainer_1mzic_129 button._percentageBtn_1mzic_139._active_1mzic_60
+
+25%:
+XPATH: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[2]
+CSS SELECTOR: button._percentageBtn_1mzic_139:nth-child(2)
+CSS PATH: html body.thanksgiving-cursor div#root div.viewport-container.layout-vertical.MuiBox-root.css-ylpzd div.soapy-container.layout-horizontal.MuiBox-root.css-0 div.soapy-container.MuiBox-root.css-0 div._standardPageContainer_q7zk6_1 div._tradeControlsContainer_q7zk6_29 div._tradeControlsContainer_73g5s_1 div._tradeControlsMain_73g5s_62 div._controlsRow_73g5s_234 div._sellSection_1mzic_1 div._amountInputSection_1mzic_9 div._amountInputContainer_1mzic_284 div._sellControlButtonsContainer_1mzic_129 button._percentageBtn_1mzic_139
+
+50%:
+XPATH: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[3]
+CSS SELECTOR: button._percentageBtn_1mzic_139:nth-child(3)
+CSS PATH: html body.thanksgiving-cursor div#root div.viewport-container.layout-vertical.MuiBox-root.css-ylpzd div.soapy-container.layout-horizontal.MuiBox-root.css-0 div.soapy-container.MuiBox-root.css-0 div._standardPageContainer_q7zk6_1 div._tradeControlsContainer_q7zk6_29 div._tradeControlsContainer_73g5s_1 div._tradeControlsMain_73g5s_62 div._controlsRow_73g5s_234 div._sellSection_1mzic_1 div._amountInputSection_1mzic_9 div._amountInputContainer_1mzic_284 div._sellControlButtonsContainer_1mzic_129 button._percentageBtn_1mzic_139
+
+100%:
+XPATH: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[4]
+CSS SELECTOR: button._percentageBtn_1mzic_139:nth-child(4)
+CSS PATH: html body.thanksgiving-cursor div#root div.viewport-container.layout-vertical.MuiBox-root.css-ylpzd div.soapy-container.layout-horizontal.MuiBox-root.css-0 div.soapy-container.MuiBox-root.css-0 div._standardPageContainer_q7zk6_1 div._tradeControlsContainer_q7zk6_29 div._tradeControlsContainer_73g5s_1 div._tradeControlsMain_73g5s_62 div._controlsRow_73g5s_234 div._sellSection_1mzic_1 div._amountInputSection_1mzic_9 div._amountInputContainer_1mzic_284 div._sellControlButtonsContainer_1mzic_129 button._percentageBtn_1mzic_139
+
+--------------------------------------------------------------------------------
+BUY BUTTON
+--------------------------------------------------------------------------------
+NOTE: This is a DIV container, not a button element!
+XPATH: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[3]/div[1]
+CSS SELECTOR: div._buttonSection_73g5s_299:nth-child(1)
+CSS PATH: html body.thanksgiving-cursor div#root div.viewport-container.layout-vertical.MuiBox-root.css-ylpzd div.soapy-container.layout-horizontal.MuiBox-root.css-0 div.soapy-container.MuiBox-root.css-0 div._standardPageContainer_q7zk6_1 div._tradeControlsContainer_q7zk6_29 div._tradeControlsContainer_73g5s_1 div._tradeControlsMain_73g5s_62 div._buttonsRow_73g5s_247 div._buttonSection_73g5s_299.undefined
+
+--------------------------------------------------------------------------------
+SELL BUTTON
+--------------------------------------------------------------------------------
+NOTE: This is a DIV container, not a button element!
+XPATH: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[3]/div[2]
+CSS SELECTOR: div._buttonSection_73g5s_299:nth-child(2)
+CSS PATH: html body.thanksgiving-cursor div#root div.viewport-container.layout-vertical.MuiBox-root.css-ylpzd div.soapy-container.layout-horizontal.MuiBox-root.css-0 div.soapy-container.MuiBox-root.css-0 div._standardPageContainer_q7zk6_1 div._tradeControlsContainer_q7zk6_29 div._tradeControlsContainer_73g5s_1 div._tradeControlsMain_73g5s_62 div._buttonsRow_73g5s_247 div._buttonSection_73g5s_299.undefined
+
+--------------------------------------------------------------------------------
+SIDEBET BUTTON
+--------------------------------------------------------------------------------
+XPATH: /html/body/div[1]/div/div[2]/div[2]/div/div[3]/div[2]/div/div[3]
+CSS SELECTOR: .bet-button
+CSS PATH: html body.thanksgiving-cursor div#root div.viewport-container.layout-vertical.MuiBox-root.css-ylpzd div.soapy-container.layout-horizontal.MuiBox-root.css-0 div.soapy-container.MuiBox-root.css-0 div._standardPageContainer_q7zk6_1 div._chartContainer_q7zk6_20.standard-page-chart-container div.sidebet-container div.sidebet-banner div.bet-button.but-button-active
+
+--------------------------------------------------------------------------------
+INCREMENT BUTTONS (OLD - NEED VERIFICATION)
+--------------------------------------------------------------------------------
+NOTE: These may be outdated. Verify before using.
+
++0.001: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[1]/div/div/div/div[1]/button[1]
 +0.01: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[1]/div/div/div/div[1]/button[2]
-
 +0.1: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[3]
-
 +1: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[4]
-
 1/2: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[5]
-
 X2: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[6]
-
 MAX: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[1]/div[2]/button[7]
 
-X: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[1]/div/div/div/button
-
-BUY: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[3]/div[1]/button
-
-SELL: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[3]/div[2]/button/div
-
-SIDEBET (ACTIVATE): /html/body/div[1]/div/div[2]/div[2]/div/div[3]/div[2]/div/div[3]
-
-SIDEBET (OLD UN-HIDE - DEPRECATED): /html/body/div[1]/div/div[2]/div[2]/div/div[3]/div[2]/div/div[1]
-
-10%: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[1]
-
-25%: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[2]
-
-50%: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[3]
-
-100%: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[2]/div[2]/div/div/div[2]/button[4]
-
+--------------------------------------------------------------------------------
+DEPRECATED SELECTORS (DO NOT USE)
+--------------------------------------------------------------------------------
 SHORT: /html/body/div[1]/div/div[2]/div[2]/div/div[4]/div/div/div[3]/div[2]/button

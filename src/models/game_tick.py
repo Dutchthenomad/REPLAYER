@@ -71,11 +71,22 @@ class GameTick:
             raise ValueError(f"Invalid game tick data: {e}")
 
     def is_tradeable(self) -> bool:
-        """Check if trading actions are allowed at this tick"""
+        """Check if trading actions are allowed at this tick.
+
+        Trading is allowed during:
+        - ACTIVE_GAMEPLAY: Normal active game
+        - PRESALE: Pre-round buy window (one BUY + one SIDEBET allowed)
+        - GAME_ACTIVATION: Instant transition from presale
+        """
+        # Presale phase allows pre-round buys even when not fully "active"
+        if self.phase == "PRESALE":
+            return True
+
+        # Normal active gameplay
         return (
             self.active and
             not self.rugged and
-            self.phase not in ["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "UNKNOWN"]
+            self.phase not in ["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "RUG_EVENT_2", "UNKNOWN"]
         )
 
     def to_dict(self) -> Dict[str, Any]:

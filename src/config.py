@@ -111,7 +111,7 @@ class Config:
         """Get live feed configuration with validation"""
         ring_buffer_size = int(os.getenv('RUGS_RING_BUFFER_SIZE', '5000'))
         recording_buffer_size = int(os.getenv('RUGS_RECORDING_BUFFER_SIZE', '100'))
-        auto_recording = os.getenv('RUGS_AUTO_RECORDING', 'true').lower() == 'true'
+        auto_recording = os.getenv('RUGS_AUTO_RECORDING', 'false').lower() == 'true'
         
         # Validate and enforce minimum values
         ring_buffer_size = max(100, min(100000, ring_buffer_size))  # 100-100k range

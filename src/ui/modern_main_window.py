@@ -89,6 +89,9 @@ class ModernMainWindow:
         self.bot_config_panel = BotConfigPanel(root, config_file="bot_config.json")
         self.bot_interface = BotInterface(state, self.trade_manager)
         self.bot_enabled = self.bot_config_panel.is_bot_enabled()
+
+        # Initialize bot_var early to prevent AttributeError if toggle_bot called before menu creation
+        self.bot_var = tk.BooleanVar(value=self.bot_enabled)
         
         # Bot Placeholders
         self.bot_ui_controller = None
@@ -143,6 +146,20 @@ class ModernMainWindow:
         self.chart = RugsChartLog(chart_container)
         self.chart.pack(fill="both", expand=True)
 
+        # Zoom controls (overlaid at top-left of chart)
+        zoom_overlay = tk.Frame(chart_container, bg='#2a2a2a')
+        zoom_overlay.place(x=10, y=10, anchor='nw')
+
+        zoom_btn_style = {'font': ('Arial', 9), 'bg': '#333333', 'fg': 'white',
+                          'bd': 1, 'relief': tk.RAISED, 'padx': 6, 'pady': 2}
+
+        tk.Button(zoom_overlay, text="+ ZOOM IN", command=self.chart.zoom_in,
+                  **zoom_btn_style).pack(side=tk.LEFT, padx=2)
+        tk.Button(zoom_overlay, text="- ZOOM OUT", command=self.chart.zoom_out,
+                  **zoom_btn_style).pack(side=tk.LEFT, padx=2)
+        tk.Button(zoom_overlay, text="↺ RESET", command=self.chart.reset_zoom,
+                  **zoom_btn_style).pack(side=tk.LEFT, padx=2)
+
         # --- PLAYBACK CONTROLS (Phase 3.2) ---
         self._create_playback_bar(main_frame)
 
@@ -178,8 +195,9 @@ class ModernMainWindow:
         # Divider
         tk.Frame(input_group, bg="#444", width=1).pack(side="left", fill="y", pady=5)
         
-        # Quick Buttons
+        # Quick Buttons (X = clear, then increments, then modifiers)
         vals = [
+            ("X", self.clear_bet_amount),
             ("+0.001", lambda: self.increment_bet_amount(Decimal('0.001'))),
             ("+0.01", lambda: self.increment_bet_amount(Decimal('0.01'))),
             ("+0.1", lambda: self.increment_bet_amount(Decimal('0.1'))),
@@ -534,7 +552,9 @@ class ModernMainWindow:
         last_candle_group = self.last_candle_tick // self.candle_period if self.last_candle_tick >= 0 else -1
         is_new_candle = current_candle_group > last_candle_group
         self.last_candle_tick = tick.tick
-        self.chart.update_tick(tick.price, is_new_candle=is_new_candle)
+        # Pass phase to chart for yellow presale line visualization
+        chart_phase = tick.phase if hasattr(tick, 'phase') else 'TRADING'
+        self.chart.update_tick(tick.price, is_new_candle=is_new_candle, phase=chart_phase)
 
         # Bot logic
         self.trade_manager.check_and_handle_rug(tick)
@@ -626,6 +646,11 @@ class ModernMainWindow:
         except (decimal.InvalidOperation, ValueError):
             # AUDIT FIX: Catch specific Decimal conversion exceptions
             return None
+
+    def clear_bet_amount(self):
+        """Clear bet amount to zero"""
+        self.bet_var.set("0")
+        self.browser_bridge.on_increment_clicked("X")
 
     def increment_bet_amount(self, val):
         try:
@@ -728,7 +753,7 @@ class ModernMainWindow:
         bot_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Bot", menu=bot_menu)
 
-        self.bot_var = tk.BooleanVar(value=self.bot_enabled)
+        # Note: self.bot_var is initialized early in __init__ to prevent AttributeError
         bot_menu.add_checkbutton(
             label="Enable Bot",
             variable=self.bot_var,
@@ -935,9 +960,17 @@ class ModernMainWindow:
 
     def _on_bridge_status_change(self, status):
         """Update browser connection indicator - AUDIT FIX Phase 2.6: Thread-safe"""
+        from bot.browser_bridge import BridgeStatus
+
         def _update_ui():
             """Execute UI updates on main thread"""
-            if status == "connected":
+            # FIX: Compare enum to enum, not enum to string
+            is_connected = status == BridgeStatus.CONNECTED
+            is_connecting = status == BridgeStatus.CONNECTING
+            is_reconnecting = status == BridgeStatus.RECONNECTING
+            is_error = status == BridgeStatus.ERROR
+
+            if is_connected:
                 self.browser_connected = True
                 # Update menu status
                 if hasattr(self, 'browser_menu'):
@@ -948,7 +981,25 @@ class ModernMainWindow:
                     self.browser_indicator.config(text="🟢 BROWSER", fg='#00e676')
                 if self.toast:
                     self.toast.show("Browser connected", "success")
-            else:
+            elif is_connecting or is_reconnecting:
+                self.browser_connected = False
+                if hasattr(self, 'browser_menu'):
+                    status_label = "🟡 Status: Connecting..." if is_connecting else "🟡 Status: Reconnecting..."
+                    self.browser_menu.entryconfig(self.browser_status_item_index, label=status_label)
+                    self.browser_menu.entryconfig(self.browser_disconnect_item_index, state=tk.DISABLED)
+                # Update status bar indicator
+                if hasattr(self, 'browser_indicator'):
+                    self.browser_indicator.config(text="🟡 BROWSER", fg='#ffc107')
+            elif is_error:
+                self.browser_connected = False
+                if hasattr(self, 'browser_menu'):
+                    self.browser_menu.entryconfig(self.browser_status_item_index, label="🔴 Status: Error")
+                    self.browser_menu.entryconfig(self.browser_disconnect_item_index, state=tk.DISABLED)
+                if hasattr(self, 'browser_indicator'):
+                    self.browser_indicator.config(text="🔴 BROWSER", fg='#f44336')
+                if self.toast:
+                    self.toast.show("Browser connection error", "error")
+            else:  # DISCONNECTED or unknown
                 self.browser_connected = False
                 if hasattr(self, 'browser_menu'):
                     self.browser_menu.entryconfig(self.browser_status_item_index, label="⚫ Status: Disconnected")
@@ -1115,7 +1166,9 @@ class ModernMainWindow:
             if not self.live_feed:
                 # AUDIT FIX: WebSocketFeed uses hardcoded server_url, no url parameter
                 self.live_feed = WebSocketFeed()
-            self.live_feed.on_tick = self._on_live_tick
+            # FIX: Use proper event handler registration (not property assignment)
+            # Register for 'signal' event which provides full GameSignal object
+            self.live_feed.on('signal', self._on_live_signal)
             self.live_feed.connect()
             self.live_feed_connected = True
             self.live_feed_var.set(True)
@@ -1141,13 +1194,15 @@ class ModernMainWindow:
             self.live_indicator.config(text="⚫ LIVE", fg='#666666')
         self.log("Live feed disconnected")
 
-    def _on_live_tick(self, tick_data):
-        """Handle incoming live tick"""
+    def _on_live_signal(self, signal):
+        """Handle incoming live signal from WebSocket feed"""
         try:
-            tick = GameTick.from_dict(tick_data)
-            self.ui_dispatcher.submit(self._process_tick_ui, tick, 0, 0)
+            # Convert GameSignal to GameTick using the feed's conversion method
+            if self.live_feed:
+                tick = self.live_feed.signal_to_game_tick(signal)
+                self.ui_dispatcher.submit(self._process_tick_ui, tick, 0, 0)
         except Exception as e:
-            logger.debug(f"Error processing live tick: {e}")
+            logger.debug(f"Error processing live signal: {e}")
 
     # ========================================================================
     # BROWSER METHODS
@@ -1155,6 +1210,8 @@ class ModernMainWindow:
 
     def _connect_browser(self):
         """Connect to browser for automation"""
+        from bot.browser_bridge import BridgeStatus
+
         if self.browser_executor:
             import asyncio
             loop = asyncio.new_event_loop()
@@ -1163,13 +1220,15 @@ class ModernMainWindow:
                 # AUDIT FIX: Check return value from start_browser()
                 success = loop.run_until_complete(self.browser_executor.start_browser())
                 if success:
-                    self._on_bridge_status_change("connected")
+                    self._on_bridge_status_change(BridgeStatus.CONNECTED)
                 else:
                     logger.error("Browser connection failed (start_browser returned False)")
+                    self._on_bridge_status_change(BridgeStatus.ERROR)
                     if self.toast:
                         self.toast.show("Browser connection failed", "error")
             except Exception as e:
                 logger.error(f"Browser connection failed: {e}")
+                self._on_bridge_status_change(BridgeStatus.ERROR)
                 if self.toast:
                     self.toast.show(f"Browser error: {e}", "error")
             finally:
@@ -1180,13 +1239,15 @@ class ModernMainWindow:
 
     def _disconnect_browser(self):
         """Disconnect from browser"""
+        from bot.browser_bridge import BridgeStatus
+
         if self.browser_executor:
             import asyncio
             loop = asyncio.new_event_loop()
             try:
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(self.browser_executor.stop_browser())
-                self._on_bridge_status_change("disconnected")
+                self._on_bridge_status_change(BridgeStatus.DISCONNECTED)
             except Exception as e:
                 logger.error(f"Browser disconnect failed: {e}")
             finally:
@@ -1197,22 +1258,11 @@ class ModernMainWindow:
     # ========================================================================
 
     def _change_theme(self, theme_name: str):
-        """Change UI theme"""
-        try:
-            import ttkbootstrap as ttk
-            if hasattr(self.root, 'style'):
-                self.root.style.theme_use(theme_name)
-            else:
-                style = ttk.Style()
-                style.theme_use(theme_name)
-
-            # Save preference
-            self._save_ui_preference('theme', theme_name)
-
-            if self.toast:
-                self.toast.show(f"Theme: {theme_name}", "success")
-        except Exception as e:
-            logger.error(f"Theme change failed: {e}")
+        """Change UI theme - only works in Standard UI mode"""
+        # Modern UI uses custom dark theme, not ttkbootstrap themes
+        if self.toast:
+            self.toast.show("Theme switching requires Standard UI mode", "warning")
+        logger.info("Theme switching is not available in Modern UI mode. Switch to Standard UI to use themes.")
 
     def _set_ui_style(self, style: str):
         """Set UI style and auto-restart the application"""

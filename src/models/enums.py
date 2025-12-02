@@ -16,7 +16,12 @@ class Phase(str, Enum):
 
     @classmethod
     def is_tradeable(cls, phase: str) -> bool:
-        """Check if trading is allowed in this phase"""
+        """Check if trading is allowed in this phase.
+
+        Tradeable phases:
+        - PRESALE: Pre-round buy window (one BUY + one SIDEBET allowed)
+        - ACTIVE: Normal active gameplay
+        """
         return phase not in [cls.UNKNOWN, cls.COOLDOWN, cls.RUG_EVENT, cls.RUG_EVENT_1]
 
 

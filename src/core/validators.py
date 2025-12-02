@@ -86,7 +86,12 @@ def validate_trading_allowed(
         - (True, None) if allowed
         - (False, "error message") if not allowed
     """
-    # Check if game is active
+    # PRESALE phase allows one BUY and one SIDEBET before game starts
+    # These positions activate when the game begins
+    if tick.phase == "PRESALE":
+        return True, None
+
+    # Check if game is active (required for non-PRESALE phases)
     if not tick.active:
         return False, f"{action} not allowed: game not active yet"
 

@@ -248,7 +248,52 @@ class GameState:
 
             logger.info(f"Balance updated: {old_balance} -> {new_balance} ({reason})")
             return True
-    
+
+    def set_baseline_balance(self, new_baseline: Decimal, reason: str = "Manual baseline set"):
+        """
+        Set a new baseline balance for P&L tracking.
+
+        This updates the initial_balance which is used for:
+        - ROI calculations
+        - Reset operations (bankruptcy recovery)
+        - Session P&L tracking baseline
+
+        Args:
+            new_baseline: The new baseline balance
+            reason: Reason for the change (for logging)
+        """
+        with self._lock:
+            old_initial = self._state['initial_balance']
+
+            # Update initial balance (the baseline for P&L)
+            self._state['initial_balance'] = new_baseline
+
+            # Reset P&L stats since we're starting fresh from this baseline
+            self._stats['total_pnl'] = Decimal('0')
+            self._stats['peak_balance'] = new_baseline
+            self._stats['max_drawdown'] = Decimal('0')
+
+            # Log the transaction
+            self._transaction_log.append({
+                'timestamp': datetime.now(),
+                'type': 'baseline_reset',
+                'old_baseline': old_initial,
+                'new_baseline': new_baseline,
+                'reason': reason
+            })
+
+            logger.info(
+                f"Baseline balance set: {old_initial} -> {new_baseline} ({reason}). "
+                f"P&L tracking reset to 0."
+            )
+
+            # Emit event for any listeners
+            self._emit(StateEvents.BALANCE_CHANGED, {
+                'old': old_initial,
+                'new': new_baseline,
+                'baseline_reset': True
+            })
+
     def open_position(self, position_data) -> bool:
         """Open a new position or add to existing position (accepts Position object or dict)"""
         with self._lock:

@@ -961,8 +961,14 @@ class MainWindow:
                     fg='#00ff88' if pnl_sol > 0 else '#ff3366'
                 )
             else:
-                # In live override, still allow SELL for manual attempts
-                self.sell_button.config(state=tk.NORMAL if live_override else tk.DISABLED)
+                # In live override, enable ALL buttons for manual control
+                # FIX: Was only enabling SELL, now enable BUY/SIDEBET too
+                if live_override:
+                    self.buy_button.config(state=tk.NORMAL)
+                    self.sidebet_button.config(state=tk.NORMAL)
+                    self.sell_button.config(state=tk.NORMAL)
+                else:
+                    self.sell_button.config(state=tk.DISABLED)
                 self.position_label.config(text="POSITION: NONE", fg='#666666')
 
         # Update sidebet countdown
@@ -1092,18 +1098,46 @@ class MainWindow:
         self.balance_lock_button.config(text="🔓")
         self._start_balance_edit()
 
-    def _relock_balance(self, choice: str):
-        """Re-lock balance, applying chosen source."""
-        if choice == 'revert_to_pnl':
-            # Bring balance back to tracked P&L
+    def _relock_balance(self, choice: str, new_balance: Optional[Decimal] = None):
+        """Re-lock balance, applying user's chosen balance.
+
+        When user sets a custom balance, this becomes the NEW BASELINE for P&L tracking.
+        All future P&L calculations will be relative to this value.
+
+        Args:
+            choice: 'custom' (user entered value) or 'keep_manual' (canceled)
+            new_balance: The balance value to set (required for 'custom')
+        """
+        if choice == 'custom' and new_balance is not None:
+            # User entered a specific balance - apply it
+            current = self.state.get('balance')
+            delta = new_balance - current
+            if delta != Decimal('0'):
+                self.state.update_balance(delta, f"Manual balance set to {new_balance:.4f} SOL")
+
+            # CRITICAL: Update the baseline for P&L tracking
+            # This resets initial_balance, total_pnl, and peak_balance
+            self.state.set_baseline_balance(
+                new_balance,
+                reason=f"User set balance to {new_balance:.4f} SOL"
+            )
+
+            # Update tracked balance to match the new baseline
+            self.tracked_balance = new_balance
+            logger.info(f"Balance baseline set to {new_balance:.4f} SOL (P&L tracking reset)")
+
+        elif choice == 'revert_to_pnl':
+            # Legacy: Bring balance back to tracked P&L
             delta = self.tracked_balance - self.state.get('balance')
-            if delta != 0:
+            if delta != Decimal('0'):
                 self.state.update_balance(delta, "Relock to P&L balance")
+
         # If keep_manual, current state balance remains and P&L resumes from there
+
         self.balance_locked = True
         self.manual_balance = None
         self.balance_lock_button.config(text="🔒")
-        # Refresh label to tracked (or manual) value
+        # Refresh label to the new balance value
         self.balance_label.config(text=f"WALLET: {self.state.get('balance'):.4f} SOL")
 
     def _start_balance_edit(self):

@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # Constants previously in Config
 BLOCKED_PHASES_FOR_TRADING = ["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "UNKNOWN"]
 
+# PRESALE allows one BUY and one SIDEBET before game starts
+PRESALE_PHASE = "PRESALE"
+
 class BotInterface:
     """
     API interface for bots to interact with the game
@@ -145,11 +148,15 @@ class BotInterface:
         if snap:
             has_position = snap.position and snap.position.get('status') == 'active'
             has_sidebet = snap.sidebet and snap.sidebet.get('status') == 'active'
-            
-            # Check if can buy
-            if (snap.active and
-                snap.phase not in BLOCKED_PHASES_FOR_TRADING and
-                not has_position and
+
+            # PRESALE phase allows trading even when not "active" yet
+            is_tradeable = (
+                snap.phase == PRESALE_PHASE or
+                (snap.active and snap.phase not in BLOCKED_PHASES_FOR_TRADING)
+            )
+
+            # Check if can buy (position accumulation / DCA allowed)
+            if (is_tradeable and
                 snap.balance >= min_bet):
                 can_buy = True
                 valid_actions.append('BUY')
@@ -160,8 +167,7 @@ class BotInterface:
                 valid_actions.append('SELL')
 
             # Check if can sidebet
-            if (snap.active and
-                snap.phase not in BLOCKED_PHASES_FOR_TRADING and
+            if (is_tradeable and
                 not has_sidebet and
                 snap.balance >= min_bet):
 

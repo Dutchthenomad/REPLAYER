@@ -82,13 +82,15 @@ class GameDataProcessor:
             print(f"Warning: JSON parse error in {filepath}: {e}")
             return []
 
-        # Filter to active game ticks only
+        # Filter to active game ticks only (including PRESALE phase)
         ticks = []
         for event in events:
             if event.get('type') == 'tick':
                 # Check if tick is active (not cooldown)
+                # Include PRESALE phase as it's a tradeable phase
                 phase = event.get('phase', 'ACTIVE')
-                if phase == 'ACTIVE' or event.get('active', True):
+                is_tradeable_phase = phase in ['ACTIVE', 'PRESALE'] or event.get('active', True)
+                if is_tradeable_phase:
                     ticks.append(event)
 
         if len(ticks) < 50:

@@ -118,7 +118,11 @@ class BalanceUnlockDialog:
 
 
 class BalanceRelockDialog:
-    """Dialog to choose between keeping manual value or reverting to P&L tracked value."""
+    """Dialog to set balance when re-locking.
+
+    Allows user to enter their actual in-game balance so REPLAYER
+    can accurately track P&L from that point forward.
+    """
 
     def __init__(self, parent, manual_balance: Decimal, tracked_balance: Decimal, on_choice: Callable):
         """
@@ -128,7 +132,8 @@ class BalanceRelockDialog:
             parent: Parent window
             manual_balance: Current manually set balance
             tracked_balance: P&L-tracked balance (what it would be without manual override)
-            on_choice: Callback with choice ('keep_manual' or 'revert_to_pnl')
+            on_choice: Callback with choice ('keep_manual', 'revert_to_pnl', or 'custom')
+                       and optional new_balance parameter
         """
         self.parent = parent
         self.manual_balance = manual_balance
@@ -138,10 +143,11 @@ class BalanceRelockDialog:
 
         # Create modal dialog
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Re-lock Balance")
-        self.dialog.geometry("450x300")
+        self.dialog.title("Set Balance")
+        self.dialog.geometry("450x380")
         self.dialog.transient(parent)
         self.dialog.grab_set()
+        self.dialog.configure(bg='#1a1a2e')
 
         # Center on parent
         self.dialog.update_idletasks()
@@ -153,75 +159,181 @@ class BalanceRelockDialog:
 
     def _build_ui(self):
         """Build dialog UI."""
+        bg_color = '#1a1a2e'
+        fg_color = '#ffffff'
+        input_bg = '#2d2d44'
+        accent_color = '#4fc3f7'
+
         # Title
-        title_frame = ttk.Frame(self.dialog, padding=20)
+        title_frame = tk.Frame(self.dialog, bg=bg_color, padx=20, pady=15)
         title_frame.pack(fill='x')
 
-        title_label = ttk.Label(
+        title_label = tk.Label(
             title_frame,
-            text="🔒 Re-lock Balance",
-            font=('TkDefaultFont', 12, 'bold')
+            text="💰 Set Your Balance",
+            font=('TkDefaultFont', 14, 'bold'),
+            bg=bg_color,
+            fg=fg_color
         )
         title_label.pack()
 
-        # Message
-        msg_frame = ttk.Frame(self.dialog, padding=(20, 10))
-        msg_frame.pack(fill='both', expand=True)
+        # Instruction message
+        msg_frame = tk.Frame(self.dialog, bg=bg_color, padx=20, pady=5)
+        msg_frame.pack(fill='x')
 
         message = (
-            "Choose which balance to use when re-locking:\n\n"
-            f"Manual Value: {self.manual_balance:.4f} SOL\n"
-            f"P&L Tracked Value: {self.tracked_balance:.4f} SOL\n\n"
-            "If you keep the manual value, P&L tracking will resume from the new baseline."
+            "Enter your current in-game wallet balance.\n"
+            "P&L tracking will resume from this value."
         )
 
-        msg_label = ttk.Label(
+        msg_label = tk.Label(
             msg_frame,
             text=message,
             justify='left',
+            bg=bg_color,
+            fg='#aaaaaa',
             wraplength=400
         )
-        msg_label.pack()
+        msg_label.pack(anchor='w')
+
+        # Balance input section
+        input_frame = tk.Frame(self.dialog, bg=bg_color, padx=20, pady=15)
+        input_frame.pack(fill='x')
+
+        input_label = tk.Label(
+            input_frame,
+            text="Balance (SOL):",
+            bg=bg_color,
+            fg=fg_color,
+            font=('TkDefaultFont', 10)
+        )
+        input_label.pack(anchor='w')
+
+        # Entry with current manual value as default
+        self.balance_entry = tk.Entry(
+            input_frame,
+            font=('TkDefaultFont', 16),
+            width=20,
+            bg=input_bg,
+            fg=fg_color,
+            insertbackground=fg_color,
+            relief='flat',
+            highlightthickness=2,
+            highlightcolor=accent_color,
+            highlightbackground='#444466'
+        )
+        self.balance_entry.insert(0, f"{self.manual_balance:.4f}")
+        self.balance_entry.select_range(0, tk.END)
+        self.balance_entry.pack(anchor='w', pady=(5, 0))
+        self.balance_entry.focus_set()
+
+        # Reference values
+        ref_frame = tk.Frame(self.dialog, bg=bg_color, padx=20, pady=10)
+        ref_frame.pack(fill='x')
+
+        ref_label = tk.Label(
+            ref_frame,
+            text="Reference values (click to use):",
+            bg=bg_color,
+            fg='#888888',
+            font=('TkDefaultFont', 9)
+        )
+        ref_label.pack(anchor='w')
+
+        # Clickable reference values
+        refs_row = tk.Frame(ref_frame, bg=bg_color)
+        refs_row.pack(anchor='w', pady=(5, 0))
+
+        manual_ref = tk.Label(
+            refs_row,
+            text=f"Previous: {self.manual_balance:.4f}",
+            bg=bg_color,
+            fg=accent_color,
+            font=('TkDefaultFont', 9, 'underline'),
+            cursor='hand2'
+        )
+        manual_ref.pack(side='left', padx=(0, 15))
+        manual_ref.bind('<Button-1>', lambda e: self._set_entry_value(self.manual_balance))
+
+        tracked_ref = tk.Label(
+            refs_row,
+            text=f"P&L Tracked: {self.tracked_balance:.4f}",
+            bg=bg_color,
+            fg=accent_color,
+            font=('TkDefaultFont', 9, 'underline'),
+            cursor='hand2'
+        )
+        tracked_ref.pack(side='left')
+        tracked_ref.bind('<Button-1>', lambda e: self._set_entry_value(self.tracked_balance))
 
         # Buttons
-        button_frame = ttk.Frame(self.dialog, padding=(20, 10))
+        button_frame = tk.Frame(self.dialog, bg=bg_color, padx=20, pady=20)
         button_frame.pack(fill='x', side='bottom')
 
-        revert_btn = ttk.Button(
+        # Apply button (primary action)
+        apply_btn = tk.Button(
             button_frame,
-            text=f"Revert to P&L ({self.tracked_balance:.4f})",
-            command=self._on_revert,
-            width=25
+            text="Apply Balance",
+            command=self._on_apply,
+            bg=accent_color,
+            fg='#000000',
+            font=('TkDefaultFont', 11, 'bold'),
+            relief='flat',
+            padx=20,
+            pady=8,
+            cursor='hand2'
         )
-        revert_btn.pack(side='bottom', pady=5)
+        apply_btn.pack(fill='x', pady=(0, 10))
 
-        keep_btn = ttk.Button(
+        # Cancel button
+        cancel_btn = tk.Button(
             button_frame,
-            text=f"Keep Manual ({self.manual_balance:.4f})",
-            command=self._on_keep,
-            width=25
+            text="Cancel",
+            command=self._on_cancel,
+            bg='#444466',
+            fg=fg_color,
+            font=('TkDefaultFont', 10),
+            relief='flat',
+            padx=15,
+            pady=5,
+            cursor='hand2'
         )
-        keep_btn.pack(side='bottom', pady=5)
+        cancel_btn.pack(fill='x')
 
-        # Focus keep button (default choice)
-        keep_btn.focus_set()
+        # Bind keys
+        self.dialog.bind('<Escape>', lambda e: self._on_cancel())
+        self.dialog.bind('<Return>', lambda e: self._on_apply())
 
-        # Bind escape key to keep manual (safe default)
-        self.dialog.bind('<Escape>', lambda e: self._on_keep())
+    def _set_entry_value(self, value: Decimal):
+        """Set entry field to a specific value."""
+        self.balance_entry.delete(0, tk.END)
+        self.balance_entry.insert(0, f"{value:.4f}")
+        self.balance_entry.select_range(0, tk.END)
+        self.balance_entry.focus_set()
 
-    def _on_keep(self):
-        """Keep manual value."""
-        logger.info(f"User chose to keep manual balance: {self.manual_balance:.4f} SOL")
-        self.result = 'keep_manual'
+    def _on_apply(self):
+        """Apply the entered balance."""
+        try:
+            new_balance = Decimal(self.balance_entry.get().strip())
+            if new_balance < 0:
+                messagebox.showerror("Invalid Balance", "Balance cannot be negative")
+                return
+
+            logger.info(f"User set balance to: {new_balance:.4f} SOL")
+            self.result = 'custom'
+            self.dialog.destroy()
+            # Pass the new balance to the callback
+            self.on_choice('custom', new_balance)
+
+        except InvalidOperation:
+            messagebox.showerror("Invalid Balance", "Please enter a valid number (e.g., 0.5000)")
+
+    def _on_cancel(self):
+        """Cancel without changes."""
+        logger.info("User canceled balance set")
         self.dialog.destroy()
-        self.on_choice('keep_manual')
-
-    def _on_revert(self):
-        """Revert to P&L tracked value."""
-        logger.info(f"User chose to revert to P&L balance: {self.tracked_balance:.4f} SOL")
-        self.result = 'revert_to_pnl'
-        self.dialog.destroy()
-        self.on_choice('revert_to_pnl')
+        # Keep current manual value
+        self.on_choice('keep_manual', self.manual_balance)
 
 
 class BalanceEditEntry:

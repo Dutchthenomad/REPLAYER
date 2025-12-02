@@ -38,13 +38,17 @@ class LatencySpikeDetector:
     PHASE 3.5 AUDIT FIX: Alerts when latency exceeds threshold.
 
     Uses rolling statistics to detect anomalous latency values.
+
+    NOTE: Thresholds significantly relaxed (2025-12-01) to prevent spam.
+    Normal network jitter of 100-300ms is NOT a spike.
+    Only truly severe latency (>10 seconds) should trigger alerts.
     """
 
     def __init__(
         self,
         window_size: int = 100,
-        spike_threshold_std: float = 2.0,
-        absolute_threshold_ms: float = 2000.0
+        spike_threshold_std: float = 10.0,  # Relaxed from 2.0 - only extreme outliers
+        absolute_threshold_ms: float = 10000.0  # Relaxed from 2000ms to 10 seconds
     ):
         """
         Initialize spike detector.
@@ -66,6 +70,10 @@ class LatencySpikeDetector:
         self.total_spikes = 0
         self.last_spike_time: Optional[float] = None
         self.last_spike_value: Optional[float] = None
+
+        # Rate limiting for warnings (prevent spam)
+        self._last_warning_time: float = 0
+        self._warning_cooldown_sec: float = 30.0  # Only warn once per 30 seconds
 
     def record(self, latency_ms: float) -> Optional[Dict[str, Any]]:
         """
@@ -111,14 +119,21 @@ class LatencySpikeDetector:
                 self.last_spike_time = time.time()
                 self.last_spike_value = latency_ms
 
-                return {
-                    'latency_ms': latency_ms,
-                    'mean_ms': mean,
-                    'std_ms': std,
-                    'reason': spike_reason,
-                    'spike_count': self.total_spikes,
-                    'timestamp': self.last_spike_time
-                }
+                # Rate limit: only return spike info if cooldown has passed
+                # This prevents warning spam while still tracking statistics
+                now = time.time()
+                if now - self._last_warning_time >= self._warning_cooldown_sec:
+                    self._last_warning_time = now
+                    return {
+                        'latency_ms': latency_ms,
+                        'mean_ms': mean,
+                        'std_ms': std,
+                        'reason': spike_reason,
+                        'spike_count': self.total_spikes,
+                        'timestamp': self.last_spike_time
+                    }
+                # Spike detected but suppressed due to rate limiting
+                return None
 
             return None
 
@@ -641,8 +656,9 @@ class WebSocketFeed:
                 self.metrics['errors'] += 1
 
         @self.sio.event
-        def disconnect():
+        def disconnect(reason=None):
             # AUDIT FIX: Error boundary for disconnect handler
+            # FIX 2025-12-01: Accept optional reason argument (newer Socket.IO versions pass it)
             try:
                 self.is_connected = False
                 # PHASE 3.2: Update health monitor
@@ -651,8 +667,13 @@ class WebSocketFeed:
                 recovery_info = self.state_machine.recover_from_disconnect()
                 # PHASE 3.6: Notify degradation manager
                 self.degradation_manager.record_disconnect()
-                self.logger.warning('❌ Disconnected from backend')
-                self._emit_event('disconnected', {'recovery_info': recovery_info})
+                # FIX: Reset latency baseline to prevent spike spam on reconnect
+                self.last_tick_time = None
+                self.spike_detector.latencies.clear()
+                self.spike_detector.total_samples = 0
+                reason_str = f' (reason: {reason})' if reason else ''
+                self.logger.warning(f'❌ Disconnected from backend{reason_str}')
+                self._emit_event('disconnected', {'recovery_info': recovery_info, 'reason': reason})
                 # AUDIT FIX: Clear handlers on disconnect to prevent memory leaks
                 # Note: Don't clear Socket.IO internal handlers, only our custom handlers
                 # self.clear_handlers()  # Commented out - handlers are intentionally persistent
@@ -682,6 +703,10 @@ class WebSocketFeed:
                 state_summary = self.state_machine.get_state_summary()
                 # PHASE 3.6: Notify degradation manager
                 self.degradation_manager.record_reconnect()
+                # FIX: Reset latency baseline to prevent spike spam after reconnect
+                self.last_tick_time = None
+                self.spike_detector.latencies.clear()
+                self.spike_detector.total_samples = 0
                 self.logger.info('🔄 Reconnected to Rugs.fun backend')
                 self.logger.info(f'   State machine: phase={state_summary["phase"]}, game={state_summary["game_id"]}')
                 self._emit_event('reconnected', {
@@ -751,17 +776,34 @@ class WebSocketFeed:
         # Calculate tick interval
         if self.last_tick_time:
             tick_interval = receive_time - self.last_tick_time
-            # AUDIT FIX: deque auto-evicts oldest when maxlen exceeded (O(1) operation)
-            self.metrics['latencies'].append(tick_interval)
 
-            # PHASE 3.5: Check for latency spike
-            spike_info = self.spike_detector.record(tick_interval)
-            if spike_info:
-                self.metrics['latency_spikes'] += 1
-                self.logger.warning(f"⚠️ Latency spike detected: {spike_info['reason']}")
-                # PHASE 3.6: Notify degradation manager
-                self.degradation_manager.record_spike()
-                self._emit_event('latency_spike', spike_info)
+            # FIX: Reset baseline if gap exceeds threshold (5 seconds)
+            # This prevents cumulative latency spam after processing pauses
+            # (e.g., when browser connection blocks the handler thread)
+            MAX_REASONABLE_GAP_MS = 5000.0  # 5 seconds
+            if tick_interval > MAX_REASONABLE_GAP_MS:
+                self.logger.info(
+                    f"⏭️ Large gap detected ({tick_interval:.0f}ms), resetting latency baseline"
+                )
+                # Reset spike detector's baseline by clearing its history
+                self.spike_detector.latencies.clear()
+                self.spike_detector.total_samples = 0
+                # Don't record this anomalous interval
+                self.last_tick_time = receive_time
+                # Continue processing the signal but skip latency recording
+            else:
+                # Normal case: record the tick interval
+                # AUDIT FIX: deque auto-evicts oldest when maxlen exceeded (O(1) operation)
+                self.metrics['latencies'].append(tick_interval)
+
+                # PHASE 3.5: Check for latency spike
+                spike_info = self.spike_detector.record(tick_interval)
+                if spike_info:
+                    self.metrics['latency_spikes'] += 1
+                    self.logger.warning(f"⚠️ Latency spike detected: {spike_info['reason']}")
+                    # PHASE 3.6: Notify degradation manager
+                    self.degradation_manager.record_spike()
+                    self._emit_event('latency_spike', spike_info)
         self.last_tick_time = receive_time
 
         # PHASE 3.2: Record signal reception for health monitoring

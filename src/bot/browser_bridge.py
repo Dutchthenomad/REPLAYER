@@ -38,6 +38,7 @@ class BridgeStatus(Enum):
     CONNECTING = "connecting"
     CONNECTED = "connected"
     ERROR = "error"
+    RECONNECTING = "reconnecting"  # Added for reconnection logic
 
 
 @dataclass
@@ -64,10 +65,11 @@ class SelectorStrategy:
 
     # Primary selectors - starts-with matching for dynamic text
     # These handle cases where button text is "BUY+0.030 SOL" but we search for "BUY"
+    # UPDATED 2025-12-01: Added new rugs.fun UI text patterns
     BUTTON_TEXT_PATTERNS = {
         'BUY': ['BUY', 'Buy', 'buy'],
         'SELL': ['SELL', 'Sell', 'sell'],
-        'SIDEBET': ['SIDEBET', 'SIDE', 'Side', 'sidebet', 'side'],
+        'SIDEBET': ['SIDEBET', 'SIDE', 'Side', 'sidebet', 'side', 'SIDE BET', 'Side Bet'],
         'X': ['×', '✕', 'X', 'x', '✖'],  # Clear button variants
         '+0.001': ['+0.001', '+ 0.001'],
         '+0.01': ['+0.01', '+ 0.01'],
@@ -84,10 +86,15 @@ class SelectorStrategy:
 
     # CSS Selectors - structural fallback when text matching fails
     # These are more brittle but work when text matching completely fails
-    # UPDATED: Include SELL and SIDEBET (missing in original)
+    # UPDATED 2025-12-01: New rugs.fun UI specific selectors
     BUTTON_CSS_SELECTORS = {
         'BUY': [
-            # Primary: Button container with buy-related classes
+            # Primary: New rugs.fun specific class (div container)
+            'div[class*="_buttonSection_"]:nth-child(1)',
+            '[class*="_buttonsRow_"] > div:first-child',
+            'div[class*="_buttonSection_"]:nth-child(1) button',
+            '[class*="_buttonsRow_"] > div:first-child button',
+            # Button container with buy-related classes
             'button[class*="buy" i]',
             'button[class*="Buy" i]',
             # Trade controls area - buy is typically first button
@@ -100,6 +107,12 @@ class SelectorStrategy:
             '[data-testid="buy-button"]',
         ],
         'SELL': [
+            # Primary: New rugs.fun specific class (div container)
+            'div[class*="_buttonSection_"]:nth-child(2)',
+            '[class*="_buttonsRow_"] > div:nth-child(2)',
+            'div[class*="_buttonSection_"]:nth-child(2) button',
+            '[class*="_buttonsRow_"] > div:nth-child(2) button',
+            # Legacy selectors
             'button[class*="sell" i]',
             'button[class*="Sell" i]',
             # Sell is typically second button in trade controls
@@ -110,6 +123,13 @@ class SelectorStrategy:
             '[data-testid="sell-button"]',
         ],
         'SIDEBET': [
+            # Primary: New rugs.fun specific class
+            '.bet-button',
+            '[class*="bet-button"]',
+            'div.bet-button',
+            '[class*="sidebet-banner"] [class*="bet-button"]',
+            '[class*="sidebet-container"] [class*="bet-button"]',
+            # Legacy selectors
             'button[class*="side" i]',
             'button[class*="Side" i]',
             'button[class*="sidebet" i]',
@@ -121,18 +141,46 @@ class SelectorStrategy:
             '[data-testid="sidebet-button"]',
         ],
         'X': [
-            # Clear button near input
+            # Primary: New rugs.fun specific class (escaped underscore for CSS)
+            'button[class*="_clearButton_"]',
+            '[class*="_clearButton_"]',
+            '[class*="_inputActions_"] button',
+            '[class*="_amountInputContainer_"] [class*="_clearButton_"]',
+            # Legacy selectors
             'button[class*="clear" i]',
+            'button[class*="clearButton" i]',
             'input[type="number"] ~ button',
             '[class*="inputGroup"] button:last-child',
+        ],
+        '10%': [
+            'button[class*="_percentageBtn_"]:nth-child(1)',
+            '[class*="_sellControlButtonsContainer_"] button:nth-child(1)',
+        ],
+        '25%': [
+            'button[class*="_percentageBtn_"]:nth-child(2)',
+            '[class*="_sellControlButtonsContainer_"] button:nth-child(2)',
+        ],
+        '50%': [
+            'button[class*="_percentageBtn_"]:nth-child(3)',
+            '[class*="_sellControlButtonsContainer_"] button:nth-child(3)',
+        ],
+        '100%': [
+            'button[class*="_percentageBtn_"]:nth-child(4)',
+            '[class*="_sellControlButtonsContainer_"] button:nth-child(4)',
         ],
     }
 
     # Class name patterns for fallback matching
+    # UPDATED 2025-12-01: Added new rugs.fun class patterns
     CLASS_PATTERNS = {
-        'BUY': ['buy', 'purchase', 'long', 'bid'],
-        'SELL': ['sell', 'exit', 'short', 'ask'],
-        'SIDEBET': ['side', 'sidebet', 'hedge', 'insurance'],
+        'BUY': ['buy', 'purchase', 'long', 'bid', 'buttonSection'],
+        'SELL': ['sell', 'exit', 'short', 'ask', 'buttonSection'],
+        'SIDEBET': ['side', 'sidebet', 'hedge', 'insurance', 'bet-button'],
+        'X': ['clear', 'clearButton'],
+        '10%': ['percentageBtn'],
+        '25%': ['percentageBtn'],
+        '50%': ['percentageBtn'],
+        '100%': ['percentageBtn'],
     }
 
     @classmethod
@@ -181,6 +229,7 @@ class BrowserBridge:
         self._thread: Optional[threading.Thread] = None
         self._action_queue: asyncio.Queue = None
         self._running = False
+        self._loop_ready = threading.Event()  # FIX: Signal when loop is ready
 
         # Callback for status changes
         self.on_status_change: Optional[Callable[[BridgeStatus], None]] = None
@@ -210,12 +259,22 @@ class BrowserBridge:
             return
 
         self._running = True
+        self._loop_ready.clear()  # Reset the ready signal
         self._thread = threading.Thread(
             target=self._run_async_loop,
             daemon=True,
             name="BrowserBridge-AsyncLoop"
         )
         self._thread.start()
+
+        # FIX: Wait for the loop to be ready before returning
+        # This prevents race condition where connect() tries to queue actions
+        # before the event loop and queue are created
+        if not self._loop_ready.wait(timeout=5.0):
+            logger.error("Async loop failed to start within 5 seconds")
+            self._running = False
+            return
+
         logger.info("Browser bridge async loop started")
 
     def _run_async_loop(self):
@@ -224,6 +283,9 @@ class BrowserBridge:
         asyncio.set_event_loop(self._loop)
         self._action_queue = asyncio.Queue()
 
+        # FIX: Signal that the loop is ready for use
+        self._loop_ready.set()
+
         try:
             self._loop.run_until_complete(self._process_actions())
         except Exception as e:
@@ -231,6 +293,7 @@ class BrowserBridge:
         finally:
             self._loop.close()
             self._running = False
+            self._loop_ready.clear()  # Clear ready state on shutdown
 
     async def _process_actions(self):
         """Process queued browser actions"""
@@ -437,10 +500,10 @@ class BrowserBridge:
         """
         Actually click a button in the browser (async).
 
-        PRODUCTION FIX: Multi-strategy selector system
-        1. Starts-with text match (handles dynamic text like "BUY+0.030 SOL")
-        2. Contains text match (backup for variant text)
-        3. CSS structural selectors (fallback)
+        PRODUCTION FIX 2025-12-01: Reordered strategies to prevent X->X2 mismatch
+        1. CSS structural selectors FIRST (most reliable with new rugs.fun classes)
+        2. Exact text match (prevents X matching X2)
+        3. Starts-with text match (handles dynamic text like "BUY+0.030 SOL")
         4. Class pattern matching (last resort)
         """
         if not self.cdp_manager or not self.cdp_manager.page:
@@ -449,13 +512,14 @@ class BrowserBridge:
         try:
             page = self.cdp_manager.page
 
-            # Strategy 1: Text-based matching (starts-with for dynamic text)
-            result = await self._try_text_based_click(page, button)
+            # Strategy 1: CSS selector FIRST (most reliable - uses specific class names)
+            # This prevents issues like 'X' matching 'X2' in text-based matching
+            result = await self._try_css_selector_click(page, button)
             if result.success:
                 return result
 
-            # Strategy 2: CSS selector fallback
-            result = await self._try_css_selector_click(page, button)
+            # Strategy 2: Text-based matching (exact first, then starts-with)
+            result = await self._try_text_based_click(page, button)
             if result.success:
                 return result
 
@@ -484,15 +548,21 @@ class BrowserBridge:
         """
         Try to click button using text-based matching.
 
-        PRODUCTION FIX: Uses starts-with matching to handle dynamic text
-        like "BUY+0.030 SOL" when searching for "BUY".
+        PRODUCTION FIX 2025-12-01: Added exact match FIRST to prevent X->X2 mismatch.
+        Order: exact match -> starts-with -> contains
         """
         patterns = SelectorStrategy.get_text_patterns(button)
 
         # JavaScript to find button by text patterns
+        # FIXED: Try EXACT match first to prevent 'X' matching 'X2'
         js_code = """
         (patterns) => {
             const allButtons = Array.from(document.querySelectorAll('button'));
+            // Also check divs that act as buttons (rugs.fun uses div containers)
+            const allClickables = [
+                ...allButtons,
+                ...Array.from(document.querySelectorAll('div[class*="button"], div[class*="Button"]'))
+            ];
 
             // Improved visibility check (handles position:fixed)
             const isVisible = (el) => {
@@ -514,12 +584,30 @@ class BrowserBridge:
                        el.getAttribute('aria-disabled') !== 'true';
             };
 
-            const visibleButtons = allButtons.filter(b => isVisible(b) && isEnabled(b));
+            const visibleButtons = allClickables.filter(b => isVisible(b) && isEnabled(b));
 
             for (const pattern of patterns) {
-                // Strategy 1: Starts with (handles "BUY" -> "BUY+0.030 SOL")
+                // Strategy 1: EXACT MATCH FIRST (prevents 'X' matching 'X2')
                 let target = visibleButtons.find(b => {
                     const text = b.textContent.trim();
+                    return text === pattern || text.toUpperCase() === pattern.toUpperCase();
+                });
+
+                if (target) {
+                    target.click();
+                    return { success: true, text: target.textContent.trim(), method: 'exact' };
+                }
+            }
+
+            // Strategy 2: Starts-with (only if no exact match found)
+            for (const pattern of patterns) {
+                let target = visibleButtons.find(b => {
+                    const text = b.textContent.trim();
+                    // Skip if this would be a partial match that could cause issues
+                    // e.g., 'X' should not match 'X2'
+                    if (pattern.length === 1 && text.length > 1) {
+                        return false;  // Single char pattern shouldn't match longer text via starts-with
+                    }
                     return text.startsWith(pattern) || text.toUpperCase().startsWith(pattern.toUpperCase());
                 });
 
@@ -527,9 +615,11 @@ class BrowserBridge:
                     target.click();
                     return { success: true, text: target.textContent.trim(), method: 'starts-with' };
                 }
+            }
 
-                // Strategy 2: Contains (more flexible)
-                target = visibleButtons.find(b => {
+            // Strategy 3: Contains (most flexible, last resort)
+            for (const pattern of patterns) {
+                let target = visibleButtons.find(b => {
                     const text = b.textContent.trim().toUpperCase();
                     return text.includes(pattern.toUpperCase());
                 });

@@ -7,6 +7,7 @@ COLOR_GRID_LINE = "#2d3b48"     # Grid
 COLOR_TEXT_PRICE = "#ffd700"    # Gold
 COLOR_CANDLE_UP = "#00e676"     # Green
 COLOR_CANDLE_DOWN = "#ff3d00"   # Red
+COLOR_PRESALE = "#ffcc00"       # Yellow/Gold for presale/waiting phases
 
 class RugsChartLog(tk.Canvas):
     """
@@ -18,10 +19,13 @@ class RugsChartLog(tk.Canvas):
         self.width = width
         self.height = height
         
-        self.prices = []        # List of dicts: {'o', 'c', 'h', 'l'}
+        self.prices = []        # List of dicts: {'o', 'c', 'h', 'l', 'phase'}
         self.current_price = 1.0
-        self.history_size = 100 # Number of candles to show
-        
+        self.current_phase = 'TRADING'  # Track current phase for yellow line
+        self.history_size = 200 # Number of candles to show (increased for better density)
+        self.visible_candles = 100  # How many candles to display (for zoom)
+        self.max_candle_width = 8  # Cap candle width for visual consistency
+
         self.bind("<Configure>", self._on_resize)
         
     def _on_resize(self, event):
@@ -29,33 +33,64 @@ class RugsChartLog(tk.Canvas):
         self.height = event.height
         self.draw_chart()
         
-    def update_tick(self, price, is_new_candle=False):
+    def update_tick(self, price, is_new_candle=False, phase='TRADING'):
         """
         Update the chart with a new price tick.
+
+        Args:
+            price: Current price multiplier
+            is_new_candle: Whether to start a new candle
+            phase: Current game phase ('TRADING', 'WAITING', 'COOLDOWN', 'COUNTDOWN')
         """
         # Convert Decimal to float for chart operations
         price = float(price)
+        self.current_phase = phase
+
+        # Determine if this is a presale/waiting phase (yellow line)
+        is_presale = phase in ('WAITING', 'COOLDOWN', 'COUNTDOWN', 'PRE_ROUND')
 
         if not self.prices:
-             self.prices.append({'o': price, 'c': price, 'h': price, 'l': price})
+            self.prices.append({'o': price, 'c': price, 'h': price, 'l': price, 'phase': phase})
 
         self.current_price = price
 
         if is_new_candle:
-             self.prices.append({'o': price, 'c': price, 'h': price, 'l': price})
-             if len(self.prices) > self.history_size:
-                 self.prices.pop(0)
+            self.prices.append({'o': price, 'c': price, 'h': price, 'l': price, 'phase': phase})
+            if len(self.prices) > self.history_size:
+                self.prices.pop(0)
         else:
-             c = self.prices[-1]
-             c['c'] = price
-             c['h'] = max(c['h'], price)
-             c['l'] = min(c['l'], price)
+            c = self.prices[-1]
+            c['c'] = price
+            c['h'] = max(c['h'], price)
+            c['l'] = min(c['l'], price)
+            c['phase'] = phase  # Update phase for current candle
 
         self.draw_chart()
         
     def reset(self):
         self.prices = []
         self.current_price = 1.0
+        self.current_phase = 'TRADING'
+        self.visible_candles = 100  # Reset zoom level
+        self.draw_chart()
+
+    # ========================================================================
+    # ZOOM CONTROLS
+    # ========================================================================
+
+    def zoom_in(self):
+        """Zoom in (show fewer candles, larger size)"""
+        self.visible_candles = max(20, int(self.visible_candles * 0.7))
+        self.draw_chart()
+
+    def zoom_out(self):
+        """Zoom out (show more candles, smaller size)"""
+        self.visible_candles = min(self.history_size, int(self.visible_candles * 1.4))
+        self.draw_chart()
+
+    def reset_zoom(self):
+        """Reset to default zoom level"""
+        self.visible_candles = 100
         self.draw_chart()
 
     def get_y_log(self, price, min_log, range_log, draw_h):
@@ -73,15 +108,18 @@ class RugsChartLog(tk.Canvas):
 
     def draw_chart(self):
         self.delete("all")
-        
+
         if not self.prices:
             return
-            
+
         w, h = self.width, self.height
         draw_h = h - 100 # Padding for text/grid
-        
-        # 1. Determine Range
-        vals = [p['h'] for p in self.prices] + [p['l'] for p in self.prices]
+
+        # Get visible candles (respects zoom level)
+        visible_prices = self.prices[-self.visible_candles:]
+
+        # 1. Determine Range (based on visible candles only)
+        vals = [p['h'] for p in visible_prices] + [p['l'] for p in visible_prices]
         if not vals: return
         
         max_val = max(vals)
@@ -111,29 +149,46 @@ class RugsChartLog(tk.Canvas):
                 self.create_text(20, y - 10, text=f"{p}x", fill="#5fa8d3", font=("Arial", 10), anchor="w")
 
         # 3. Draw Candles
-        num_candles = len(self.prices)
+        num_candles = len(visible_prices)
         if num_candles == 0: return
-        
-        candle_w = (w - 60) / num_candles
-        
-        for i, p in enumerate(self.prices):
-            x = 50 + i * candle_w
-            
+
+        # Calculate candle width with cap for visual consistency
+        raw_candle_w = (w - 60) / num_candles
+        candle_w = min(raw_candle_w, self.max_candle_width)
+
+        # Center candles in available space if we're using capped width
+        total_candles_width = candle_w * num_candles
+        chart_area = w - 60
+        x_offset = 50 + (chart_area - total_candles_width) / 2 if total_candles_width < chart_area else 50
+
+        for i, p in enumerate(visible_prices):
+            x = x_offset + i * candle_w
+
             y_open = self.get_y_log(p['o'], min_log, range_log, draw_h)
             y_close = self.get_y_log(p['c'], min_log, range_log, draw_h)
             y_high = self.get_y_log(p['h'], min_log, range_log, draw_h)
             y_low = self.get_y_log(p['l'], min_log, range_log, draw_h)
-            
-            color = COLOR_CANDLE_UP if p['c'] >= p['o'] else COLOR_CANDLE_DOWN
-            
+
+            # Determine candle color based on phase and price movement
+            phase = p.get('phase', 'TRADING')
+            is_presale = phase in ('WAITING', 'COOLDOWN', 'COUNTDOWN', 'PRE_ROUND')
+
+            if is_presale:
+                # Yellow for presale/waiting phases (connects games visually)
+                color = COLOR_PRESALE
+            elif p['c'] >= p['o']:
+                color = COLOR_CANDLE_UP
+            else:
+                color = COLOR_CANDLE_DOWN
+
             # Wick
             self.create_line(x + candle_w/2, y_high, x + candle_w/2, y_low, fill=color)
-            
+
             # Body
             pad = 1 if candle_w > 3 else 0
-            if abs(y_open - y_close) < 1: 
+            if abs(y_open - y_close) < 1:
                 y_close = y_open + 1 # Min height
-                
+
             self.create_rectangle(x + pad, y_open, x + candle_w - pad, y_close, fill=color, outline=color)
 
         # 4. Price Overlay

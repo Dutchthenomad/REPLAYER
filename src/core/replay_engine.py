@@ -65,7 +65,8 @@ class ReplayEngine:
             recordings_dir=config.FILES['recordings_dir'],
             buffer_size=recording_buffer_size
         )
-        self.auto_recording = config.LIVE_FEED.get('auto_recording', True)
+        # Default to disabled - user must explicitly enable recording from menu
+        self.auto_recording = config.LIVE_FEED.get('auto_recording', False)
 
         # Thread safety with proper initialization
         self._lock = threading.RLock()

@@ -129,12 +129,14 @@ class TestBotInterfaceInfo:
         assert info['can_sell'] == True
         assert 'SELL' in info['valid_actions']
 
-    def test_info_cannot_buy_with_position(self, loaded_game_state, trade_manager, bot_interface):
-        """Test can_buy is False when position active"""
+    def test_info_can_buy_with_position_dca(self, loaded_game_state, trade_manager, bot_interface):
+        """Test can_buy is True when position active (DCA allowed)"""
         trade_manager.execute_buy(Decimal('0.005'))
         info = bot_interface.bot_get_info()
 
-        assert info['can_buy'] == False
+        # DCA (position accumulation) is allowed - can buy even with existing position
+        assert info['can_buy'] == True
+        assert 'BUY' in info['valid_actions']
 
 
 class TestBotInterfaceActions:
@@ -214,15 +216,20 @@ class TestBotInterfaceValidation:
         assert result['success'] == False
         assert 'reason' in result
 
-    def test_cannot_buy_twice(self, loaded_game_state, bot_interface):
-        """Test cannot buy when position active"""
+    def test_can_buy_twice_accumulates_position(self, loaded_game_state, bot_interface):
+        """Test buying twice accumulates position (DCA allowed)"""
         # First buy
         result1 = bot_interface.bot_execute_action("BUY", Decimal('0.005'))
         assert result1['success'] == True
 
-        # Second buy fails
+        # Second buy succeeds (position accumulation / DCA)
         result2 = bot_interface.bot_execute_action("BUY", Decimal('0.005'))
-        assert result2['success'] == False
+        assert result2['success'] == True
+
+        # Verify position accumulated
+        obs = bot_interface.bot_get_observation()
+        assert obs['position'] is not None
+        assert obs['position']['amount'] == 0.010  # 0.005 + 0.005
 
 
 class TestBotInterfaceEdgeCases:

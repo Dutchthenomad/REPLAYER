@@ -21,8 +21,16 @@ Extracted from browser_executor.py during Phase 1 refactoring.
 # ============================================================================
 
 # BUY button selectors - handles "BUY+0.030 SOL" dynamic text
+# UPDATED 2025-12-01: New rugs.fun UI uses div containers, not button elements
+# FIXED 2025-12-01: Use [class*=] attribute selector for underscore-prefixed classes
 BUY_BUTTON_SELECTORS = [
-    # Primary: Regex starts-with (handles "BUY+0.030 SOL")
+    # Primary: New rugs.fun specific class (div container)
+    'div[class*="_buttonSection_"]:nth-child(1)',
+    '[class*="_buttonsRow_"] > div:first-child',
+    # Click the inner button if present
+    'div[class*="_buttonSection_"]:nth-child(1) button',
+    '[class*="_buttonsRow_"] > div:first-child button',
+    # Regex starts-with (handles "BUY+0.030 SOL")
     'button >> text=/^BUY/i',
     # Case-insensitive class patterns
     'button[class*="buy" i]',
@@ -41,8 +49,16 @@ BUY_BUTTON_SELECTORS = [
 ]
 
 # SELL button selectors - handles "SELL-0.030 SOL" dynamic text
+# UPDATED 2025-12-01: New rugs.fun UI uses div containers, not button elements
+# FIXED 2025-12-01: Use [class*=] attribute selector for underscore-prefixed classes
 SELL_BUTTON_SELECTORS = [
-    # Primary: Regex starts-with (handles "SELL-X.XXX SOL")
+    # Primary: New rugs.fun specific class (div container)
+    'div[class*="_buttonSection_"]:nth-child(2)',
+    '[class*="_buttonsRow_"] > div:nth-child(2)',
+    # Click the inner button if present
+    'div[class*="_buttonSection_"]:nth-child(2) button',
+    '[class*="_buttonsRow_"] > div:nth-child(2) button',
+    # Regex starts-with (handles "SELL-X.XXX SOL")
     'button >> text=/^SELL/i',
     # Case-insensitive class patterns
     'button[class*="sell" i]',
@@ -61,8 +77,15 @@ SELL_BUTTON_SELECTORS = [
 ]
 
 # SIDEBET button selectors - handles variations like "SIDE BET", "SIDEBET"
+# UPDATED 2025-12-01: New rugs.fun UI uses .bet-button class
 SIDEBET_BUTTON_SELECTORS = [
-    # Primary: Regex starts-with
+    # Primary: New rugs.fun specific class
+    '.bet-button',
+    '[class*="bet-button"]',
+    'div.bet-button',
+    '[class*="sidebet-banner"] [class*="bet-button"]',
+    '[class*="sidebet-container"] [class*="bet-button"]',
+    # Regex starts-with
     'button >> text=/^SIDE/i',
     'button >> text=/^SIDEBET/i',
     # Case-insensitive class patterns
@@ -99,10 +122,18 @@ BET_AMOUNT_INPUT_SELECTORS = [
 # ============================================================================
 
 CLEAR_BUTTON_SELECTORS = [
+    # Primary: New rugs.fun specific class (UPDATED 2025-12-01)
+    # FIXED: Use [class*=] attribute selector for underscore-prefixed classes
+    'button[class*="_clearButton_"]',
+    '[class*="_clearButton_"]',
+    '[class*="_inputActions_"] button',
+    '[class*="_amountInputContainer_"] [class*="_clearButton_"]',
     # Handle various X/clear button representations
-    'button >> text=/^[X×✕✖]/i',
+    # NOTE: Exact "X" text match should be tried before starts-with to avoid matching "X2"
+    'button >> text=/^[X×✕✖]$/i',  # Exact single char match only
     'button:has-text("X")',
     'button[class*="clear" i]',
+    'button[class*="clearButton" i]',
     'input[type="number"] ~ button',
     'button[title*="clear"]',
     '[data-action="clear-bet"]',
@@ -169,31 +200,56 @@ MAX_BUTTON_SELECTORS = [
 # PERCENTAGE BUTTON SELECTORS (Partial Sell)
 # ============================================================================
 
+# UPDATED 2025-12-01: New rugs.fun UI uses ._percentageBtn_1mzic_139 class
+# FIXED 2025-12-01: Use [class*=] attribute selector for underscore-prefixed classes
 PERCENTAGE_10_SELECTORS = [
+    # Primary: New rugs.fun specific class
+    'button[class*="_percentageBtn_"]:nth-child(1)',
+    '[class*="_sellControlButtonsContainer_"] button:nth-child(1)',
+    '[class*="_percentageBtn_"]:nth-child(1)',
+    # Fallback text-based
     'button >> text=/^10%/i',
     'button:has-text("10%")',
     'button:has-text("10 %")',
     '[data-percentage="10%"]',
     'button[class*="pct-10"]',
+    'button[class*="percentageBtn"]:nth-child(1)',
 ]
 
 PERCENTAGE_25_SELECTORS = [
+    # Primary: New rugs.fun specific class
+    'button[class*="_percentageBtn_"]:nth-child(2)',
+    '[class*="_sellControlButtonsContainer_"] button:nth-child(2)',
+    '[class*="_percentageBtn_"]:nth-child(2)',
+    # Fallback text-based
     'button >> text=/^25%/i',
     'button:has-text("25%")',
     'button:has-text("25 %")',
     '[data-percentage="25%"]',
     'button[class*="pct-25"]',
+    'button[class*="percentageBtn"]:nth-child(2)',
 ]
 
 PERCENTAGE_50_SELECTORS = [
+    # Primary: New rugs.fun specific class
+    'button[class*="_percentageBtn_"]:nth-child(3)',
+    '[class*="_sellControlButtonsContainer_"] button:nth-child(3)',
+    '[class*="_percentageBtn_"]:nth-child(3)',
+    # Fallback text-based
     'button >> text=/^50%/i',
     'button:has-text("50%")',
     'button:has-text("50 %")',
     '[data-percentage="50%"]',
     'button[class*="pct-50"]',
+    'button[class*="percentageBtn"]:nth-child(3)',
 ]
 
 PERCENTAGE_100_SELECTORS = [
+    # Primary: New rugs.fun specific class
+    'button[class*="_percentageBtn_"]:nth-child(4)',
+    '[class*="_sellControlButtonsContainer_"] button:nth-child(4)',
+    '[class*="_percentageBtn_"]:nth-child(4)',
+    # Fallback text-based
     'button >> text=/^100%/i',
     'button >> text=/^ALL/i',
     'button:has-text("100%")',
@@ -201,6 +257,7 @@ PERCENTAGE_100_SELECTORS = [
     'button:has-text("ALL")',
     '[data-percentage="100%"]',
     'button[class*="pct-100"]',
+    'button[class*="percentageBtn"]:nth-child(4)',
 ]
 
 # ============================================================================
