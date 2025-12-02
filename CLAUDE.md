@@ -4,24 +4,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Project**: REPLAYER - Dual-Mode Replay/Live Trading Platform for Rugs.fun
 **Location**: `/home/nomad/Desktop/REPLAYER/`
-**Status**: Phase 9.1 Complete (CDP Browser Connection)
+**Status**: ✅ Phase 9 COMPLETE (v0.9.4) - Ready for Phase 10
 **Current Branch**: `main`
+**Last Updated**: 2025-12-01
 
 ---
 
-## CRITICAL: Production Readiness Audit Complete (Nov 24, 2025)
+## 🎉 Phase 9 Complete: Button Mapping & Browser Automation Production Ready
 
-**Audit Results**: MEDIUM-HIGH risk level. System requires critical fixes before production.
-- See `COMPREHENSIVE_AUDIT_REPORT.md` for full audit findings
-- See `PRODUCTION_READINESS_PLAN.md` for 4-week fix roadmap
+**Tag**: `v0.9.4` | **Date**: December 1, 2025
 
-**Next Priority**: Begin Phase 10 (Critical Fixes) immediately
+### Key Accomplishments
+
+1. **Browser Selectors Production Ready** (`src/bot/browser_selectors.py`)
+   - Multi-strategy selector system (text → class → structural → ARIA)
+   - Support for div containers (BUY/SELL are divs, not buttons in new UI)
+   - Dynamic text handling ("BUY" matches "BUY+0.030 SOL")
+   - Percentage buttons for partial sells (10%, 25%, 50%, 100%)
+   - Clear button (X) with Unicode variant support
+   - Sidebet `.bet-button` class detection
+
+2. **Browser Bridge Improvements** (`src/bot/browser_bridge.py`)
+   - Starts-with text matching for dynamic button text
+   - Exponential backoff retry logic (3 attempts)
+   - Pre-click state verification
+   - Timeout handling to prevent deadlocks
+
+3. **CDP Browser Connection** (`src/browser_automation/cdp_browser_manager.py`)
+   - Chrome DevTools Protocol connection to system Chrome
+   - Phantom wallet persistence via Chrome profile
+   - Bypasses Playwright MV3 extension bug
+
+4. **Modern UI Overhaul**
+   - Theme-aware chart colors
+   - Enhanced dialogs and overlays
+   - Approaching deployment-ready state
 
 ---
 
-## Phase 9.1 Complete: CDP Browser Connection
+## Phase 10: Bot & ML Integration (NEXT)
 
-### What Was Implemented (Nov 22, 2025)
+**Priority Tasks**:
+1. RL model integration with working browser automation
+2. Live trading validation in REPLAYER
+3. SidebetPredictor real-time inference
+4. Modern UI deployment finalization
+
+**Production Readiness** (from Nov 24 audit):
+- See `deprecated/documentation/COMPREHENSIVE_AUDIT_REPORT.md` for findings
+- See `deprecated/documentation/PRODUCTION_READINESS_PLAN.md` for fix roadmap
+
+---
+
+## CDP Browser Connection (Phase 9.1)
+
+### What Was Implemented
 
 **Problem Solved**: Playwright's bundled Chromium has a known MV3 extension bug - Phantom extension appears in toolbar but `window.phantom` never gets injected.
 
