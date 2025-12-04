@@ -7,6 +7,8 @@ import os
 import json
 import logging
 import decimal
+import sys
+import threading
 from pathlib import Path
 from decimal import Decimal
 from typing import Dict, Any, Optional, Union
@@ -15,6 +17,24 @@ from typing import Dict, Any, Optional, Union
 class ConfigError(Exception):
     """Configuration validation error"""
     pass
+
+
+def _safe_int_env(name: str, default: int, min_val: int = None, max_val: int = None) -> int:
+    """
+    Safely parse integer environment variable with bounds.
+    Falls back to default on invalid values.
+    """
+    logger_local = logging.getLogger(__name__)
+    try:
+        value = int(os.getenv(name, str(default)))
+        if min_val is not None:
+            value = max(min_val, value)
+        if max_val is not None:
+            value = min(max_val, value)
+        return value
+    except (ValueError, TypeError):
+        logger_local.warning(f"Invalid {name}, using default {default}")
+        return default
 
 
 class Config:
@@ -44,7 +64,7 @@ class Config:
         'rug_liquidation_price': Decimal('0.02'),
         'max_position_size': Decimal('10.0'),
         'stop_loss_threshold': Decimal('0.5'),
-        'blocked_phases': ["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "UNKNOWN"],
+        'blocked_phases': frozenset(["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "UNKNOWN"]),
     }
     
     # ========== Playback Settings ==========
@@ -103,19 +123,13 @@ class Config:
             'backup_count': 3,
         }
     
-    FILES = property(lambda self: self.get_files_config())
-
     # ========== Live Feed Settings (With Validation) ==========
     @classmethod
     def get_live_feed_config(cls) -> dict:
         """Get live feed configuration with validation"""
-        ring_buffer_size = int(os.getenv('RUGS_RING_BUFFER_SIZE', '5000'))
-        recording_buffer_size = int(os.getenv('RUGS_RECORDING_BUFFER_SIZE', '100'))
+        ring_buffer_size = _safe_int_env('RUGS_RING_BUFFER_SIZE', 5000, 100, 100000)
+        recording_buffer_size = _safe_int_env('RUGS_RECORDING_BUFFER_SIZE', 100, 10, 1000)
         auto_recording = os.getenv('RUGS_AUTO_RECORDING', 'false').lower() == 'true'
-        
-        # Validate and enforce minimum values
-        ring_buffer_size = max(100, min(100000, ring_buffer_size))  # 100-100k range
-        recording_buffer_size = max(10, min(1000, recording_buffer_size))  # 10-1k range
         
         return {
             'ring_buffer_size': ring_buffer_size,
@@ -196,6 +210,8 @@ class Config:
             config_file: Optional path to JSON config file
             validate: Whether to validate configuration on init
         """
+        self._lock = threading.RLock()
+        self._files_config: Optional[dict] = None
         self.config_file = config_file
         self._custom_settings = {}
         self._logger = None  # Will be set after logger initialization
@@ -210,17 +226,32 @@ class Config:
         # Validate configuration
         if validate:
             self.validate()
+
+    @property
+    def FILES(self) -> dict:
+        """Cached file configuration"""
+        with self._lock:
+            if self._files_config is None:
+                self._files_config = self.get_files_config()
+            return self._files_config
     
-    def _ensure_directories(self):
-        """Ensure all required directories exist"""
+    def _ensure_directories(self) -> Dict[str, bool]:
+        """Ensure all required directories exist, track success"""
+        status: Dict[str, bool] = {}
         try:
-            files_config = self.get_files_config()
+            files_config = self.FILES
             for key in ['recordings_dir', 'config_dir', 'log_dir']:
                 path = files_config[key]
-                path.mkdir(parents=True, exist_ok=True)
+                try:
+                    path.mkdir(parents=True, exist_ok=True)
+                    status[key] = path.exists() and path.is_dir()
+                except Exception as e:
+                    print(f"Warning: Could not create {key}: {e}")
+                    status[key] = False
         except Exception as e:
-            # Can't use logger yet, use print for bootstrap errors
             print(f"Warning: Could not create directories: {e}")
+        self._directory_status = status
+        return status
     
     def validate(self):
         """
@@ -267,6 +298,34 @@ class Config:
             errors.append("ring_buffer_size must be at least 100")
         if live_feed['recording_buffer_size'] < 10:
             errors.append("recording_buffer_size must be at least 10")
+
+        # Validate logging
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        if self.LOGGING['level'].upper() not in valid_levels:
+            errors.append(f"Invalid log level: {self.LOGGING['level']}")
+
+        # Validate BOT
+        try:
+            from bot.strategies import list_strategies
+            valid_strategies = list_strategies()
+            if self.BOT.get('default_strategy') and \
+               self.BOT['default_strategy'] not in valid_strategies:
+                errors.append(f"Invalid strategy: {self.BOT['default_strategy']}")
+        except Exception:
+            # Avoid import cycles during early bootstrap; skip if unavailable
+            pass
+
+        # Validate NETWORK
+        if self.NETWORK.get('timeout', 0) <= 0:
+            errors.append("Network timeout must be positive")
+        if self.NETWORK.get('max_retries', 0) < 0:
+            errors.append("max_retries cannot be negative")
+
+        # Validate directory creation status
+        if hasattr(self, '_directory_status'):
+            for key, success in self._directory_status.items():
+                if not success:
+                    errors.append(f"Required directory {key} could not be created")
         
         if errors:
             raise ConfigError("Configuration validation failed:\n" + "\n".join(errors))
@@ -288,19 +347,14 @@ class Config:
             
             with open(filepath, 'r') as f:
                 data = json.load(f)
-                
-            # Convert string Decimals back to Decimal objects
-            for section in ['financial', 'game_rules', 'bot']:
-                if section in data:
-                    for key, value in data[section].items():
-                        if isinstance(value, str) and '.' in value:
-                            try:
-                                data[section][key] = Decimal(value)
-                            except (decimal.InvalidOperation, ValueError):
-                                # AUDIT FIX: Catch specific Decimal conversion exceptions
-                                pass
+
+            # Deserialize sections to restore types
+            for section in ['financial', 'game_rules', 'bot', 'files']:
+                if section in data and isinstance(data[section], dict):
+                    data[section] = self._deserialize_dict(data[section])
             
-            self._custom_settings = data
+            with self._lock:
+                self._custom_settings = data
             
             if self._logger:
                 self._logger.info(f"Loaded configuration from {filepath}")
@@ -339,7 +393,10 @@ class Config:
         }
         
         # Merge with custom settings
-        for section, values in self._custom_settings.items():
+        with self._lock:
+            custom_settings = self._custom_settings.copy()
+
+        for section, values in custom_settings.items():
             if section in config_dict:
                 config_dict[section].update(values)
             else:
@@ -356,11 +413,28 @@ class Config:
             self._logger.info(f"Saved configuration to {filepath}")
     
     def _serialize_dict(self, d: dict) -> dict:
-        """Convert Decimal values to strings for JSON serialization"""
+        """Serialize dict with type preservation"""
         result = {}
         for key, value in d.items():
             if isinstance(value, Decimal):
-                result[key] = str(value)
+                result[key] = {'__decimal__': str(value)}
+            elif isinstance(value, Path):
+                result[key] = {'__path__': str(value)}
+            else:
+                result[key] = value
+        return result
+
+    def _deserialize_dict(self, d: dict) -> dict:
+        """Deserialize dict with type restoration"""
+        result = {}
+        for key, value in d.items():
+            if isinstance(value, dict):
+                if '__decimal__' in value:
+                    result[key] = Decimal(value['__decimal__'])
+                elif '__path__' in value:
+                    result[key] = Path(value['__path__'])
+                else:
+                    result[key] = value
             else:
                 result[key] = value
         return result
@@ -377,23 +451,22 @@ class Config:
         Returns:
             Configuration value or default
         """
-        # Check custom settings first
-        section_lower = section.lower()
-        if section_lower in self._custom_settings:
-            if key in self._custom_settings[section_lower]:
-                return self._custom_settings[section_lower][key]
-        
-        # Fall back to default settings
-        section_attr = section.upper()
-        if hasattr(self, section_attr):
-            section_dict = getattr(self, section_attr)
-            if callable(section_dict):
-                section_dict = section_dict()
-            if isinstance(section_dict, dict):
-                return section_dict.get(key, default)
+        with self._lock:
+            section_lower = section.lower()
+            if section_lower in self._custom_settings:
+                if key in self._custom_settings[section_lower]:
+                    return self._custom_settings[section_lower][key]
+            
+            section_attr = section.upper()
+            if hasattr(self, section_attr):
+                section_dict = getattr(self, section_attr)
+                if callable(section_dict):
+                    section_dict = section_dict()
+                if isinstance(section_dict, dict):
+                    return section_dict.get(key, default)
         
         return default
-    
+
     def set(self, section: str, key: str, value: Any):
         """
         Set a configuration value
@@ -403,10 +476,11 @@ class Config:
             key: Configuration key
             value: Value to set
         """
-        section_lower = section.lower()
-        if section_lower not in self._custom_settings:
-            self._custom_settings[section_lower] = {}
-        self._custom_settings[section_lower][key] = value
+        with self._lock:
+            section_lower = section.lower()
+            if section_lower not in self._custom_settings:
+                self._custom_settings[section_lower] = {}
+            self._custom_settings[section_lower][key] = value
     
     def set_logger(self, logger):
         """Set logger instance after logger initialization"""
@@ -420,20 +494,22 @@ class Config:
     
     def to_dict(self) -> dict:
         """Export entire configuration as dictionary"""
+        with self._lock:
+            custom_settings = self._custom_settings.copy()
+
         return {
             'financial': self._serialize_dict(self.FINANCIAL),
             'game_rules': self._serialize_dict(self.GAME_RULES),
             'playback': self.PLAYBACK,
             'ui': self.UI,
             'memory': self.MEMORY,
-            'files': {k: str(v) if isinstance(v, Path) else v 
-                     for k, v in self.get_files_config().items()},
+            'files': {k: str(v) for k, v in self.FILES.items()},
             'live_feed': self.get_live_feed_config(),
             'logging': self.LOGGING,
             'bot': self._serialize_dict(self.BOT),
             'network': self.NETWORK,
             'themes': self.THEMES,
-            'custom': self._custom_settings,
+            'custom': custom_settings,
         }
 
 
@@ -454,6 +530,8 @@ config.set_logger(logger)
 # Validate configuration after logger is set
 try:
     config.validate()
+    logger.info("Configuration validated successfully")
 except ConfigError as e:
-    logger.error(f"Configuration validation failed: {e}")
-    # Continue with defaults, but log the error
+    logger.critical(f"FATAL: Configuration validation failed: {e}")
+    print(f"FATAL: Configuration validation failed: {e}", file=sys.stderr)
+    sys.exit(1)

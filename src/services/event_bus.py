@@ -257,39 +257,20 @@ class EventBus:
         This prevents deadlocks when callbacks publish events.
         AUDIT FIX 2: Updated to work with (cb_id, ref) tuple format
         """
-        # AUDIT FIX: Get callbacks THEN release lock before calling them
         callbacks_to_call = []
         with self._sub_lock:
             if event in self._subscribers:
-                # Clean up dead weak references while we're here
                 alive_entries = []
+                dead_entries = []
                 for cb_id, ref in self._subscribers[event]:
-                    if hasattr(ref, '__call__') and hasattr(ref, '__self__'):
-                        # It's a weakref - call it to get the actual callback
-                        cb = ref()
-                        if cb is not None:
-                            callbacks_to_call.append(cb)
-                            alive_entries.append((cb_id, ref))
-                    elif callable(ref):
-                        # Check if it's a weakref by trying to call it
-                        try:
-                            cb = ref()
-                            if cb is not None:
-                                callbacks_to_call.append(cb)
-                                alive_entries.append((cb_id, ref))
-                        except TypeError:
-                            # Not a weakref, it's a direct reference
-                            callbacks_to_call.append(ref)
-                            alive_entries.append((cb_id, ref))
-                    else:
-                        # Direct reference (not callable in the weakref sense)
-                        callbacks_to_call.append(ref)
+                    callback = self._resolve_callback(ref)
+                    if callback:
+                        callbacks_to_call.append(callback)
                         alive_entries.append((cb_id, ref))
-
-                # Update list with only alive callbacks
+                    else:
+                        dead_entries.append((cb_id, ref))
                 self._subscribers[event] = alive_entries
 
-        # AUDIT FIX: Call callbacks OUTSIDE the lock!
         for callback in callbacks_to_call:
             try:
                 callback({'name': event.value, 'data': data})
@@ -297,6 +278,17 @@ class EventBus:
             except Exception as e:
                 self._stats['errors'] += 1
                 logger.error(f"Error in callback for {event.value}: {e}", exc_info=True)
+
+    def _resolve_callback(self, ref):
+        """Safely resolve weak or direct callback reference"""
+        try:
+            if isinstance(ref, weakref.ReferenceType):
+                return ref()
+            if callable(ref):
+                return ref
+        except Exception as e:
+            logger.warning(f"Failed to resolve callback: {e}")
+        return None
 
     def get_stats(self) -> Dict[str, Any]:
         """

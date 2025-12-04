@@ -35,7 +35,12 @@ class AggressiveStrategy(TradingStrategy):
         """Make aggressive trading decision"""
 
         if not observation:
-            return ("WAIT", None, "No game state available")
+            return self._validate_action(
+                "WAIT",
+                None,
+                "No game state available",
+                info.get("valid_actions", [])
+            )
 
         # Extract state
         state = observation['current_state']
@@ -46,11 +51,15 @@ class AggressiveStrategy(TradingStrategy):
         price = Decimal(str(state['price']))
         tick = state['tick']
         balance = Decimal(str(wallet['balance']))
+        valid_actions = info.get("valid_actions", [])
+
+        def decide_action(action: str, amount: Optional[Decimal], reasoning: str):
+            return self._validate_action(action, amount, reasoning, valid_actions)
 
         # Buy aggressively if no position
         if position is None and info['can_buy']:
             if price < self.BUY_THRESHOLD and balance >= self.BUY_AMOUNT:
-                return (
+                return decide_action(
                     "BUY",
                     self.BUY_AMOUNT,
                     f"Aggressive entry at {price:.2f}x"
@@ -62,7 +71,7 @@ class AggressiveStrategy(TradingStrategy):
 
             # Big profit target
             if pnl_pct > self.TAKE_PROFIT:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"Big profit exit at +{pnl_pct:.1f}%"
@@ -70,7 +79,7 @@ class AggressiveStrategy(TradingStrategy):
 
             # Wider stop loss
             if pnl_pct < self.STOP_LOSS:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"Stop loss at {pnl_pct:.1f}%"
@@ -79,7 +88,7 @@ class AggressiveStrategy(TradingStrategy):
         # Place sidebets when available
         if sidebet is None and info['can_sidebet']:
             if balance >= self.SIDEBET_AMOUNT:
-                return (
+                return decide_action(
                     "SIDE",
                     self.SIDEBET_AMOUNT,
                     f"Sidebet at tick {tick}"
@@ -88,13 +97,13 @@ class AggressiveStrategy(TradingStrategy):
         # Default: wait
         if position:
             pnl_pct = Decimal(str(position['current_pnl_percent']))
-            return (
+            return decide_action(
                 "WAIT",
                 None,
                 f"Holding for bigger gains (P&L: {pnl_pct:.1f}%)"
             )
         else:
-            return (
+            return decide_action(
                 "WAIT",
                 None,
                 "Waiting for entry"

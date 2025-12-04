@@ -89,7 +89,12 @@ class FoundationalStrategy(TradingStrategy):
         """
 
         if not observation:
-            return ("WAIT", None, "No game state available")
+            return self._validate_action(
+                "WAIT",
+                None,
+                "No game state available",
+                info.get("valid_actions", [])
+            )
 
         # Extract state
         state = observation['current_state']
@@ -100,6 +105,10 @@ class FoundationalStrategy(TradingStrategy):
         price = Decimal(str(state['price']))
         tick = state['tick']
         balance = Decimal(str(wallet['balance']))
+        valid_actions = info.get("valid_actions", [])
+
+        def decide_action(action: str, amount: Optional[Decimal], reasoning: str):
+            return self._validate_action(action, amount, reasoning, valid_actions)
 
         # =====================================================================
         # POSITION MANAGEMENT (Priority 1: Exit existing positions)
@@ -111,7 +120,7 @@ class FoundationalStrategy(TradingStrategy):
 
             # Profit target: +100% (sweet spot median return)
             if pnl_pct >= self.PROFIT_TARGET:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"✅ Take profit at +{pnl_pct:.1f}% (target: {self.PROFIT_TARGET}%)"
@@ -119,7 +128,7 @@ class FoundationalStrategy(TradingStrategy):
 
             # Stop loss: -30% (conservative, prevents large losses)
             if pnl_pct <= self.STOP_LOSS:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"🛑 Stop loss at {pnl_pct:.1f}% (limit: {self.STOP_LOSS}%)"
@@ -127,7 +136,7 @@ class FoundationalStrategy(TradingStrategy):
 
             # Temporal risk: Exit before median rug time (tick 138)
             if tick >= self.MEDIAN_RUG_TICK:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"⏰ Exit at tick {tick} (median rug time: {self.MEDIAN_RUG_TICK})"
@@ -135,7 +144,7 @@ class FoundationalStrategy(TradingStrategy):
 
             # Optimal hold time: 60 ticks for sweet spot
             if ticks_held >= self.MAX_HOLD_TICKS:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"⌛ Hold time exceeded ({ticks_held} ticks, optimal: {self.MAX_HOLD_TICKS})"
@@ -148,7 +157,7 @@ class FoundationalStrategy(TradingStrategy):
         if position is None and info['can_buy']:
             if self._should_enter(price, tick, balance):
                 self.entry_tick = tick  # Track entry time
-                return (
+                return decide_action(
                     "BUY",
                     self.BUY_AMOUNT,
                     f"🎯 Enter sweet spot at {price:.1f}x (tick {tick}, safe window: < {self.SAFE_WINDOW_TICKS})"
@@ -160,7 +169,7 @@ class FoundationalStrategy(TradingStrategy):
 
         if sidebet is None and info['can_sidebet']:
             if self._should_sidebet(tick, balance):
-                return (
+                return decide_action(
                     "SIDE",
                     self.SIDEBET_AMOUNT,
                     f"💰 Sidebet at tick {tick} (danger zone: {self.SIDEBET_TICK_MIN}-{self.SIDEBET_TICK_MAX})"
@@ -173,32 +182,32 @@ class FoundationalStrategy(TradingStrategy):
         if position:
             pnl_pct = Decimal(str(position['current_pnl_percent']))
             ticks_held = tick - self.entry_tick if self.entry_tick else 0
-            return (
+            return decide_action(
                 "WAIT",
                 None,
                 f"⏳ Holding (Price: {price:.1f}x, P&L: {pnl_pct:.1f}%, Held: {ticks_held} ticks)"
             )
         else:
             if price < self.ENTRY_PRICE_MIN:
-                return (
+                return decide_action(
                     "WAIT",
                     None,
                     f"⏳ Price too low ({price:.1f}x, need: {self.ENTRY_PRICE_MIN}x+)"
                 )
             elif price > self.ENTRY_PRICE_MAX:
-                return (
+                return decide_action(
                     "WAIT",
                     None,
                     f"⏳ Price too high ({price:.1f}x, max: {self.ENTRY_PRICE_MAX}x)"
                 )
             elif tick >= self.SAFE_WINDOW_TICKS:
-                return (
+                return decide_action(
                     "WAIT",
                     None,
                     f"⏳ Past safe window (tick {tick}, limit: {self.SAFE_WINDOW_TICKS})"
                 )
             else:
-                return (
+                return decide_action(
                     "WAIT",
                     None,
                     f"⏳ Waiting for sweet spot (Price: {price:.1f}x, Tick: {tick})"

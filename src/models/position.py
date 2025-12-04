@@ -36,6 +36,14 @@ class Position:
     pnl_sol: Optional[Decimal] = None
     pnl_percent: Optional[Decimal] = None
 
+    def __post_init__(self):
+        if self.entry_price <= 0:
+            raise ValueError(f"entry_price must be positive, got {self.entry_price}")
+        if self.amount <= 0:
+            raise ValueError(f"amount must be positive, got {self.amount}")
+        if self.entry_tick < 0:
+            raise ValueError(f"entry_tick cannot be negative, got {self.entry_tick}")
+
     def calculate_unrealized_pnl(self, current_price: Decimal) -> tuple[Decimal, Decimal]:
         """
         Calculate unrealized P&L for active position
@@ -114,17 +122,26 @@ class Position:
 
         return amount_to_reduce
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary"""
+    def to_dict(self, preserve_precision: bool = False) -> dict:
+        """Convert to dictionary
+
+        Args:
+            preserve_precision: If True, keep Decimals as strings
+        """
+        def convert(value):
+            if isinstance(value, Decimal):
+                return str(value) if preserve_precision else float(value)
+            return value
+
         return {
-            'entry_price': float(self.entry_price),
-            'amount': float(self.amount),
+            'entry_price': convert(self.entry_price),
+            'amount': convert(self.amount),
             'entry_time': self.entry_time,
             'entry_tick': self.entry_tick,
             'status': self.status,
-            'exit_price': float(self.exit_price) if self.exit_price else None,
+            'exit_price': convert(self.exit_price) if self.exit_price else None,
             'exit_time': self.exit_time,
             'exit_tick': self.exit_tick,
-            'pnl_sol': float(self.pnl_sol) if self.pnl_sol else None,
-            'pnl_percent': float(self.pnl_percent) if self.pnl_percent else None
+            'pnl_sol': convert(self.pnl_sol) if self.pnl_sol else None,
+            'pnl_percent': convert(self.pnl_percent) if self.pnl_percent else None
         }

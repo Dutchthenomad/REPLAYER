@@ -69,6 +69,7 @@ class BotConfigPanel:
         # Phase 8 Fix: Default to UI_LAYER mode (for live trading preparation)
         # BACKEND mode is for fast training, UI_LAYER learns realistic timing
         default_config = {
+            '_schema_version': 1,
             'execution_mode': 'ui_layer',  # Default to UI_LAYER mode
             'strategy': 'conservative',    # Default strategy
             'bot_enabled': False,          # Bot disabled by default
@@ -90,6 +91,27 @@ class BotConfigPanel:
             # Phase 8 Fix: Create default config file on first run
             logger.info("No bot config found, creating default configuration")
             self._save_default_config(default_config)
+
+        # Validate schema
+        allowed_modes = {'backend', 'ui_layer'}
+        if default_config.get('execution_mode') not in allowed_modes:
+            logger.warning(f"Invalid execution_mode '{default_config.get('execution_mode')}', resetting to ui_layer")
+            default_config['execution_mode'] = 'ui_layer'
+
+        allowed_strategies = set(list_strategies())
+        if default_config.get('strategy') not in allowed_strategies:
+            logger.warning(f"Invalid strategy '{default_config.get('strategy')}', resetting to conservative")
+            default_config['strategy'] = 'conservative'
+
+        # Sanitize balance precision (9 decimal places to avoid float noise)
+        if 'default_balance_sol' in default_config:
+            try:
+                default_config['default_balance_sol'] = round(
+                    float(default_config['default_balance_sol']), 9
+                )
+            except (TypeError, ValueError):
+                logger.warning("Invalid default_balance_sol; resetting to 0.0")
+                default_config['default_balance_sol'] = 0.0
 
         return default_config
 

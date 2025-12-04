@@ -12,10 +12,12 @@ from collections import defaultdict, deque
 import logging
 from enum import Enum
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
 # AUDIT FIX: Bounded history to prevent unbounded memory growth
-MAX_HISTORY_SIZE = 10000  # Max snapshots to keep
+MAX_HISTORY_SIZE = config.MEMORY.get('max_state_history', 1000)  # Configurable cap
 MAX_TRANSACTION_LOG_SIZE = 1000  # Max transactions to keep
 MAX_CLOSED_POSITIONS_SIZE = 500  # Max closed positions to keep
 

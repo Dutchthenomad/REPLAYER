@@ -3,8 +3,11 @@ Base strategy class for trading bots
 """
 
 from abc import ABC, abstractmethod
+import logging
 from decimal import Decimal
 from typing import Tuple, Optional, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 class TradingStrategy(ABC):
@@ -51,3 +54,26 @@ class TradingStrategy(ABC):
 
     def __str__(self):
         return self.name
+
+    def _validate_action(
+        self,
+        action: str,
+        amount: Optional[Decimal],
+        reasoning: str,
+        valid_actions: Optional[list]
+    ) -> Tuple[str, Optional[Decimal], str]:
+        """
+        Ensure the chosen action is allowed by the environment.
+        Falls back to WAIT if invalid to prevent illegal trades.
+        """
+        allowed = valid_actions or ["WAIT"]
+        normalized = action.upper()
+
+        if normalized not in allowed:
+            logger.warning(
+                f"Desired action {normalized} not in allowed actions {allowed}, "
+                "defaulting to WAIT"
+            )
+            return ("WAIT", None, "Action not permitted; waiting")
+
+        return (normalized, amount, reasoning)

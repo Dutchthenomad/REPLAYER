@@ -72,6 +72,8 @@ class TimingOverlay:
             x = screen_width - 200 if x is None else x
             y = screen_height - 300 if y is None else y
 
+        x, y = self._sanitize_position(x, y)
+
         self.window.geometry(f"+{x}+{y}")
 
         # Start hidden (will show when mode is UI_LAYER)
@@ -116,6 +118,14 @@ class TimingOverlay:
             logger.debug(f"Saved timing overlay config: {self.config}")
         except Exception as e:
             logger.error(f"Failed to save timing overlay config: {e}")
+
+    def _sanitize_position(self, x: int, y: int) -> tuple[int, int]:
+        """Ensure overlay coordinates stay within screen bounds."""
+        screen_width = self.parent.winfo_screenwidth()
+        screen_height = self.parent.winfo_screenheight()
+        safe_x = max(0, min(int(x), screen_width - 50))
+        safe_y = max(0, min(int(y), screen_height - 50))
+        return safe_x, safe_y
 
     def _create_ui(self):
         """Create overlay UI"""

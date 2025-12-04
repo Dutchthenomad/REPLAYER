@@ -30,6 +30,8 @@ from collections import deque  # AUDIT FIX: For efficient latency tracking
 # REPLAYER imports
 from models import GameTick
 
+logger = logging.getLogger(__name__)
+
 
 class LatencySpikeDetector:
     """
@@ -44,11 +46,15 @@ class LatencySpikeDetector:
     Only truly severe latency (>10 seconds) should trigger alerts.
     """
 
+    WARNING_THRESHOLD_MS = 2000.0   # 2 seconds - warning
+    ERROR_THRESHOLD_MS = 5000.0     # 5 seconds - error
+    CRITICAL_THRESHOLD_MS = 10000.0 # 10 seconds - critical
+
     def __init__(
         self,
         window_size: int = 100,
-        spike_threshold_std: float = 10.0,  # Relaxed from 2.0 - only extreme outliers
-        absolute_threshold_ms: float = 10000.0  # Relaxed from 2000ms to 10 seconds
+        spike_threshold_std: float = 10.0,
+        absolute_threshold_ms: float = CRITICAL_THRESHOLD_MS
     ):
         """
         Initialize spike detector.
@@ -89,25 +95,24 @@ class LatencySpikeDetector:
             self.latencies.append(latency_ms)
             self.total_samples += 1
 
-            # Need minimum samples for statistics
-            if len(self.latencies) < 10:
-                return None
+            # Calculate rolling statistics when enough samples
+            mean = 0.0
+            std = 0.0
+            if len(self.latencies) >= 10:
+                mean = sum(self.latencies) / len(self.latencies)
+                variance = sum((x - mean) ** 2 for x in self.latencies) / len(self.latencies)
+                std = variance ** 0.5 if variance > 0 else 0
 
-            # Calculate rolling statistics
-            mean = sum(self.latencies) / len(self.latencies)
-            variance = sum((x - mean) ** 2 for x in self.latencies) / len(self.latencies)
-            std = variance ** 0.5 if variance > 0 else 0
-
-            # Check for spike
-            is_spike = False
+            status = self.check_latency(latency_ms)
+            is_spike = status != 'OK'
             spike_reason = None
 
-            # Check absolute threshold
-            if latency_ms > self.absolute_threshold_ms:
+            # Absolute threshold check
+            if latency_ms >= self.absolute_threshold_ms:
                 is_spike = True
-                spike_reason = f"Absolute threshold exceeded: {latency_ms:.0f}ms > {self.absolute_threshold_ms:.0f}ms"
+                spike_reason = f"Absolute threshold exceeded: {latency_ms:.0f}ms"
 
-            # Check standard deviation threshold
+            # Statistical spike check (requires variance)
             elif std > 0:
                 z_score = (latency_ms - mean) / std
                 if z_score > self.spike_threshold_std:
@@ -118,24 +123,49 @@ class LatencySpikeDetector:
                 self.total_spikes += 1
                 self.last_spike_time = time.time()
                 self.last_spike_value = latency_ms
-
-                # Rate limit: only return spike info if cooldown has passed
-                # This prevents warning spam while still tracking statistics
-                now = time.time()
-                if now - self._last_warning_time >= self._warning_cooldown_sec:
-                    self._last_warning_time = now
-                    return {
-                        'latency_ms': latency_ms,
-                        'mean_ms': mean,
-                        'std_ms': std,
-                        'reason': spike_reason,
-                        'spike_count': self.total_spikes,
-                        'timestamp': self.last_spike_time
-                    }
-                # Spike detected but suppressed due to rate limiting
-                return None
+                spike_status = status if status != 'OK' else 'WARNING'
+                return self._maybe_emit_status(latency_ms, spike_status, spike_reason, mean, std)
 
             return None
+
+    def check_latency(self, latency_ms: float) -> str:
+        """Tiered latency threshold evaluation"""
+        if latency_ms >= self.absolute_threshold_ms:
+            logger.critical(f"CRITICAL latency: {latency_ms}ms")
+            return 'CRITICAL'
+        if latency_ms >= self.ERROR_THRESHOLD_MS:
+            logger.error(f"High latency: {latency_ms}ms")
+            return 'ERROR'
+        if latency_ms >= self.WARNING_THRESHOLD_MS:
+            logger.warning(f"Elevated latency: {latency_ms}ms")
+            return 'WARNING'
+        return 'OK'
+
+    def _maybe_emit_status(
+        self,
+        latency_ms: float,
+        status: str,
+        reason: Optional[str] = None,
+        mean: float = 0.0,
+        std: float = 0.0
+    ) -> Optional[Dict[str, Any]]:
+        """Rate-limit status emission"""
+        if status == 'OK':
+            return None
+        now = time.time()
+        if now - self._last_warning_time < self._warning_cooldown_sec:
+            return None
+
+        self._last_warning_time = now
+        return {
+            'latency_ms': latency_ms,
+            'mean_ms': mean,
+            'std_ms': std,
+            'reason': reason or status,
+            'spike_count': self.total_spikes,
+            'timestamp': self.last_spike_time or now,
+            'status': status,
+        }
 
     def get_stats(self) -> Dict[str, Any]:
         """Get spike detector statistics"""
@@ -534,6 +564,26 @@ class TokenBucketRateLimiter:
                     if self.total_requests > 0 else 0.0
             }
 
+class PriorityRateLimiter(TokenBucketRateLimiter):
+    """Rate limiter with priority bypass for critical signals"""
+
+    CRITICAL_PHASES = {'RUG_EVENT', 'RUG_EVENT_1', 'RUG_EVENT_2'}
+
+    def __init__(self, rate: float = 20.0, burst: int = None):
+        super().__init__(rate=rate, burst=burst)
+
+    def should_process(self, signal: Any) -> bool:
+        """Always allow critical signals; rate limit others"""
+        if self._is_critical(signal):
+            return True
+        return self.acquire()
+
+    def _is_critical(self, signal: Any) -> bool:
+        return (
+            getattr(signal, 'rugged', False) or
+            getattr(signal, 'phase', '') in self.CRITICAL_PHASES
+        )
+
 # Phase 3 refactoring: GameSignal and GameStateMachine extracted to own module
 from sources.game_state_machine import GameSignal, GameStateMachine
 
@@ -562,8 +612,8 @@ class WebSocketFeed:
         )
         self.state_machine = GameStateMachine()
 
-        # PHASE 3.1 AUDIT FIX: Rate limiter to prevent data floods
-        self.rate_limiter = TokenBucketRateLimiter(rate=rate_limit)
+        # PHASE 3.1 AUDIT FIX: Rate limiter to prevent data floods (with critical bypass)
+        self.rate_limiter = PriorityRateLimiter(rate=rate_limit)
 
         # PHASE 3.2 AUDIT FIX: Connection health monitor
         self.health_monitor = ConnectionHealthMonitor()
@@ -582,7 +632,7 @@ class WebSocketFeed:
             'total_ticks': 0,
             'total_games': 0,
             'noise_filtered': 0,
-            'latencies': deque(maxlen=100),  # AUDIT FIX: O(1) operations, auto-evicts oldest
+            'latencies': deque(maxlen=1000),  # AUDIT FIX: O(1) operations, extended history
             'phase_transitions': 0,
             'anomalies': 0,
             'errors': 0,  # AUDIT FIX: Track callback errors
@@ -762,17 +812,6 @@ class WebSocketFeed:
         """Handle gameStateUpdate event - PRIMARY SIGNAL SOURCE"""
         receive_time = time.time() * 1000  # milliseconds
 
-        # PHASE 3.1 AUDIT FIX: Apply rate limiting
-        if not self.rate_limiter.acquire():
-            self.metrics['rate_limited'] += 1
-            # Log every 100th rate-limited signal to avoid log spam
-            if self.metrics['rate_limited'] % 100 == 1:
-                self.logger.warning(
-                    f"Rate limiting active: {self.metrics['rate_limited']} signals dropped "
-                    f"(drop rate: {self.rate_limiter.get_stats()['drop_rate']:.1f}%)"
-                )
-            return  # Drop this signal
-
         # Calculate tick interval
         if self.last_tick_time:
             tick_interval = receive_time - self.last_tick_time
@@ -826,6 +865,18 @@ class WebSocketFeed:
 
         # Create signal object
         signal = GameSignal(**signal_dict)
+
+        # PHASE 3.1 AUDIT FIX: Apply rate limiting with critical bypass
+        if not self.rate_limiter.should_process(signal):
+            self.metrics['rate_limited'] += 1
+            if self.metrics['rate_limited'] % 100 == 1:
+                stats = self.rate_limiter.get_stats()
+                drop_rate = stats.get('drop_rate', 0.0)
+                self.logger.warning(
+                    f"Rate limiting active: {self.metrics['rate_limited']} signals dropped "
+                    f"(drop rate: {drop_rate:.1f}%)"
+                )
+            return  # Drop this signal
 
         # Update metrics
         self.metrics['total_signals'] += 1
