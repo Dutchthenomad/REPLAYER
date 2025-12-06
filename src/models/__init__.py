@@ -6,6 +6,14 @@ from .enums import Phase, PositionStatus, SideBetStatus
 from .game_tick import GameTick
 from .position import Position
 from .side_bet import SideBet
+from .demo_action import (
+    ActionCategory,
+    BUTTON_TO_CATEGORY,
+    get_category_for_button,
+    is_trade_action,
+    StateSnapshot,
+    DemoAction,
+)
 
 __all__ = [
     'Phase',
@@ -14,4 +22,11 @@ __all__ = [
     'GameTick',
     'Position',
     'SideBet',
+    # Demo action models
+    'ActionCategory',
+    'BUTTON_TO_CATEGORY',
+    'get_category_for_button',
+    'is_trade_action',
+    'StateSnapshot',
+    'DemoAction',
 ]
