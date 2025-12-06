@@ -168,7 +168,55 @@ class GameState:
                 'cooldown_timer': 0,  # Not tracked in state
                 'trade_count': 0,  # Not tracked in state
             })
-    
+
+    def capture_demo_snapshot(self, bet_amount: Decimal) -> 'DemoStateSnapshot':
+        """
+        Capture state snapshot for demo recording (Phase 10).
+
+        Returns models.demo_action.StateSnapshot with all state context
+        needed for imitation learning.
+
+        Args:
+            bet_amount: Current bet amount from UI (not tracked in GameState)
+
+        Returns:
+            StateSnapshot from models.demo_action (not core.game_state.StateSnapshot)
+        """
+        from models.demo_action import StateSnapshot as DemoStateSnapshot
+
+        with self._lock:
+            # Convert position to dict with string Decimals for JSON
+            position_dict = None
+            if self._state['position']:
+                pos = self._state['position']
+                position_dict = {
+                    'entry_price': str(pos.get('entry_price', Decimal('0'))),
+                    'amount': str(pos.get('amount', Decimal('0'))),
+                    'entry_tick': pos.get('entry_tick', 0),
+                    'entry_time': pos.get('entry_time'),
+                }
+
+            # Convert sidebet to dict with string Decimals for JSON
+            sidebet_dict = None
+            if self._state['sidebet']:
+                sb = self._state['sidebet']
+                sidebet_dict = {
+                    'amount': str(sb.get('amount', Decimal('0'))),
+                    'placed_tick': sb.get('placed_tick', 0),
+                    'placed_time': sb.get('placed_time'),
+                }
+
+            return DemoStateSnapshot(
+                balance=self._state['balance'],
+                position=position_dict,
+                sidebet=sidebet_dict,
+                bet_amount=bet_amount,
+                sell_percentage=self._state.get('sell_percentage', Decimal('1.0')),
+                current_tick=self._state.get('current_tick', 0),
+                current_price=self._state.get('current_price', Decimal('1.0')),
+                phase=self._state.get('current_phase', 'UNKNOWN'),
+            )
+
     # ========== State Mutation Methods ==========
     
     def update(self, **kwargs) -> bool:

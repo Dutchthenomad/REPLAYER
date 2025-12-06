@@ -248,3 +248,88 @@ class TestGameStateResetAndMetrics:
 
         assert metrics['average_win'] > Decimal('0')
         assert metrics['average_loss'] > Decimal('0')
+
+
+class TestCaptureDemoSnapshot:
+    """Tests for capture_demo_snapshot() - Phase 10 Demo Recording"""
+
+    def test_capture_demo_snapshot_returns_demo_state_snapshot(self, game_state):
+        """Test capture_demo_snapshot returns models.demo_action.StateSnapshot"""
+        from models.demo_action import StateSnapshot as DemoStateSnapshot
+
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        assert isinstance(snapshot, DemoStateSnapshot)
+
+    def test_capture_demo_snapshot_includes_balance(self, game_state):
+        """Test snapshot includes current balance"""
+        game_state.update_balance(Decimal('-0.02'), "Test")
+
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        assert snapshot.balance == Decimal('0.080')
+
+    def test_capture_demo_snapshot_includes_bet_amount(self, game_state):
+        """Test snapshot includes provided bet_amount"""
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.015'))
+
+        assert snapshot.bet_amount == Decimal('0.015')
+
+    def test_capture_demo_snapshot_includes_sell_percentage(self, game_state):
+        """Test snapshot includes current sell percentage"""
+        game_state.set_sell_percentage(Decimal('0.5'))
+
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        assert snapshot.sell_percentage == Decimal('0.5')
+
+    def test_capture_demo_snapshot_includes_tick_and_price(self, game_state):
+        """Test snapshot includes tick and price"""
+        game_state.update(current_tick=42, current_price=Decimal('2.5'))
+
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        assert snapshot.current_tick == 42
+        assert snapshot.current_price == Decimal('2.5')
+
+    def test_capture_demo_snapshot_includes_phase(self, game_state):
+        """Test snapshot includes current phase"""
+        game_state.update(current_phase='ACTIVE_GAMEPLAY')
+
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        assert snapshot.phase == 'ACTIVE_GAMEPLAY'
+
+    def test_capture_demo_snapshot_includes_position(self, game_state, sample_position):
+        """Test snapshot includes position if active"""
+        game_state.open_position(sample_position)
+
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        assert snapshot.position is not None
+        assert snapshot.position['entry_price'] == str(sample_position.entry_price)
+
+    def test_capture_demo_snapshot_includes_sidebet(self, game_state, sample_sidebet):
+        """Test snapshot includes sidebet if active"""
+        game_state.place_sidebet(sample_sidebet)
+
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        assert snapshot.sidebet is not None
+        assert snapshot.sidebet['amount'] == str(sample_sidebet.amount)
+
+    def test_capture_demo_snapshot_null_when_no_position(self, game_state):
+        """Test snapshot has None for position when no position"""
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        assert snapshot.position is None
+
+    def test_capture_demo_snapshot_is_serializable(self, game_state):
+        """Test snapshot can be converted to dict for JSONL"""
+        snapshot = game_state.capture_demo_snapshot(bet_amount=Decimal('0.01'))
+
+        snapshot_dict = snapshot.to_dict()
+
+        assert 'balance' in snapshot_dict
+        assert 'bet_amount' in snapshot_dict
+        assert 'current_tick' in snapshot_dict
