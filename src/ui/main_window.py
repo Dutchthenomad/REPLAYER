@@ -14,6 +14,7 @@ import threading
 
 from core import ReplayEngine, TradeManager
 from core.game_queue import GameQueue
+from core.demo_recorder import DemoRecorderSink  # Phase 10
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
 from ui.tk_dispatcher import TkDispatcher
@@ -77,6 +78,11 @@ class MainWindow:
         # Initialize replay engine and trade manager
         self.replay_engine = ReplayEngine(state)
         self.trade_manager = TradeManager(state)
+
+        # Phase 10: Initialize demo recorder for human demonstration recording
+        demo_dir = Path(config.FILES.get('recordings_dir', 'rugs_recordings')) / 'demonstrations'
+        self.demo_recorder = DemoRecorderSink(demo_dir)
+        logger.info(f"DemoRecorderSink initialized: {demo_dir}")
 
         # Initialize game queue for multi-game sessions
         recordings_dir = config.FILES['recordings_dir']
@@ -160,6 +166,17 @@ class MainWindow:
         )
         recording_menu.add_separator()
         recording_menu.add_command(label="Open Recordings Folder", command=lambda: self.replay_controller.open_recordings_folder() if hasattr(self, 'replay_controller') else None)
+
+        # Phase 10: Demo Recording submenu
+        demo_menu = tk.Menu(recording_menu, tearoff=0)
+        recording_menu.add_cascade(label="Demo Recording", menu=demo_menu)
+        demo_menu.add_command(label="Start Session", command=self._start_demo_session)
+        demo_menu.add_command(label="End Session", command=self._end_demo_session)
+        demo_menu.add_separator()
+        demo_menu.add_command(label="Start Game", command=self._start_demo_game)
+        demo_menu.add_command(label="End Game", command=self._end_demo_game)
+        demo_menu.add_separator()
+        demo_menu.add_command(label="Show Status", command=self._show_demo_status)
 
         # Bot Menu
         bot_menu = tk.Menu(menubar, tearoff=0)
@@ -805,7 +822,9 @@ class MainWindow:
             # Notifications
             toast=self.toast,
             # Callbacks
-            log_callback=self.log
+            log_callback=self.log,
+            # Phase 10: Demo recording
+            demo_recorder=self.demo_recorder
         )
 
         # Phase 3.4: Initialize LiveFeedController
@@ -1497,6 +1516,82 @@ Keyboard Shortcuts: Press 'H' for help
 """
         messagebox.showinfo("About REPLAYER", about_text)
 
+    # ========================================================================
+    # DEMO RECORDING HANDLERS (Phase 10)
+    # ========================================================================
+
+    def _start_demo_session(self):
+        """Start a new demo recording session."""
+        try:
+            session_id = self.demo_recorder.start_session()
+            self.log(f"Demo session started: {session_id}")
+            self.toast.show(f"Demo session started", "success")
+            logger.info(f"Demo recording session started: {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to start demo session: {e}")
+            self.toast.show(f"Failed to start session: {e}", "error")
+
+    def _end_demo_session(self):
+        """End the current demo recording session."""
+        try:
+            self.demo_recorder.end_session()
+            self.log("Demo session ended")
+            self.toast.show("Demo session ended", "info")
+            logger.info("Demo recording session ended")
+        except Exception as e:
+            logger.error(f"Failed to end demo session: {e}")
+            self.toast.show(f"Failed to end session: {e}", "error")
+
+    def _start_demo_game(self):
+        """Start recording a new game in the demo session."""
+        # Use current game ID from state, or prompt user
+        game_id = self.state.get('game_id')
+        if not game_id:
+            # Generate a placeholder game ID
+            import time
+            game_id = f"game_{int(time.time())}"
+
+        try:
+            self.demo_recorder.start_game(game_id)
+            self.log(f"Demo game started: {game_id}")
+            self.toast.show(f"Recording game: {game_id[:20]}...", "success")
+            logger.info(f"Demo recording game started: {game_id}")
+        except Exception as e:
+            logger.error(f"Failed to start demo game: {e}")
+            self.toast.show(f"Failed to start game: {e}", "error")
+
+    def _end_demo_game(self):
+        """End recording the current game."""
+        try:
+            self.demo_recorder.end_game()
+            self.log("Demo game ended")
+            self.toast.show("Game recording saved", "info")
+            logger.info("Demo recording game ended")
+        except Exception as e:
+            logger.error(f"Failed to end demo game: {e}")
+            self.toast.show(f"Failed to end game: {e}", "error")
+
+    def _show_demo_status(self):
+        """Show current demo recording status in a dialog."""
+        try:
+            status = self.demo_recorder.get_status()
+            status_text = f"""Demo Recording Status
+
+Session Active: {'Yes' if status['session_active'] else 'No'}
+Session ID: {status.get('session_id', 'N/A')}
+Session Start: {status.get('session_start', 'N/A')}
+
+Game Active: {'Yes' if status['game_active'] else 'No'}
+Game ID: {status.get('game_id', 'N/A')}
+Actions Recorded: {status.get('action_count', 0)}
+
+Output Directory: {self.demo_recorder.base_dir}
+"""
+            messagebox.showinfo("Demo Recording Status", status_text)
+        except Exception as e:
+            logger.error(f"Failed to get demo status: {e}")
+            messagebox.showerror("Error", f"Failed to get status: {e}")
+
     def shutdown(self):
         """Cleanup dispatcher resources during application shutdown."""
         # Phase 8.5: Stop browser if connected
@@ -1516,6 +1611,14 @@ Keyboard Shortcuts: Press 'H' for help
                 if loop:
                     loop.close()
                     asyncio.set_event_loop(None)
+
+        # Phase 10: Close demo recorder (flushes any pending data)
+        if self.demo_recorder:
+            try:
+                self.demo_recorder.close()
+                logger.info("Demo recorder closed")
+            except Exception as e:
+                logger.error(f"Error closing demo recorder: {e}")
 
         # Phase 3.4: Delegate live feed cleanup to LiveFeedController
         self.live_feed_controller.cleanup()
