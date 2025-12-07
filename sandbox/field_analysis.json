@@ -1,0 +1,3987 @@
+{
+  "collection_time": "2025-12-06T19:57:49.036232",
+  "samples_collected": 200,
+  "duration_sec": 39.563892126083374,
+  "event_types": {
+    "standard/newTrade": 18,
+    "rugRoyaleUpdate": 2,
+    "battleEventUpdate": 1,
+    "newChatMessage": 3
+  },
+  "fields": {
+    "active": {
+      "count": 141,
+      "types": [
+        "bool"
+      ],
+      "sample_values": [
+        true,
+        true,
+        true
+      ],
+      "is_captured": true
+    },
+    "price": {
+      "count": 141,
+      "types": [
+        "float",
+        "int"
+      ],
+      "sample_values": [
+        1.061531247396796,
+        1.0654483722620864,
+        1.0790508269765124
+      ],
+      "is_captured": true
+    },
+    "partialPrices": {
+      "count": 140,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=3>",
+        "<dict len=3>",
+        "<dict len=3>"
+      ],
+      "is_captured": false
+    },
+    "partialPrices.startTick": {
+      "count": 140,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        125,
+        126,
+        127
+      ],
+      "is_captured": false
+    },
+    "partialPrices.endTick": {
+      "count": 140,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        129,
+        130,
+        131
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values": {
+      "count": 140,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=5>",
+        "<dict len=5>",
+        "<dict len=5>"
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.125": {
+      "count": 1,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.2749526227232495
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.126": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.3019525694480605,
+        1.3019525694480605
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.127": {
+      "count": 3,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.073446660724414,
+        1.073446660724414,
+        1.073446660724414
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.128": {
+      "count": 4,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.0654483722620864,
+        1.0654483722620864,
+        1.0654483722620864
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.129": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.061531247396796,
+        1.061531247396796,
+        1.061531247396796
+      ],
+      "is_captured": false
+    },
+    "tradeCount": {
+      "count": 138,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        281,
+        281,
+        281
+      ],
+      "is_captured": true
+    },
+    "rugged": {
+      "count": 141,
+      "types": [
+        "bool"
+      ],
+      "sample_values": [
+        false,
+        false,
+        false
+      ],
+      "is_captured": true
+    },
+    "tickCount": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        129,
+        128,
+        130
+      ],
+      "is_captured": true
+    },
+    "cooldownTimer": {
+      "count": 176,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        0,
+        0,
+        0
+      ],
+      "is_captured": true
+    },
+    "cooldownPaused": {
+      "count": 176,
+      "types": [
+        "bool"
+      ],
+      "sample_values": [
+        false,
+        false,
+        false
+      ],
+      "is_captured": false
+    },
+    "pauseMessage": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "",
+        "",
+        ""
+      ],
+      "is_captured": false
+    },
+    "allowPreRoundBuys": {
+      "count": 176,
+      "types": [
+        "bool"
+      ],
+      "sample_values": [
+        false,
+        false,
+        false
+      ],
+      "is_captured": true
+    },
+    "averageMultiplier": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        9.7615303000043,
+        9.7615303000043,
+        9.7615303000043
+      ],
+      "is_captured": false
+    },
+    "count2x": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        40,
+        40,
+        40
+      ],
+      "is_captured": false
+    },
+    "count10x": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        7,
+        7,
+        7
+      ],
+      "is_captured": false
+    },
+    "count50x": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        4,
+        4,
+        4
+      ],
+      "is_captured": false
+    },
+    "count100x": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        2,
+        2,
+        2
+      ],
+      "is_captured": false
+    },
+    "leaderboard": {
+      "count": 178,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=10>",
+        "<list len=10>",
+        "<list len=10>"
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].id": {
+      "count": 176,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "did:privy:cmigqkf0f00x4jm0cuxvdrunq",
+        "did:privy:cmigqkf0f00x4jm0cuxvdrunq",
+        "did:privy:cmigqkf0f00x4jm0cuxvdrunq"
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].username": {
+      "count": 178,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "Fannyman",
+        "Fannyman",
+        "Fannyman"
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].level": {
+      "count": 178,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        43,
+        43,
+        43
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].pnl": {
+      "count": 176,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.264879755,
+        0.264879755,
+        0.26400901
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].regularPnl": {
+      "count": 176,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.264879755,
+        0.264879755,
+        0.26400901
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].sidebetPnl": {
+      "count": 176,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        0,
+        0,
+        0
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].shortPnl": {
+      "count": 176,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        0,
+        0,
+        0
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].sidebetActive": {
+      "count": 176,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].sideBet": {
+      "count": 176,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].shortPosition": {
+      "count": 176,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].pnlPercent": {
+      "count": 176,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        105.38162218559235,
+        105.38162218559235,
+        105.03519887887344
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].hasActiveTrades": {
+      "count": 176,
+      "types": [
+        "bool"
+      ],
+      "sample_values": [
+        true,
+        true,
+        true
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].positionQty": {
+      "count": 176,
+      "types": [
+        "float",
+        "int"
+      ],
+      "sample_values": [
+        0.2222919,
+        0.2222919,
+        0.2222919
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].avgCost": {
+      "count": 176,
+      "types": [
+        "float",
+        "int"
+      ],
+      "sample_values": [
+        1.259605046,
+        1.259605046,
+        1.259605046
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].totalInvested": {
+      "count": 176,
+      "types": [
+        "float",
+        "int"
+      ],
+      "sample_values": [
+        0.251352892,
+        0.251352892,
+        0.251352892
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].selectedCoin": {
+      "count": 176,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].position": {
+      "count": 176,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1,
+        1,
+        1
+      ],
+      "is_captured": false
+    },
+    "gameId": {
+      "count": 176,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "20251207-e8186dbf38e046d1",
+        "20251207-e8186dbf38e046d1",
+        "20251207-e8186dbf38e046d1"
+      ],
+      "is_captured": true
+    },
+    "connectedPlayers": {
+      "count": 176,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        224,
+        224,
+        225
+      ],
+      "is_captured": false
+    },
+    "rugpool": {
+      "count": 138,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=3>",
+        "<dict len=3>",
+        "<dict len=3>"
+      ],
+      "is_captured": false
+    },
+    "rugpool.instarugCount": {
+      "count": 138,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        2,
+        2,
+        2
+      ],
+      "is_captured": false
+    },
+    "rugpool.threshold": {
+      "count": 138,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        10,
+        10,
+        10
+      ],
+      "is_captured": false
+    },
+    "rugpool.rugpoolAmount": {
+      "count": 138,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.025240591000001,
+        1.025240591000001,
+        1.025240591000001
+      ],
+      "is_captured": false
+    },
+    "rugRoyale": {
+      "count": 141,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=5>",
+        "<dict len=5>",
+        "<dict len=5>"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.status": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "SCHEDULED",
+        "SCHEDULED",
+        "SCHEDULED"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.activeEventId": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1",
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1",
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent": {
+      "count": 141,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=10>",
+        "<dict len=10>",
+        "<dict len=10>"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.id": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1",
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1",
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.startTime": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-07T02:00:00.000Z",
+        "2025-12-07T02:00:00.000Z",
+        "2025-12-07T02:00:00.000Z"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.endTime": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-07T03:00:00.000Z",
+        "2025-12-07T03:00:00.000Z",
+        "2025-12-07T03:00:00.000Z"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.prepTimeMinutes": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        30,
+        30,
+        30
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.levelRequired": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        10,
+        10,
+        10
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.status": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "SCHEDULED",
+        "SCHEDULED",
+        "SCHEDULED"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.createdAt": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-06T20:36:23.461Z",
+        "2025-12-06T20:36:23.461Z",
+        "2025-12-06T20:36:23.461Z"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.createdBy": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin",
+        "admin",
+        "admin"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.startingBalance": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        100,
+        100,
+        100
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes": {
+      "count": 141,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=10>",
+        "<dict len=10>",
+        "<dict len=10>"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.1": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1,
+        1,
+        1
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.2": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.3": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.4": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.5": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.6": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.7": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.8": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.9": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.currentEvent.customPrizes.10": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.upcomingEvents": {
+      "count": 141,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=0>",
+        "<list len=0>",
+        "<list len=0>"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events": {
+      "count": 141,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=15>",
+        "<list len=15>",
+        "<list len=15>"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].id": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin-e61550c8-8f07-4ddd-84ac-e80e5cb9f1a6",
+        "admin-e61550c8-8f07-4ddd-84ac-e80e5cb9f1a6",
+        "admin-e61550c8-8f07-4ddd-84ac-e80e5cb9f1a6"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].startTime": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-06T22:00:00.000Z",
+        "2025-12-06T22:00:00.000Z",
+        "2025-12-06T22:00:00.000Z"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].endTime": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-06T23:00:00.000Z",
+        "2025-12-06T23:00:00.000Z",
+        "2025-12-06T23:00:00.000Z"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].prepTimeMinutes": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        30,
+        30,
+        30
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].levelRequired": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        10,
+        10,
+        10
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].status": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "SCHEDULED",
+        "SCHEDULED",
+        "SCHEDULED"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].createdAt": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-06T20:36:03.609Z",
+        "2025-12-06T20:36:03.609Z",
+        "2025-12-06T20:36:03.609Z"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].createdBy": {
+      "count": 141,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin",
+        "admin",
+        "admin"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].startingBalance": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        100,
+        100,
+        100
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes": {
+      "count": 141,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=10>",
+        "<dict len=10>",
+        "<dict len=10>"
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.1": {
+      "count": 141,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1,
+        1,
+        1
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.2": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.3": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.4": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.5": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.6": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.7": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.8": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.9": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "rugRoyale.events[0].customPrizes.10": {
+      "count": 141,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "provablyFair": {
+      "count": 176,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=2>",
+        "<dict len=2>",
+        "<dict len=2>"
+      ],
+      "is_captured": false
+    },
+    "provablyFair.serverSeedHash": {
+      "count": 176,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "4660f3a18f8b937b9d115d5e64200cd7b6f101da871cd976739817096afadcac",
+        "4660f3a18f8b937b9d115d5e64200cd7b6f101da871cd976739817096afadcac",
+        "4660f3a18f8b937b9d115d5e64200cd7b6f101da871cd976739817096afadcac"
+      ],
+      "is_captured": false
+    },
+    "provablyFair.version": {
+      "count": 176,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "v3",
+        "v3",
+        "v3"
+      ],
+      "is_captured": false
+    },
+    "gameHistory": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=10>",
+        "<list len=10>",
+        "<list len=10>"
+      ],
+      "is_captured": true
+    },
+    "gameHistory[0].id": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "20251207-1e01ac417e8043ca",
+        "20251207-1e01ac417e8043ca",
+        "20251207-e8186dbf38e046d1"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].timestamp": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1765068982439,
+        1765068982439,
+        1765069065094
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].prices": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=93>",
+        "<list len=93>",
+        "<list len=267>"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].peakMultiplier": {
+      "count": 3,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.223525528686852,
+        1.223525528686852,
+        2.809169793399426
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].rugged": {
+      "count": 3,
+      "types": [
+        "bool"
+      ],
+      "sample_values": [
+        true,
+        true,
+        true
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalTrades": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=0>",
+        "<list len=0>",
+        "<list len=0>"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=17>",
+        "<list len=17>",
+        "<list len=49>"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].playerId": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "did:privy:cma7qjd5u00l2kv0n49w1iz28",
+        "did:privy:cma7qjd5u00l2kv0n49w1iz28",
+        "did:privy:cma7qjd5u00l2kv0n49w1iz28"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].username": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "SILVER",
+        "SILVER",
+        "SILVER"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].gameId": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "20251207-1e01ac417e8043ca",
+        "20251207-1e01ac417e8043ca",
+        "20251207-e8186dbf38e046d1"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].betAmount": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        8,
+        8,
+        16
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].xPayout": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        5,
+        5,
+        5
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].coinAddress": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "0xPractice",
+        "0xPractice",
+        "0xPractice"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].bonusPortion": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        0,
+        0,
+        0
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].realPortion": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        0,
+        0,
+        0
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].timestamp": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1765068967229,
+        1765068967229,
+        1765068998371
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].type": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "placed",
+        "placed",
+        "placed"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].startedAtTick": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        33,
+        33,
+        2
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].end": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        73,
+        73,
+        42
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].globalSidebets[0].id": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "9b7ade47-452b-4427-8b9a-081f75ff15f2",
+        "9b7ade47-452b-4427-8b9a-081f75ff15f2",
+        "3bcfd4c0-40a0-4269-b977-2a15fe808a3d"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].provablyFair": {
+      "count": 3,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=2>",
+        "<dict len=2>",
+        "<dict len=2>"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].provablyFair.serverSeed": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "e2896666bec952ac4dbc65d73e1d08dcd5da597137dcf6255f23cd67db9dcd7c",
+        "e2896666bec952ac4dbc65d73e1d08dcd5da597137dcf6255f23cd67db9dcd7c",
+        "bca795ea31f91aa387622f2548ea5c380774282ea78ec9772bfaa85f3ef6f051"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].provablyFair.serverSeedHash": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "620f7079cc785925512f5ec4ad3b412a804e68771ed12384509066ce5c635d4c",
+        "620f7079cc785925512f5ec4ad3b412a804e68771ed12384509066ce5c635d4c",
+        "4660f3a18f8b937b9d115d5e64200cd7b6f101da871cd976739817096afadcac"
+      ],
+      "is_captured": false
+    },
+    "gameHistory[0].gameVersion": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "v3",
+        "v3",
+        "v3"
+      ],
+      "is_captured": false
+    },
+    "highestToday": {
+      "count": 3,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2251.16879893427,
+        2251.16879893427,
+        2251.16879893427
+      ],
+      "is_captured": false
+    },
+    "highestTodayTimestamp": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1765010285288,
+        1765010285288,
+        1765010285288
+      ],
+      "is_captured": false
+    },
+    "highestTodayPrices": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=1318>",
+        "<list len=1318>",
+        "<list len=1318>"
+      ],
+      "is_captured": false
+    },
+    "godCandle2x": {
+      "count": 3,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "godCandle2xTimestamp": {
+      "count": 3,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "godCandle2xPrices": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=0>",
+        "<list len=0>",
+        "<list len=0>"
+      ],
+      "is_captured": false
+    },
+    "godCandle2xMassiveJump": {
+      "count": 3,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "godCandle10x": {
+      "count": 3,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "godCandle10xTimestamp": {
+      "count": 3,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "godCandle10xPrices": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=0>",
+        "<list len=0>",
+        "<list len=0>"
+      ],
+      "is_captured": false
+    },
+    "godCandle10xMassiveJump": {
+      "count": 3,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "godCandle50x": {
+      "count": 3,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        57.900163060873,
+        57.900163060873,
+        57.900163060873
+      ],
+      "is_captured": false
+    },
+    "godCandle50xTimestamp": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1765065527257,
+        1765065527257,
+        1765065527257
+      ],
+      "is_captured": false
+    },
+    "godCandle50xPrices": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=544>",
+        "<list len=544>",
+        "<list len=544>"
+      ],
+      "is_captured": false
+    },
+    "godCandle50xMassiveJump": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=2>",
+        "<list len=2>",
+        "<list len=2>"
+      ],
+      "is_captured": false
+    },
+    "availableShitcoins": {
+      "count": 3,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=1>",
+        "<list len=1>",
+        "<list len=1>"
+      ],
+      "is_captured": false
+    },
+    "availableShitcoins[0].address": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "0xPractice",
+        "0xPractice",
+        "0xPractice"
+      ],
+      "is_captured": false
+    },
+    "availableShitcoins[0].ticker": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "FREE",
+        "FREE",
+        "FREE"
+      ],
+      "is_captured": false
+    },
+    "availableShitcoins[0].name": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "Practice SOL",
+        "Practice SOL",
+        "Practice SOL"
+      ],
+      "is_captured": false
+    },
+    "availableShitcoins[0].max_bet": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        10000,
+        10000,
+        10000
+      ],
+      "is_captured": false
+    },
+    "availableShitcoins[0].max_win": {
+      "count": 3,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        100000,
+        100000,
+        100000
+      ],
+      "is_captured": false
+    },
+    "gameVersion": {
+      "count": 3,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "v3",
+        "v3",
+        "v3"
+      ],
+      "is_captured": false
+    },
+    "prices": {
+      "count": 1,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=129>"
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.130": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.0790508269765124,
+        1.0790508269765124,
+        1.0790508269765124
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.131": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.0556146866194827,
+        1.0556146866194827,
+        1.0556146866194827
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.132": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.0807806125355957,
+        1.0807806125355957,
+        1.0807806125355957
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.133": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.1074688171948752,
+        1.1074688171948752,
+        1.1074688171948752
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.134": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.8827826537829921,
+        0.8827826537829921,
+        0.8827826537829921
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.135": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.8919121301190227,
+        0.8919121301190227,
+        0.8919121301190227
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.136": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.1129101398951533,
+        1.1129101398951533,
+        1.1129101398951533
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.137": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.094402670963453,
+        1.094402670963453,
+        1.094402670963453
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.138": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.0876919569174754,
+        1.0876919569174754,
+        1.0876919569174754
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.139": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.0676539867806747,
+        1.0676539867806747,
+        1.0676539867806747
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.140": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.0677025011710441,
+        1.0677025011710441,
+        1.0677025011710441
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.141": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.2900071437789182,
+        1.2900071437789182,
+        1.2900071437789182
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.142": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.3001675666199153,
+        1.3001675666199153,
+        1.3001675666199153
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.143": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.3122460816525654,
+        1.3122460816525654,
+        1.3122460816525654
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.144": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.3385962306900054,
+        1.3385962306900054,
+        1.3385962306900054
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.145": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.633551595658256,
+        1.633551595658256,
+        1.633551595658256
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.146": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.6513886382329241,
+        1.6513886382329241,
+        1.6513886382329241
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.147": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.6735888837497075,
+        1.6735888837497075,
+        1.6735888837497075
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.148": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.6710016566304622,
+        1.6710016566304622,
+        1.6710016566304622
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.149": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.7135926751190191,
+        1.7135926751190191,
+        1.7135926751190191
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.150": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.753293097008126,
+        1.753293097008126,
+        1.753293097008126
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.151": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.7731890016002751,
+        1.7731890016002751,
+        1.7731890016002751
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.152": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.7551185267393294,
+        1.7551185267393294,
+        1.7551185267393294
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.153": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.7699059338252552,
+        1.7699059338252552,
+        1.7699059338252552
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.154": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.7491189223354553,
+        1.7491189223354553,
+        1.7491189223354553
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.155": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.0939060746089933,
+        2.0939060746089933,
+        2.0939060746089933
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.156": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.1180996655666466,
+        2.1180996655666466,
+        2.1180996655666466
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.157": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.1583695899301505,
+        2.1583695899301505,
+        2.1583695899301505
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.158": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.179846095220536,
+        2.179846095220536,
+        2.179846095220536
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.159": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.199885209030848,
+        2.199885209030848,
+        2.199885209030848
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.160": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.2215914250687843,
+        2.2215914250687843,
+        2.2215914250687843
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.161": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.201697722660274,
+        2.201697722660274,
+        2.201697722660274
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.162": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.1864536280439877,
+        2.1864536280439877,
+        2.1864536280439877
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.163": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.1701474369251037,
+        2.1701474369251037,
+        2.1701474369251037
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.164": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.2283773120902985,
+        2.2283773120902985,
+        2.2283773120902985
+      ],
+      "is_captured": false
+    },
+    "status": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "SCHEDULED",
+        "SCHEDULED"
+      ],
+      "is_captured": false
+    },
+    "activeEventId": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1",
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1"
+      ],
+      "is_captured": false
+    },
+    "currentEvent": {
+      "count": 2,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=4>",
+        "<dict len=4>"
+      ],
+      "is_captured": false
+    },
+    "currentEvent.id": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1",
+        "admin-369c4187-4db9-43a3-bfb3-4212f8a9b7e1"
+      ],
+      "is_captured": false
+    },
+    "currentEvent.startTime": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-07T02:00:00.000Z",
+        "2025-12-07T02:00:00.000Z"
+      ],
+      "is_captured": false
+    },
+    "currentEvent.endTime": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-07T03:00:00.000Z",
+        "2025-12-07T03:00:00.000Z"
+      ],
+      "is_captured": false
+    },
+    "currentEvent.prepTimeMinutes": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        30,
+        30
+      ],
+      "is_captured": false
+    },
+    "upcomingEvents": {
+      "count": 2,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=0>",
+        "<list len=0>"
+      ],
+      "is_captured": false
+    },
+    "events": {
+      "count": 2,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=15>",
+        "<list len=15>"
+      ],
+      "is_captured": false
+    },
+    "events[0].id": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin-e61550c8-8f07-4ddd-84ac-e80e5cb9f1a6",
+        "admin-e61550c8-8f07-4ddd-84ac-e80e5cb9f1a6"
+      ],
+      "is_captured": false
+    },
+    "events[0].startTime": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-06T22:00:00.000Z",
+        "2025-12-06T22:00:00.000Z"
+      ],
+      "is_captured": false
+    },
+    "events[0].endTime": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-06T23:00:00.000Z",
+        "2025-12-06T23:00:00.000Z"
+      ],
+      "is_captured": false
+    },
+    "events[0].prepTimeMinutes": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        30,
+        30
+      ],
+      "is_captured": false
+    },
+    "events[0].levelRequired": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        10,
+        10
+      ],
+      "is_captured": false
+    },
+    "events[0].status": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "SCHEDULED",
+        "SCHEDULED"
+      ],
+      "is_captured": false
+    },
+    "events[0].createdAt": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "2025-12-06T20:36:03.609Z",
+        "2025-12-06T20:36:03.609Z"
+      ],
+      "is_captured": false
+    },
+    "events[0].createdBy": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "admin",
+        "admin"
+      ],
+      "is_captured": false
+    },
+    "events[0].startingBalance": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        100,
+        100
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes": {
+      "count": 2,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=10>",
+        "<dict len=10>"
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.1": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1,
+        1
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.2": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5,
+        0.5
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.3": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.25,
+        0.25
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.4": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.1,
+        0.1
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.5": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.6": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.7": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.8": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.9": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "events[0].customPrizes.10": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].playerId": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "did:privy:cmhl30kmt0021ld0cwkng7zwk",
+        "did:privy:cmhl30kmt0021ld0cwkng7zwk"
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].balance": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        3967.07153772,
+        3967.07153772
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].lastUpdated": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1765067440142,
+        1765067440142
+      ],
+      "is_captured": false
+    },
+    "leaderboard[0].rank": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1,
+        1
+      ],
+      "is_captured": false
+    },
+    "history": {
+      "count": 2,
+      "types": [
+        "list"
+      ],
+      "sample_values": [
+        "<list len=0>",
+        "<list len=0>"
+      ],
+      "is_captured": false
+    },
+    "playerPosition": {
+      "count": 2,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "timeRemaining": {
+      "count": 2,
+      "types": [
+        "NoneType"
+      ],
+      "sample_values": [
+        null,
+        null
+      ],
+      "is_captured": false
+    },
+    "finalRound": {
+      "count": 2,
+      "types": [
+        "bool"
+      ],
+      "sample_values": [
+        false,
+        false
+      ],
+      "is_captured": false
+    },
+    "isInFinalRound": {
+      "count": 2,
+      "types": [
+        "bool"
+      ],
+      "sample_values": [
+        false,
+        false
+      ],
+      "is_captured": false
+    },
+    "config": {
+      "count": 2,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=5>",
+        "<dict len=5>"
+      ],
+      "is_captured": false
+    },
+    "config.token": {
+      "count": 2,
+      "types": [
+        "str"
+      ],
+      "sample_values": [
+        "0xPractice",
+        "0xPractice"
+      ],
+      "is_captured": false
+    },
+    "config.startingBalance": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        100,
+        100
+      ],
+      "is_captured": false
+    },
+    "config.prepTimeMinutes": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        30,
+        30
+      ],
+      "is_captured": false
+    },
+    "config.levelRequired": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        10,
+        10
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers": {
+      "count": 2,
+      "types": [
+        "dict"
+      ],
+      "sample_values": [
+        "<dict len=10>",
+        "<dict len=10>"
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.1": {
+      "count": 2,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1,
+        1
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.2": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5,
+        0.5
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.3": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.25,
+        0.25
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.4": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.1,
+        0.1
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.5": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.6": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.7": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.8": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.9": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "config.prizeTiers.10": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.025,
+        0.025
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.165": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.6847563744708727,
+        2.6847563744708727,
+        2.6847563744708727
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.166": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.760465191590798,
+        2.760465191590798,
+        2.760465191590798
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.167": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.809169793399426,
+        2.809169793399426,
+        2.809169793399426
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.168": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.808495444000607,
+        2.808495444000607,
+        2.808495444000607
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.169": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.762247988546043,
+        2.762247988546043,
+        2.762247988546043
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.170": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.7404234657350623,
+        2.7404234657350623,
+        2.7404234657350623
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.171": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.184755727762128,
+        2.184755727762128,
+        2.184755727762128
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.172": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.193019132547949,
+        2.193019132547949,
+        2.193019132547949
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.173": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.1865689271463946,
+        2.1865689271463946,
+        2.1865689271463946
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.174": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.2546186121251286,
+        2.2546186121251286,
+        2.2546186121251286
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.175": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.2682854322762465,
+        2.2682854322762465,
+        2.2682854322762465
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.176": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.2508780257410943,
+        2.2508780257410943,
+        2.2508780257410943
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.177": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.238572086790649,
+        2.238572086790649,
+        2.238572086790649
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.178": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.251661289741027,
+        2.251661289741027,
+        2.251661289741027
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.179": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.7485547082841038,
+        1.7485547082841038,
+        1.7485547082841038
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.180": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.782122142292531,
+        1.782122142292531,
+        1.782122142292531
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.181": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.2163040227810775,
+        2.2163040227810775,
+        2.2163040227810775
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.182": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.296457596264831,
+        2.296457596264831,
+        2.296457596264831
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.183": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.269132659032325,
+        2.269132659032325,
+        2.269132659032325
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.184": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.3375497661914078,
+        2.3375497661914078,
+        2.3375497661914078
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.185": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.4094625151502975,
+        2.4094625151502975,
+        2.4094625151502975
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.186": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.4112091593442364,
+        2.4112091593442364,
+        2.4112091593442364
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.187": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.924454023322576,
+        1.924454023322576,
+        1.924454023322576
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.188": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.961823515429704,
+        1.961823515429704,
+        1.961823515429704
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.189": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.9630697951544631,
+        1.9630697951544631,
+        1.9630697951544631
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.190": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.0205946955724547,
+        2.0205946955724547,
+        2.0205946955724547
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.191": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.046154366487927,
+        2.046154366487927,
+        2.046154366487927
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.192": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.051775637702779,
+        2.051775637702779,
+        2.051775637702779
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.193": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.044176195147887,
+        2.044176195147887,
+        2.044176195147887
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.194": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.007939360003319,
+        2.007939360003319,
+        2.007939360003319
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.195": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.0110344077666844,
+        2.0110344077666844,
+        2.0110344077666844
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.196": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.0714832314224854,
+        2.0714832314224854,
+        2.0714832314224854
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.197": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        2.136034104927549,
+        2.136034104927549,
+        2.136034104927549
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.198": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.771524509567886,
+        1.771524509567886,
+        1.771524509567886
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.199": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.758706536868812,
+        1.758706536868812,
+        1.758706536868812
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.200": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.761795025095485,
+        1.761795025095485,
+        1.761795025095485
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.201": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.3571421461290953,
+        1.3571421461290953,
+        1.3571421461290953
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.202": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.3890440240168769,
+        1.3890440240168769,
+        1.3890440240168769
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.203": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.1423918863194658,
+        1.1423918863194658,
+        1.1423918863194658
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.204": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.8993271933257969,
+        0.8993271933257969,
+        0.8993271933257969
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.205": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.1083542949172058,
+        1.1083542949172058,
+        1.1083542949172058
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.206": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.1049718279913259,
+        1.1049718279913259,
+        1.1049718279913259
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.207": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.1219022847728863,
+        1.1219022847728863,
+        1.1219022847728863
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.208": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        1.1299805783863894,
+        1.1299805783863894,
+        1.1299805783863894
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.209": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.8736598197958784,
+        0.8736598197958784,
+        0.8736598197958784
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.210": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.90294340289189,
+        0.90294340289189,
+        0.90294340289189
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.211": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.92833180846168,
+        0.92833180846168,
+        0.92833180846168
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.212": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9216562379896934,
+        0.9216562379896934,
+        0.9216562379896934
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.213": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9470157461450617,
+        0.9470157461450617,
+        0.9470157461450617
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.214": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.7557563824663703,
+        0.7557563824663703,
+        0.7557563824663703
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.215": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.774253951447061,
+        0.774253951447061,
+        0.774253951447061
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.216": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.7868795091618234,
+        0.7868795091618234,
+        0.7868795091618234
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.217": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.804535284537368,
+        0.804535284537368,
+        0.804535284537368
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.218": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9814599159978256,
+        0.9814599159978256,
+        0.9814599159978256
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.219": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9808919063782723,
+        0.9808919063782723,
+        0.9808919063782723
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.220": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9771256473409924,
+        0.9771256473409924,
+        0.9771256473409924
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.221": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9898361486841069,
+        0.9898361486841069,
+        0.9898361486841069
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.222": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9934599739526838,
+        0.9934599739526838,
+        0.9934599739526838
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.223": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9802602599611995,
+        0.9802602599611995,
+        0.9802602599611995
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.224": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9770384359036643,
+        0.9770384359036643,
+        0.9770384359036643
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.225": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9747421477741774,
+        0.9747421477741774,
+        0.9747421477741774
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.226": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9558719817538242,
+        0.9558719817538242,
+        0.9558719817538242
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.227": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.9772719899072009,
+        0.9772719899072009,
+        0.9772719899072009
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.228": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.7738550418420763,
+        0.7738550418420763,
+        0.7738550418420763
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.229": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6255093448655697,
+        0.6255093448655697,
+        0.6255093448655697
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.230": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6166466333979256,
+        0.6166466333979256,
+        0.6166466333979256
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.231": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6318486967276721,
+        0.6318486967276721,
+        0.6318486967276721
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.232": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6320888971593441,
+        0.6320888971593441,
+        0.6320888971593441
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.233": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6436827547719871,
+        0.6436827547719871,
+        0.6436827547719871
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.234": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.664591488180409,
+        0.664591488180409,
+        0.664591488180409
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.235": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6544454898823998,
+        0.6544454898823998,
+        0.6544454898823998
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.236": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6754514778340796,
+        0.6754514778340796,
+        0.6754514778340796
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.237": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6955818395439388,
+        0.6955818395439388,
+        0.6955818395439388
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.238": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6892139248262514,
+        0.6892139248262514,
+        0.6892139248262514
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.239": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5561193797862861,
+        0.5561193797862861,
+        0.5561193797862861
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.240": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5678579918722094,
+        0.5678579918722094,
+        0.5678579918722094
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.241": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5747600339190743,
+        0.5747600339190743,
+        0.5747600339190743
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.242": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.4696142168311834,
+        0.4696142168311834,
+        0.4696142168311834
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.243": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.4629321467053115,
+        0.4629321467053115,
+        0.4629321467053115
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.244": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.46778795538366474,
+        0.46778795538366474,
+        0.46778795538366474
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.245": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.4741196366409601,
+        0.4741196366409601,
+        0.4741196366409601
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.246": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.4848746279991753,
+        0.4848746279991753,
+        0.4848746279991753
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.247": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.4779625224130144,
+        0.4779625224130144,
+        0.4779625224130144
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.248": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.48641634508874876,
+        0.48641634508874876,
+        0.48641634508874876
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.249": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.4833918153621685,
+        0.4833918153621685,
+        0.4833918153621685
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.250": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.47606881294590087,
+        0.47606881294590087,
+        0.47606881294590087
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.251": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.4871451580807742,
+        0.4871451580807742,
+        0.4871451580807742
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.252": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.48502329085119017,
+        0.48502329085119017,
+        0.48502329085119017
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.253": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.4752127633800703,
+        0.4752127633800703,
+        0.4752127633800703
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.254": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.47236240704678556,
+        0.47236240704678556,
+        0.47236240704678556
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.255": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5617669236636589,
+        0.5617669236636589,
+        0.5617669236636589
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.256": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5643676841645591,
+        0.5643676841645591,
+        0.5643676841645591
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.257": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5586048997413667,
+        0.5586048997413667,
+        0.5586048997413667
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.258": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5738667807953332,
+        0.5738667807953332,
+        0.5738667807953332
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.259": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5760554265034193,
+        0.5760554265034193,
+        0.5760554265034193
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.260": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.589796683089224,
+        0.589796683089224,
+        0.589796683089224
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.261": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5927943696635962,
+        0.5927943696635962,
+        0.5927943696635962
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.262": {
+      "count": 6,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.6020759762204929,
+        0.6020759762204929,
+        0.6020759762204929
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.263": {
+      "count": 5,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.591553212149195,
+        0.591553212149195,
+        0.591553212149195
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.264": {
+      "count": 4,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5842373584122309,
+        0.5842373584122309,
+        0.5842373584122309
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.265": {
+      "count": 3,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.5996034926087009,
+        0.5996034926087009,
+        0.5996034926087009
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.266": {
+      "count": 2,
+      "types": [
+        "float"
+      ],
+      "sample_values": [
+        0.00925864293410624,
+        0.00925864293410624
+      ],
+      "is_captured": false
+    },
+    "partialPrices.values.0": {
+      "count": 1,
+      "types": [
+        "int"
+      ],
+      "sample_values": [
+        1
+      ],
+      "is_captured": false
+    }
+  }
+}
