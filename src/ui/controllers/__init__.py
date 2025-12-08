@@ -10,5 +10,14 @@ from .replay_controller import ReplayController
 from .trading_controller import TradingController
 from .live_feed_controller import LiveFeedController
 from .browser_bridge_controller import BrowserBridgeController
+# Phase 10.5H: Recording controller
+from .recording_controller import RecordingController
 
-__all__ = ['BotManager', 'ReplayController', 'TradingController', 'LiveFeedController', 'BrowserBridgeController']
+__all__ = [
+    'BotManager',
+    'ReplayController',
+    'TradingController',
+    'LiveFeedController',
+    'BrowserBridgeController',
+    'RecordingController',
+]

@@ -64,8 +64,12 @@ tmp/
 temp/
 *.tmp
 
-# Claude Code artifacts
-.claude/
+# Claude Code artifacts (keep templates and commands)
+.claude/settings*.json
+.claude/*.json
+
+# Git worktrees for feature isolation
+.worktrees/
 
 # ML Models (large binary files - commented to track in git for now)
 # models/*.pkl

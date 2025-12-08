@@ -14,6 +14,20 @@ from .demo_action import (
     StateSnapshot,
     DemoAction,
 )
+# Phase 10.4B: Recording data models
+from .recording_models import (
+    GameStateMeta,
+    GameStateRecord,
+    PlayerAction,
+    PlayerSessionMeta,
+    PlayerSession,
+)
+# Phase 10.5A: Recording config model
+from .recording_config import (
+    CaptureMode,
+    MonitorThresholdType,
+    RecordingConfig,
+)
 
 __all__ = [
     'Phase',
@@ -29,4 +43,14 @@ __all__ = [
     'is_trade_action',
     'StateSnapshot',
     'DemoAction',
+    # Phase 10.4B: Recording data models
+    'GameStateMeta',
+    'GameStateRecord',
+    'PlayerAction',
+    'PlayerSessionMeta',
+    'PlayerSession',
+    # Phase 10.5A: Recording config model
+    'CaptureMode',
+    'MonitorThresholdType',
+    'RecordingConfig',
 ]

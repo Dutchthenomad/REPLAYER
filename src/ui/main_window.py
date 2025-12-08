@@ -131,6 +131,9 @@ class MainWindow:
             self.bot_toggle_button.config(state=tk.NORMAL)
             logger.info("Bot executor auto-started from config")
 
+        # Auto-start live feed connection on UI startup
+        self.root.after(1000, self._auto_connect_live_feed)
+
         # Phase 3.1: Monitoring loops now handled by BotManager
         # (removed _check_bot_results() and _update_timing_metrics_loop() calls)
 
@@ -158,18 +161,30 @@ class MainWindow:
         recording_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Recording", menu=recording_menu)
 
+        # Phase 10.5: Unified Recording Session
+        recording_menu.add_command(
+            label="Configure & Start Recording...",
+            command=self._show_recording_config
+        )
+        recording_menu.add_command(
+            label="Stop Recording",
+            command=self._stop_recording_session
+        )
+        recording_menu.add_separator()
+
         # Recording toggle - tracks replay_engine.auto_recording state (variable created in _create_ui())
         recording_menu.add_checkbutton(
-            label="Enable Recording",
+            label="Enable Auto-Recording (Legacy)",
             variable=self.recording_var,
             command=lambda: self.replay_controller.toggle_recording() if hasattr(self, 'replay_controller') else None
         )
         recording_menu.add_separator()
         recording_menu.add_command(label="Open Recordings Folder", command=lambda: self.replay_controller.open_recordings_folder() if hasattr(self, 'replay_controller') else None)
+        recording_menu.add_command(label="Show Recording Status", command=self._show_recording_status)
 
-        # Phase 10: Demo Recording submenu
+        # Phase 10: Demo Recording submenu (legacy - kept for backwards compatibility)
         demo_menu = tk.Menu(recording_menu, tearoff=0)
-        recording_menu.add_cascade(label="Demo Recording", menu=demo_menu)
+        recording_menu.add_cascade(label="Demo Recording (Legacy)", menu=demo_menu)
         demo_menu.add_command(label="Start Session", command=self._start_demo_session)
         demo_menu.add_command(label="End Session", command=self._end_demo_session)
         demo_menu.add_separator()
@@ -841,6 +856,15 @@ class MainWindow:
             log_callback=self.log
         )
 
+        # Phase 10.5H: Initialize RecordingController
+        from ui.controllers import RecordingController
+        recordings_dir = self.config.FILES.get('recordings_dir', 'rugs_recordings')
+        self.recording_controller = RecordingController(
+            root=self.root,
+            recordings_path=recordings_dir,
+            game_state=self.state
+        )
+
         # Create menu bar now (after controllers are initialized, before BrowserBridgeController needs it)
         self._create_menu_bar()
 
@@ -864,13 +888,17 @@ class MainWindow:
     def _setup_event_handlers(self):
         """Setup event bus subscriptions"""
         from services.event_bus import Events
-        
+
         # Subscribe to game events
         self.event_bus.subscribe(Events.GAME_TICK, self._handle_game_tick)
         self.event_bus.subscribe(Events.TRADE_EXECUTED, self._handle_trade_executed)
         self.event_bus.subscribe(Events.TRADE_FAILED, self._handle_trade_failed)
         self.event_bus.subscribe(Events.FILE_LOADED, self._handle_file_loaded)
-        
+
+        # Phase 10.5: Subscribe to game events for recording
+        self.event_bus.subscribe(Events.GAME_START, self._handle_game_start_for_recording)
+        self.event_bus.subscribe(Events.GAME_END, self._handle_game_end_for_recording)
+
         # Subscribe to state events
         from core.game_state import StateEvents
         self.state.subscribe(StateEvents.BALANCE_CHANGED, self._handle_balance_changed)
@@ -883,7 +911,13 @@ class MainWindow:
     def log(self, message: str):
         """Log message (using logger instead of text widget)"""
         logger.info(message)
-    
+
+    def _auto_connect_live_feed(self):
+        """Auto-connect to live feed on startup."""
+        if hasattr(self, 'live_feed_controller'):
+            logger.info("Auto-connecting to live feed...")
+            self.live_feed_controller.toggle_live_feed()
+
     # Phase 3.2: load_game, load_game_file moved to ReplayController
 
     # Phase 3.4: enable_live_feed, disable_live_feed, toggle_live_feed moved to LiveFeedController
@@ -1056,8 +1090,13 @@ class MainWindow:
 
     def _handle_game_tick(self, event):
         """Handle game tick event"""
-        # Now handled by ReplayEngine callbacks
-        pass
+        # Phase 10.5: Forward tick to recording controller
+        if hasattr(self, 'recording_controller') and self.recording_controller.is_active:
+            data = event.get('data', {})
+            game_tick = data.get('tick')  # This is a GameTick object
+            # Extract tick number and price from GameTick object
+            if game_tick and hasattr(game_tick, 'tick') and hasattr(game_tick, 'price'):
+                self.recording_controller.on_tick(game_tick.tick, game_tick.price)
     
     def _handle_trade_executed(self, event):
         """Handle successful trade"""
@@ -1066,7 +1105,25 @@ class MainWindow:
     def _handle_trade_failed(self, event):
         """Handle failed trade"""
         self.log(f"Trade failed: {event.get('data')}")
-    
+
+    def _handle_game_start_for_recording(self, event):
+        """Handle game start event for recording - Phase 10.5"""
+        if hasattr(self, 'recording_controller') and self.recording_controller.is_active:
+            data = event.get('data', {})
+            game_id = data.get('game_id', 'unknown')
+            logger.debug(f"Recording: Game started - {game_id}")
+            self.recording_controller.on_game_start(game_id)
+
+    def _handle_game_end_for_recording(self, event):
+        """Handle game end event for recording - Phase 10.5"""
+        if hasattr(self, 'recording_controller') and self.recording_controller.is_active:
+            data = event.get('data', {})
+            game_id = data.get('game_id', 'unknown')
+            # Let the recorder calculate prices/peak from collected ticks
+            # Event may not contain all data, but recorder has it internally
+            logger.debug(f"Recording: Game ended - {game_id}")
+            self.recording_controller.on_game_end(game_id=game_id)
+
     def _handle_file_loaded(self, event):
         """Handle file loaded event"""
         files = event.get('data', {}).get('files', [])
@@ -1590,6 +1647,59 @@ Output Directory: {self.demo_recorder.base_dir}
             messagebox.showinfo("Demo Recording Status", status_text)
         except Exception as e:
             logger.error(f"Failed to get demo status: {e}")
+            messagebox.showerror("Error", f"Failed to get status: {e}")
+
+    # ========================================================================
+    # UNIFIED RECORDING HANDLERS (Phase 10.5)
+    # ========================================================================
+
+    def _show_recording_config(self):
+        """Show the recording configuration dialog."""
+        try:
+            if hasattr(self, 'recording_controller'):
+                self.recording_controller.show_config_dialog()
+            else:
+                logger.error("RecordingController not initialized")
+                self.toast.show("Recording controller not available", "error")
+        except Exception as e:
+            logger.error(f"Failed to show recording config: {e}")
+            self.toast.show(f"Error: {e}", "error")
+
+    def _stop_recording_session(self):
+        """Stop the current recording session."""
+        try:
+            if hasattr(self, 'recording_controller'):
+                if self.recording_controller.is_active:
+                    self.recording_controller.stop_session()
+                else:
+                    self.toast.show("No active recording session", "info")
+            else:
+                logger.error("RecordingController not initialized")
+        except Exception as e:
+            logger.error(f"Failed to stop recording: {e}")
+            self.toast.show(f"Error: {e}", "error")
+
+    def _show_recording_status(self):
+        """Show current recording status in a dialog."""
+        try:
+            if hasattr(self, 'recording_controller'):
+                status = self.recording_controller.get_status()
+                status_text = f"""Recording Status
+
+State: {status.get('state', 'unknown').upper()}
+Games Recorded: {status.get('games_recorded', 0)}
+Capture Mode: {status.get('capture_mode', 'unknown')}
+Game Limit: {status.get('game_limit', 'infinite') or 'infinite'}
+Data Feed Healthy: {'Yes' if status.get('is_healthy', True) else 'No (Monitor Mode)'}
+Current Game: {status.get('current_game_id', 'None') or 'None'}
+
+Recordings Directory: {self.recording_controller.recordings_path}
+"""
+                messagebox.showinfo("Recording Status", status_text)
+            else:
+                messagebox.showinfo("Recording Status", "Recording controller not initialized")
+        except Exception as e:
+            logger.error(f"Failed to get recording status: {e}")
             messagebox.showerror("Error", f"Failed to get status: {e}")
 
     def shutdown(self):

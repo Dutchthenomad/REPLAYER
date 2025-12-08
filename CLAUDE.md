@@ -1,5 +1,5 @@
 # REPLAYER - Production Documentation
-**Version**: 0.10.3 | **Date**: December 6, 2025 | **Status**: Phase 10.3 Complete
+**Version**: 0.10.5 | **Date**: December 7, 2025 | **Status**: Phase 10.5 Complete
 
 ---
 
@@ -44,12 +44,12 @@ cd src && python3 -m pytest tests/ -v --tb=short
 - 275 tests passing
 - Modern UI with theme-aware charts
 
-### What's Next (Phase 10.4)
-- Server state verification layer (player-specific)
-- Auto-start recording on game transitions
-- Latency tracking for realistic bot timing
+### What's Next (Phase 11)
+- RL model integration for live trading
+- Browser automation for real trades
+- Portfolio management dashboard
 
-### Phase 10: Human Demo Recording System (In Progress)
+### Phase 10: Human Demo Recording System (Complete)
 **Goal**: Record human gameplay to train RL bot with realistic behavior patterns.
 
 | Sub-Phase | Status | Description |
@@ -57,15 +57,18 @@ cd src && python3 -m pytest tests/ -v --tb=short
 | 10.1 | Complete | DemoRecorderSink, demo_action models (32 tests) |
 | 10.2 | Complete | TradingController integration (22 tests) |
 | 10.3 | Complete | MainWindow menu integration |
-| 10.4 | **Next** | WebSocket verification layer |
-| 10.5 | Planned | Auto-start on game transitions |
-| 10.6 | Planned | Latency tracking for timing realism |
+| 10.4 | Complete | WebSocket foundation layer (game transition events) |
+| 10.5 | Complete | Unified recording configuration system |
 
-**Scope Focus**: Player-specific data only (not rugpool, battle, chat).
+**Key Achievements**:
+- Game-aware recording with automatic GAME_START/GAME_END detection
+- LiveFeedController tracks game transitions and publishes events
+- RecordingController integrates with EventBus for game lifecycle
+- Verified recording captures complete price histories (500+ ticks per game)
 
 **References**:
 - `docs/WEBSOCKET_EVENTS_SPEC.md` - Full protocol documentation
-- `docs/PHASE_10_4_PLAN.md` - Implementation plan with code examples
+- `docs/plans/2025-12-07-unified-recording-config-design.md` - Phase 10.5 design
 
 ---
 
@@ -261,11 +264,12 @@ Symlink: `src/rugs_recordings` -> `/home/nomad/rugs_recordings/`
 | 8 | Complete | UI-first bot, partial sells, timing overlay |
 | 9 | Complete | CDP browser connection, button selectors |
 | 10.1-10.3 | Complete | Human demo recording (models, controller, menu) |
-| 10.4 | **Active** | WebSocket verification layer |
+| 10.4 | Complete | WebSocket foundation layer (game transitions) |
+| 10.5 | Complete | Unified recording configuration system |
 
 ---
 
-## WebSocket Integration (Phase 10.4+)
+## WebSocket Integration
 
 ### Player-Specific Events (In Scope)
 
@@ -296,4 +300,4 @@ if abs(local_balance - server_balance) > Decimal('0.000001'):
 
 ---
 
-*Phase 10.3 Complete | Phase 10.4 Active | December 6, 2025*
+*Phase 10.5 Complete | December 7, 2025*

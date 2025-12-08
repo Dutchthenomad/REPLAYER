@@ -63,6 +63,9 @@ class LiveFeedController:
         # Callbacks
         self.log = log_callback
 
+        # Phase 10.5: Track current game for GAME_START/GAME_END events
+        self._current_game_id: str = None
+
         logger.info("LiveFeedController initialized")
 
     # ========================================================================
@@ -105,6 +108,25 @@ class LiveFeedController:
 
                         # Publish to event bus for UI updates
                         from services.event_bus import Events
+
+                        # Phase 10.5: Detect game transitions for recording
+                        game_id = tick.game_id
+                        if game_id and game_id != self._current_game_id:
+                            # New game started
+                            if self._current_game_id is not None:
+                                # Previous game ended
+                                logger.debug(f"Live feed: Game ended - {self._current_game_id}")
+                                self.event_bus.publish(Events.GAME_END, {
+                                    'game_id': self._current_game_id,
+                                    'clean': True  # Assume clean transition
+                                })
+                            # New game starting
+                            logger.debug(f"Live feed: Game started - {game_id}")
+                            self._current_game_id = game_id
+                            self.event_bus.publish(Events.GAME_START, {
+                                'game_id': game_id
+                            })
+
                         self.event_bus.publish(Events.GAME_TICK, {'tick': tick})
                     except Exception as e:
                         logger.error(f"Error processing live signal: {e}", exc_info=True)
@@ -165,8 +187,22 @@ class LiveFeedController:
 
                 # Marshal to Tkinter main thread with captured value
                 def handle_game_complete(captured_data=data_snapshot):
+                    from services.event_bus import Events
+
                     game_num = captured_data.get('gameNumber', 0)
+                    seed_data = captured_data.get('seedData')
                     self.log(f"💥 Game {game_num} complete")
+
+                    # Phase 10.5: Publish GAME_END with seed data
+                    if self._current_game_id:
+                        logger.debug(f"Live feed: Game complete - {self._current_game_id}")
+                        self.event_bus.publish(Events.GAME_END, {
+                            'game_id': self._current_game_id,
+                            'clean': True,
+                            'seed_data': seed_data
+                        })
+                        # Reset for next game
+                        self._current_game_id = None
 
                 self.root.after(0, handle_game_complete)
 
@@ -211,6 +247,8 @@ class LiveFeedController:
             self.parent.live_feed.disconnect()
             self.parent.live_feed = None
             self.parent.live_feed_connected = False
+            # Phase 10.5: Reset game tracking
+            self._current_game_id = None
             self.toast.show("Live feed disconnected", "info")
             if hasattr(self.parent, 'phase_label'):
                 self.parent.phase_label.config(text="PHASE: DISCONNECTED", fg='white')
@@ -250,5 +288,7 @@ class LiveFeedController:
                 self.parent.live_feed.disconnect()
                 self.parent.live_feed = None
                 self.parent.live_feed_connected = False
+                # Phase 10.5: Reset game tracking
+                self._current_game_id = None
             except Exception as e:
                 logger.error(f"Error disconnecting live feed during shutdown: {e}", exc_info=True)
