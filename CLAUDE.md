@@ -1,5 +1,5 @@
 # REPLAYER - Production Documentation
-**Version**: 0.10.5 | **Date**: December 7, 2025 | **Status**: Phase 10.5 Complete
+**Version**: 0.10.6 | **Date**: December 8, 2025 | **Status**: Phase 10.6 Complete
 
 ---
 
@@ -59,16 +59,21 @@ cd src && python3 -m pytest tests/ -v --tb=short
 | 10.3 | Complete | MainWindow menu integration |
 | 10.4 | Complete | WebSocket foundation layer (game transition events) |
 | 10.5 | Complete | Unified recording configuration system |
+| 10.6 | Complete | Unified recording integration with dual-state validation |
 
 **Key Achievements**:
 - Game-aware recording with automatic GAME_START/GAME_END detection
 - LiveFeedController tracks game transitions and publishes events
 - RecordingController integrates with EventBus for game lifecycle
 - Verified recording captures complete price histories (500+ ticks per game)
+- **Phase 10.6**: TradingController fully integrated with RecordingController
+- **Phase 10.6**: Dual-state validation (local vs server) for drift detection
+- **Phase 10.6**: Auto-start/stop recording on WebSocket connect/disconnect
 
 **References**:
 - `docs/WEBSOCKET_EVENTS_SPEC.md` - Full protocol documentation
 - `docs/plans/2025-12-07-unified-recording-config-design.md` - Phase 10.5 design
+- `docs/plans/2025-12-07-phase-10.6-unified-recording-integration.md` - Phase 10.6 design
 
 ---
 
@@ -266,6 +271,7 @@ Symlink: `src/rugs_recordings` -> `/home/nomad/rugs_recordings/`
 | 10.1-10.3 | Complete | Human demo recording (models, controller, menu) |
 | 10.4 | Complete | WebSocket foundation layer (game transitions) |
 | 10.5 | Complete | Unified recording configuration system |
+| 10.6 | Complete | Unified recording integration with dual-state validation |
 
 ---
 
@@ -300,4 +306,4 @@ if abs(local_balance - server_balance) > Decimal('0.000001'):
 
 ---
 
-*Phase 10.5 Complete | December 7, 2025*
+*Phase 10.6 Complete | December 8, 2025*
