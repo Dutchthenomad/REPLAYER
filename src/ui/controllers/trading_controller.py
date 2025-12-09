@@ -7,12 +7,18 @@ Handles:
 - Bet amount management (increment, clear, half, double, max)
 - Sell percentage management (10%, 25%, 50%, 100%)
 - UI updates for trade state
+
+Phase 10.6: Records ALL button presses to RecordingController with
+dual-state validation (local vs server).
 """
 
 import tkinter as tk
 from decimal import Decimal
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 import logging
+
+if TYPE_CHECKING:
+    from ui.controllers.recording_controller import RecordingController
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +46,9 @@ class TradingController:
         toast,
         # Callbacks
         log_callback: Callable[[str], None],
-        # Phase 10: Demo recording
+        # Phase 10.6: Recording controller (replaces demo_recorder)
+        recording_controller: Optional["RecordingController"] = None,
+        # Legacy: Keep demo_recorder for backwards compatibility during migration
         demo_recorder=None
     ):
         """
@@ -57,7 +65,8 @@ class TradingController:
             ui_dispatcher: TkDispatcher for thread-safe UI updates
             toast: Toast notification widget
             log_callback: Logging function
-            demo_recorder: Optional DemoRecorderSink for recording actions (Phase 10)
+            recording_controller: RecordingController for Phase 10.6 recording
+            demo_recorder: DEPRECATED - Legacy DemoRecorderSink (Phase 10.1-10.3)
         """
         self.parent = parent_window
         self.trade_manager = trade_manager
@@ -78,30 +87,30 @@ class TradingController:
         # Callbacks
         self.log = log_callback
 
-        # Phase 10: Demo recording
+        # Phase 10.6: Recording controller (primary)
+        self.recording_controller = recording_controller
+
+        # Legacy: Demo recorder (deprecated, kept for backwards compatibility)
         self.demo_recorder = demo_recorder
 
         logger.info("TradingController initialized")
 
     # ========================================================================
-    # DEMO RECORDING (Phase 10)
+    # RECORDING (Phase 10.6 - Unified with Validation)
     # ========================================================================
 
     def _record_button_press(self, button: str, amount: Decimal = None):
         """
-        Record a button press to the demo recorder (if active).
+        Record a button press with dual-state validation.
 
-        Phase 10: Records all button presses for imitation learning.
+        Phase 10.6: Records ALL button presses to RecordingController
+        with local state snapshot for zero-tolerance validation against
+        server state.
 
         Args:
             button: Button text (e.g., 'BUY', '+0.01', '25%')
             amount: Trade amount (for BUY/SELL/SIDEBET actions)
         """
-        if self.demo_recorder is None:
-            return
-        if not self.demo_recorder.is_game_active():
-            return
-
         try:
             # Get current bet amount from entry
             try:
@@ -109,16 +118,29 @@ class TradingController:
             except Exception:
                 bet_amount = Decimal('0')
 
-            # Capture state snapshot
-            state_before = self.state.capture_demo_snapshot(bet_amount)
+            # Phase 10.6: Use new RecordingController
+            if self.recording_controller:
+                # Capture local state snapshot for validation
+                local_state = self.state.capture_local_snapshot(bet_amount)
 
-            # Record the button press
-            self.demo_recorder.record_button_press(
-                button=button,
-                state_before=state_before,
-                amount=amount
-            )
-            logger.debug(f"Recorded button press: {button}")
+                # Record to new unified system
+                self.recording_controller.on_button_press(
+                    button=button,
+                    local_state=local_state,
+                    amount=amount
+                )
+                logger.debug(f"Recorded button press (Phase 10.6): {button}")
+
+            # Legacy: Also record to old system during migration
+            elif self.demo_recorder and self.demo_recorder.is_game_active():
+                state_before = self.state.capture_demo_snapshot(bet_amount)
+                self.demo_recorder.record_button_press(
+                    button=button,
+                    state_before=state_before,
+                    amount=amount
+                )
+                logger.debug(f"Recorded button press (legacy): {button}")
+
         except Exception as e:
             logger.error(f"Failed to record button press: {e}")
 

@@ -865,6 +865,12 @@ class MainWindow:
             game_state=self.state
         )
 
+        # Phase 10.6: Wire RecordingController to TradingController
+        self.trading_controller.recording_controller = self.recording_controller
+
+        # Phase 10.6: Wire RecordingController to LiveFeedController for auto-start/stop
+        self.live_feed_controller.set_recording_controller(self.recording_controller)
+
         # Create menu bar now (after controllers are initialized, before BrowserBridgeController needs it)
         self._create_menu_bar()
 

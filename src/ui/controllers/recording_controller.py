@@ -16,7 +16,12 @@ from typing import Optional, TYPE_CHECKING
 from decimal import Decimal
 
 from models.recording_config import RecordingConfig, CaptureMode
-from models.recording_models import PlayerAction
+from models.recording_models import (
+    PlayerAction,
+    ServerState,
+    LocalStateSnapshot,
+    RecordedAction,
+)
 from services.unified_recorder import UnifiedRecorder
 from services.recording_state_machine import RecordingState
 from ui.recording_config_dialog import RecordingConfigDialog
@@ -247,6 +252,67 @@ class RecordingController:
         """
         if self._recorder:
             self._recorder.on_player_action(action)
+
+    # =========================================================================
+    # Phase 10.6: Button Recording with Validation
+    # =========================================================================
+
+    def on_button_press(
+        self,
+        button: str,
+        local_state: LocalStateSnapshot,
+        amount: Optional[Decimal] = None,
+        server_state: Optional[ServerState] = None
+    ) -> Optional[RecordedAction]:
+        """
+        Record a button press with dual-state validation.
+
+        Phase 10.6: Called by TradingController for ALL button presses.
+
+        Args:
+            button: Button text (e.g., 'BUY', '+0.01', '25%', 'X')
+            local_state: REPLAYER's calculated state at action time
+            amount: Trade amount (for BUY/SELL/SIDEBET)
+            server_state: Server state from WebSocket (optional)
+
+        Returns:
+            RecordedAction if recorded, None otherwise
+        """
+        if self._recorder:
+            return self._recorder.record_button_press(
+                button=button,
+                local_state=local_state,
+                amount=amount,
+                server_state=server_state
+            )
+        return None
+
+    def update_server_state(self, server_state: ServerState) -> None:
+        """
+        Update the latest server state for validation.
+
+        Called when WebSocket playerUpdate is received.
+
+        Args:
+            server_state: Latest server state from WebSocket
+        """
+        if self._recorder:
+            self._recorder.update_server_state(server_state)
+
+    def record_trade_confirmation(self, action_id: str, timestamp_ms: int) -> Optional[float]:
+        """
+        Record trade confirmation and calculate latency.
+
+        Args:
+            action_id: ID of the action to confirm
+            timestamp_ms: Confirmation timestamp in milliseconds
+
+        Returns:
+            Latency in ms if found, None otherwise
+        """
+        if self._recorder:
+            return self._recorder.record_trade_confirmation(action_id, timestamp_ms)
+        return None
 
     def on_connection_lost(self) -> None:
         """Handle WebSocket connection loss."""

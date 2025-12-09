@@ -26,8 +26,14 @@ from models.recording_models import (
     GameStateMeta,
     PlayerSession,
     PlayerSessionMeta,
-    PlayerAction
+    PlayerAction,
+    # Phase 10.6: Validation-aware models
+    ServerState,
+    LocalStateSnapshot,
+    RecordedAction,
+    validate_states,
 )
+from models.demo_action import ActionCategory, get_category_for_button, is_trade_action
 from services.recording_state_machine import RecordingState, RecordingStateMachine
 from sources.data_integrity_monitor import DataIntegrityMonitor, ThresholdType, IntegrityIssue
 
@@ -112,6 +118,12 @@ class UnifiedRecorder:
         self._player_session: Optional[PlayerSession] = None
         self._player_session_start: Optional[datetime] = None
         self._pending_actions: List[PlayerAction] = []
+
+        # Phase 10.6: Button recording state
+        self._current_game_actions: List[RecordedAction] = []
+        self._action_file_handle = None
+        self._last_server_state: Optional[ServerState] = None
+        self._pending_trade_actions: Dict[str, RecordedAction] = {}  # action_id -> action
 
         # Callbacks
         self.on_game_recorded: Optional[Callable[[str], None]] = None
@@ -306,6 +318,116 @@ class UnifiedRecorder:
         """Handle WebSocket connection restored."""
         self._integrity_monitor.on_connection_restored()
 
+    # =========================================================================
+    # Phase 10.6: Button Recording with Validation
+    # =========================================================================
+
+    def update_server_state(self, server_state: ServerState) -> None:
+        """
+        Update the latest server state from WebSocket playerUpdate.
+
+        Args:
+            server_state: Latest server state from WebSocket
+        """
+        self._last_server_state = server_state
+
+    def record_button_press(
+        self,
+        button: str,
+        local_state: LocalStateSnapshot,
+        amount: Optional[Decimal] = None,
+        server_state: Optional[ServerState] = None
+    ) -> Optional[RecordedAction]:
+        """
+        Record a button press with dual-state validation.
+
+        Phase 10.6: Records ALL button presses (not just trades) with
+        local vs server state validation.
+
+        Args:
+            button: Button text (e.g., 'BUY', '+0.01', '25%', 'X')
+            local_state: REPLAYER's calculated state at action time
+            amount: Trade amount (for BUY/SELL/SIDEBET)
+            server_state: Server state (uses last cached if not provided)
+
+        Returns:
+            RecordedAction if recorded, None if not recording
+        """
+        # Only record if we're actively recording a game
+        if not self.is_recording or not self._current_game:
+            return None
+
+        # Use provided server state or last cached
+        server = server_state or self._last_server_state
+
+        # Categorize the button
+        try:
+            category = get_category_for_button(button)
+        except ValueError:
+            logger.warning(f"Unknown button: {button}")
+            category = ActionCategory.BET_INCREMENT
+
+        # Validate states (zero tolerance)
+        drift_detected = False
+        drift_details = None
+        if server:
+            drift_detected, drift_details = validate_states(local_state, server)
+            if drift_detected:
+                logger.warning(f"Drift detected on {button}: {drift_details}")
+
+        # Create recorded action
+        action = RecordedAction(
+            game_id=self._current_game.meta.game_id,
+            tick=local_state.current_tick,
+            timestamp=datetime.utcnow(),
+            category=category.value,
+            button=button,
+            amount=amount,
+            local_state=local_state,
+            server_state=server,
+            drift_detected=drift_detected,
+            drift_details=drift_details,
+        )
+
+        # Store action
+        self._current_game_actions.append(action)
+        self._current_game_has_player_input = True
+
+        # If it's a trade action, track for confirmation
+        if is_trade_action(category):
+            self._pending_trade_actions[action.action_id] = action
+
+        # Write to JSONL file if open
+        if self._action_file_handle:
+            line = json.dumps(action.to_dict(), cls=DecimalEncoder) + "\n"
+            self._action_file_handle.write(line)
+            self._action_file_handle.flush()
+
+        logger.debug(f"Recorded button: {button} (drift={drift_detected})")
+        return action
+
+    def record_trade_confirmation(
+        self,
+        action_id: str,
+        timestamp_ms: int
+    ) -> Optional[float]:
+        """
+        Record trade confirmation and calculate latency.
+
+        Args:
+            action_id: ID of the action to confirm
+            timestamp_ms: Confirmation timestamp in milliseconds
+
+        Returns:
+            Latency in ms if found, None otherwise
+        """
+        action = self._pending_trade_actions.pop(action_id, None)
+        if action:
+            latency = action.record_confirmation(timestamp_ms)
+            logger.debug(f"Trade confirmed: {action.button} latency={latency:.0f}ms")
+            return latency
+        return None
+
     def get_status(self) -> Dict[str, Any]:
         """Get comprehensive status."""
         return {
@@ -331,6 +453,26 @@ class UnifiedRecorder:
         )
         self._current_game_has_player_input = False
         self._current_game_ticks = []
+        self._current_game_actions = []
+        self._pending_trade_actions = {}
+
+        # Phase 10.6: Open JSONL file for player actions
+        if self._config.capture_mode == CaptureMode.GAME_AND_PLAYER:
+            player_dir = self.base_path / "player"
+            player_dir.mkdir(parents=True, exist_ok=True)
+
+            time_str = self._current_game_start.strftime("%Y%m%dT%H%M%S")
+            game_id_short = game_id.split('-')[-1][:8] if '-' in game_id else game_id[:8]
+            filename = f"{time_str}_{game_id_short}_player.jsonl"
+            filepath = player_dir / filename
+
+            try:
+                self._action_file_handle = open(filepath, 'w')
+                logger.debug(f"Opened player action file: {filepath}")
+            except Exception as e:
+                logger.error(f"Failed to open player action file: {e}")
+                self._action_file_handle = None
+
         logger.debug(f"Started game recording: {game_id}")
 
     def _finalize_game(
@@ -360,29 +502,41 @@ class UnifiedRecorder:
         if not self._current_game:
             return None
 
+        # Phase 10.6: Close action file if open
+        if self._action_file_handle:
+            try:
+                self._action_file_handle.close()
+                logger.debug("Closed player action file")
+            except Exception as e:
+                logger.error(f"Error closing action file: {e}")
+            self._action_file_handle = None
+
         # Create games directory
         games_dir = self.base_path / "games"
         games_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate filename
         time_str = self._current_game_start.strftime("%Y%m%dT%H%M%S")
-        game_id_short = self._current_game.meta.game_id.split('-')[-1][:8]
+        game_id_short = self._current_game.meta.game_id.split('-')[-1][:8] if '-' in self._current_game.meta.game_id else self._current_game.meta.game_id[:8]
         filename = f"{time_str}_{game_id_short}.game.json"
         filepath = games_dir / filename
 
-        # Build game data with has_player_input flag
+        # Build game data with has_player_input flag and action count
         game_data = self._current_game.to_dict()
         game_data["meta"]["has_player_input"] = self._current_game_has_player_input
+        game_data["meta"]["action_count"] = len(self._current_game_actions)
 
         # Write file
         with open(filepath, 'w') as f:
             json.dump(game_data, f, indent=2, cls=DecimalEncoder)
 
-        logger.info(f"Saved game: {filepath}")
+        logger.info(f"Saved game: {filepath} (actions={len(self._current_game_actions)})")
 
         # Clear current game
         self._current_game = None
         self._current_game_start = None
+        self._current_game_actions = []
+        self._pending_trade_actions = {}
 
         return str(filepath)
 
@@ -391,10 +545,25 @@ class UnifiedRecorder:
         if self._current_game:
             game_id = self._current_game.meta.game_id
             logger.warning(f"Discarding game due to integrity issue: {game_id}")
+
+            # Phase 10.6: Close and delete action file if open
+            if self._action_file_handle:
+                filepath = self._action_file_handle.name
+                try:
+                    self._action_file_handle.close()
+                    # Delete the incomplete file
+                    Path(filepath).unlink(missing_ok=True)
+                    logger.debug(f"Deleted incomplete action file: {filepath}")
+                except Exception as e:
+                    logger.error(f"Error cleaning up action file: {e}")
+                self._action_file_handle = None
+
             self._current_game = None
             self._current_game_start = None
             self._current_game_has_player_input = False
             self._current_game_ticks = []
+            self._current_game_actions = []
+            self._pending_trade_actions = {}
 
     def _start_player_session(self) -> None:
         """Start a new player session."""

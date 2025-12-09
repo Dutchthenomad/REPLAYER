@@ -217,6 +217,59 @@ class GameState:
                 phase=self._state.get('current_phase', 'UNKNOWN'),
             )
 
+    def capture_local_snapshot(self, bet_amount: Decimal) -> 'LocalStateSnapshot':
+        """
+        Capture state snapshot for Phase 10.6 validation-aware recording.
+
+        Returns LocalStateSnapshot with all state context needed for
+        zero-tolerance validation against server state.
+
+        Args:
+            bet_amount: Current bet amount from UI (not tracked in GameState)
+
+        Returns:
+            LocalStateSnapshot from models.recording_models
+        """
+        from models.recording_models import LocalStateSnapshot
+
+        with self._lock:
+            # Get position details
+            position_qty = Decimal('0')
+            position_entry_price = None
+            position_pnl = None
+
+            if self._state['position']:
+                pos = self._state['position']
+                position_qty = pos.get('amount', Decimal('0'))
+                position_entry_price = pos.get('entry_price')
+                # Calculate PnL if we have entry price and current price
+                if position_entry_price and self._state.get('current_price'):
+                    current_price = self._state['current_price']
+                    position_pnl = (current_price - position_entry_price) * position_qty
+
+            # Get sidebet details
+            sidebet_active = False
+            sidebet_amount = None
+
+            if self._state['sidebet']:
+                sb = self._state['sidebet']
+                sidebet_active = True
+                sidebet_amount = sb.get('amount', Decimal('0'))
+
+            return LocalStateSnapshot(
+                balance=self._state['balance'],
+                position_qty=position_qty,
+                position_entry_price=position_entry_price,
+                position_pnl=position_pnl,
+                sidebet_active=sidebet_active,
+                sidebet_amount=sidebet_amount,
+                bet_amount=bet_amount,
+                sell_percentage=self._state.get('sell_percentage', Decimal('1.0')),
+                current_tick=self._state.get('current_tick', 0),
+                current_price=self._state.get('current_price', Decimal('1.0')),
+                phase=self._state.get('current_phase', 'UNKNOWN'),
+            )
+
     # ========== State Mutation Methods ==========
     
     def update(self, **kwargs) -> bool:

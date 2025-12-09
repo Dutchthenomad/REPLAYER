@@ -7,12 +7,18 @@ Handles:
 - Live mode state management
 - Feed source switching
 - UI updates for live feed status
+
+Phase 10.6: Auto-starts recording when WebSocket connects,
+auto-stops when disconnected.
 """
 
 import tkinter as tk
 import threading
 import logging
-from typing import Callable
+from typing import Callable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ui.controllers.recording_controller import RecordingController
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +72,22 @@ class LiveFeedController:
         # Phase 10.5: Track current game for GAME_START/GAME_END events
         self._current_game_id: str = None
 
+        # Phase 10.6: Recording controller for auto-start/stop
+        self._recording_controller: Optional["RecordingController"] = None
+
         logger.info("LiveFeedController initialized")
+
+    def set_recording_controller(self, controller: "RecordingController") -> None:
+        """
+        Set the recording controller for auto-start/stop recording.
+
+        Phase 10.6: Must be called after RecordingController is created.
+
+        Args:
+            controller: RecordingController instance
+        """
+        self._recording_controller = controller
+        logger.debug("Recording controller set for auto-start/stop")
 
     # ========================================================================
     # LIVE FEED CONNECTION
@@ -159,6 +180,14 @@ class LiveFeedController:
                     if hasattr(self.parent, 'phase_label'):
                         self.parent.phase_label.config(text="PHASE: LIVE FEED", fg='#00ff88')
 
+                    # Phase 10.6: Auto-start recording
+                    if self._recording_controller:
+                        try:
+                            self._recording_controller.start_session()
+                            self.log("📹 Recording started automatically")
+                        except Exception as rec_e:
+                            logger.error(f"Failed to auto-start recording: {rec_e}")
+
                 self.root.after(0, handle_connected)
 
             @self.parent.live_feed.on('disconnected')
@@ -177,6 +206,14 @@ class LiveFeedController:
                         self.toast.show("Live feed disconnected", "error")
                     if hasattr(self.parent, 'phase_label'):
                         self.parent.phase_label.config(text="PHASE: DISCONNECTED", fg='#ff3366')
+
+                    # Phase 10.6: Auto-stop recording
+                    if self._recording_controller and self._recording_controller.is_active:
+                        try:
+                            self._recording_controller.stop_session()
+                            self.log("📹 Recording stopped automatically")
+                        except Exception as rec_e:
+                            logger.error(f"Failed to auto-stop recording: {rec_e}")
 
                 self.root.after(0, handle_disconnected)
 

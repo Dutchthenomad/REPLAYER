@@ -22,6 +22,14 @@ from .recording_models import (
     PlayerSessionMeta,
     PlayerSession,
 )
+# Phase 10.6: Validation-aware recording models
+from .recording_models import (
+    ServerState,
+    LocalStateSnapshot,
+    DriftDetails,
+    RecordedAction,
+    validate_states,
+)
 # Phase 10.5A: Recording config model
 from .recording_config import (
     CaptureMode,
@@ -49,6 +57,12 @@ __all__ = [
     'PlayerAction',
     'PlayerSessionMeta',
     'PlayerSession',
+    # Phase 10.6: Validation-aware recording models
+    'ServerState',
+    'LocalStateSnapshot',
+    'DriftDetails',
+    'RecordedAction',
+    'validate_states',
     # Phase 10.5A: Recording config model
     'CaptureMode',
     'MonitorThresholdType',
