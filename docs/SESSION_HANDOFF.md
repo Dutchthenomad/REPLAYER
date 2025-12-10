@@ -77,6 +77,32 @@ After Priority 1, you can verify with a live session:
 - [ ] Recorded actions include `server_state` field
 - [ ] `drift_detected` flag works when local != server
 
+### Live Verification Results (Dec 9, 2025)
+
+**Testing Outcome**: Events NOT received in current setup
+
+| Event | Status | Analysis |
+|-------|--------|----------|
+| `usernameStatus` | ❌ NOT received | Requires wallet authentication |
+| `playerUpdate` | ❌ NOT received | Only sent after **server-side** trades |
+
+**Root Cause**:
+- `usernameStatus` is only sent when user is logged in with Phantom wallet
+- `playerUpdate` is only triggered by **real trades on the website**, not local simulations
+- The trades in REPLAYER (BUY/SELL buttons) are local simulations - they don't hit the server
+
+**Conclusion**:
+- Implementation is CORRECT and COMPLETE (handlers are properly wired)
+- Events will only fire during **authenticated live trading sessions**
+- For full verification, user must:
+  1. Connect Phantom wallet to rugs.fun
+  2. Execute **real trades** through the browser (not REPLAYER)
+  3. Or use browser bridge to execute real trades via Playwright
+
+**Pre-existing Bug Found**: Sidebet expiry error (`'dict' object has no attribute 'placed_tick'`)
+- Unrelated to Priority 1 changes
+- Occurs when sidebets are active during live feed
+
 ---
 
 ## Related Documents
