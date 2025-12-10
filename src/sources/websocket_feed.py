@@ -109,6 +109,11 @@ class WebSocketFeed:
         self.is_connected = False
         self.event_handlers = {}
 
+        # Phase 10.7: Player state tracking
+        self.player_id: Optional[str] = None
+        self.username: Optional[str] = None
+        self.last_player_update: Optional[Dict[str, Any]] = None
+
         # AUDIT FIX: Guard to prevent duplicate event listener registration
         self._listeners_setup = False
 
@@ -257,6 +262,35 @@ class WebSocketFeed:
                 self._handle_game_state_update(data)
             except Exception as e:
                 self.logger.error(f"Error handling game state update: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
+        # Phase 10.7: Player identity event (once on connect)
+        @self.sio.on('usernameStatus')
+        def on_username_status(data):
+            try:
+                self.player_id = data.get('id')
+                self.username = data.get('username')
+                player_id_short = self.player_id[:20] + '...' if self.player_id and len(self.player_id) > 20 else self.player_id
+                self.logger.info(f'👤 Identity confirmed: {self.username} ({player_id_short})')
+                self._emit_event('player_identity', {
+                    'player_id': self.player_id,
+                    'username': self.username
+                })
+            except Exception as e:
+                self.logger.error(f"Error in usernameStatus handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
+        # Phase 10.7: Player state update (after each trade)
+        @self.sio.on('playerUpdate')
+        def on_player_update(data):
+            try:
+                self.last_player_update = data
+                cash = data.get('cash', 0)
+                pos_qty = data.get('positionQty', 0)
+                self.logger.debug(f'💰 Player update: cash={cash:.4f}, pos={pos_qty:.4f}')
+                self._emit_event('player_update', data)
+            except Exception as e:
+                self.logger.error(f"Error in playerUpdate handler: {e}", exc_info=True)
                 self.metrics['errors'] += 1
 
         # Catch-all for noise tracking
@@ -519,6 +553,21 @@ class WebSocketFeed:
     def get_last_signal(self) -> Optional[GameSignal]:
         """Get the last received signal"""
         return self.last_signal
+
+    def get_player_info(self) -> Dict[str, Any]:
+        """
+        Get current player identity and state.
+
+        Phase 10.7: Returns player ID, username, and last server update.
+
+        Returns:
+            Dict with player_id, username, and last_update
+        """
+        return {
+            'player_id': self.player_id,
+            'username': self.username,
+            'last_update': self.last_player_update
+        }
 
     def signal_to_game_tick(self, signal: GameSignal) -> GameTick:
         """

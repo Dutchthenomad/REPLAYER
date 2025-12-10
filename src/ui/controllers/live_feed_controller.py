@@ -75,6 +75,10 @@ class LiveFeedController:
         # Phase 10.6: Recording controller for auto-start/stop
         self._recording_controller: Optional["RecordingController"] = None
 
+        # Phase 10.7: Player identity tracking
+        self._player_id: Optional[str] = None
+        self._username: Optional[str] = None
+
         logger.info("LiveFeedController initialized")
 
     def set_recording_controller(self, controller: "RecordingController") -> None:
@@ -243,6 +247,56 @@ class LiveFeedController:
 
                 self.root.after(0, handle_game_complete)
 
+            # Phase 10.7: Player identity event (once on connect)
+            @self.parent.live_feed.on('player_identity')
+            def on_player_identity(info):
+                # PRODUCTION FIX: Capture info snapshot
+                info_snapshot = dict(info) if hasattr(info, 'items') else {}
+
+                def handle_identity(captured_info=info_snapshot):
+                    from services.event_bus import Events
+
+                    self._player_id = captured_info.get('player_id')
+                    self._username = captured_info.get('username')
+                    self.log(f"👤 Logged in as: {self._username}")
+
+                    # Set player info on recording controller
+                    if self._recording_controller:
+                        self._recording_controller.set_player_info(
+                            self._player_id,
+                            self._username
+                        )
+
+                    # Publish to EventBus for other consumers
+                    self.event_bus.publish(Events.PLAYER_IDENTITY, captured_info)
+
+                self.root.after(0, handle_identity)
+
+            # Phase 10.7: Player update event (after each trade)
+            @self.parent.live_feed.on('player_update')
+            def on_player_update(data):
+                # PRODUCTION FIX: Capture data snapshot
+                data_snapshot = dict(data) if hasattr(data, 'items') else {}
+
+                def handle_update(captured_data=data_snapshot):
+                    from services.event_bus import Events
+                    from models.recording_models import ServerState
+
+                    # Create ServerState from WebSocket data
+                    server_state = ServerState.from_websocket(captured_data)
+
+                    # Forward to recording controller
+                    if self._recording_controller:
+                        self._recording_controller.update_server_state(server_state)
+
+                    # Publish to EventBus for other consumers
+                    self.event_bus.publish(Events.PLAYER_UPDATE, {
+                        'server_state': server_state,
+                        'raw_data': captured_data
+                    })
+
+                self.root.after(0, handle_update)
+
             # Bug 6 Fix: Connect to feed in background thread (non-blocking)
             # This prevents UI freeze during Socket.IO handshake (up to 20s timeout)
             def connect_in_background():
@@ -286,6 +340,9 @@ class LiveFeedController:
             self.parent.live_feed_connected = False
             # Phase 10.5: Reset game tracking
             self._current_game_id = None
+            # Phase 10.7: Reset player tracking
+            self._player_id = None
+            self._username = None
             self.toast.show("Live feed disconnected", "info")
             if hasattr(self.parent, 'phase_label'):
                 self.parent.phase_label.config(text="PHASE: DISCONNECTED", fg='white')
@@ -327,5 +384,8 @@ class LiveFeedController:
                 self.parent.live_feed_connected = False
                 # Phase 10.5: Reset game tracking
                 self._current_game_id = None
+                # Phase 10.7: Reset player tracking
+                self._player_id = None
+                self._username = None
             except Exception as e:
                 logger.error(f"Error disconnecting live feed during shutdown: {e}", exc_info=True)

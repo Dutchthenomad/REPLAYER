@@ -57,6 +57,10 @@ class Events(Enum):
     REPLAY_PAUSED = "replay.paused"    # Alias for REPLAY_PAUSE
     REPLAY_STOPPED = "replay.stopped"  # Alias for REPLAY_STOP
 
+    # Phase 10.7: Player State Events (WebSocket server state)
+    PLAYER_IDENTITY = "player.identity"  # Player ID and username from usernameStatus
+    PLAYER_UPDATE = "player.update"      # Server state from playerUpdate
+
 class EventBus:
     """
     Thread-safe event bus with deadlock prevention
