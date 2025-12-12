@@ -2,7 +2,7 @@
 Tests for TkDispatcher
 """
 
-from ui.tk_dispatcher import TkDispatcher
+from services.ui_dispatcher import TkDispatcher
 
 
 class DummyRoot:

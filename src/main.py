@@ -32,13 +32,12 @@ class Application:
     Phase 8.5: Added live_mode parameter for browser automation
     """
 
-    def __init__(self, live_mode: bool = False, modern_ui: bool = None):
+    def __init__(self, live_mode: bool = False):
         """
         Initialize application
 
         Args:
             live_mode: If True, enable live browser automation mode (Phase 8.5)
-            modern_ui: If True, use the new Modern UI (Game-like). If None, load from preference.
         """
         # Initialize logging first
         self.logger = setup_logging()
@@ -53,17 +52,8 @@ class Application:
         # Phase 8.5: Store live mode flag
         self.live_mode = live_mode
 
-        # Import MainWindow for preference loading
+        # Import MainWindow
         from ui.main_window import MainWindow
-
-        # Load UI style preference if not explicitly specified
-        if modern_ui is None:
-            ui_style = MainWindow.load_ui_style_preference()
-            self.modern_ui = (ui_style == 'modern')
-            self.logger.info(f"UI Style: {ui_style} (from preference)")
-        else:
-            self.modern_ui = modern_ui
-            self.logger.info(f"UI Style: {'modern' if modern_ui else 'standard'} (from command line)")
 
         # PRODUCTION FIX: Validate configuration at startup
         # Catches invalid settings before they cause runtime errors
@@ -91,18 +81,10 @@ class Application:
         # Setup event handlers
         self._setup_event_handlers()
 
-        # Create UI window
-        # Modern UI uses plain tk.Tk() with its own dark theme
-        # Standard UI uses ttkbootstrap.Window for theming support
-        if self.modern_ui:
-            # Modern UI: Plain Tk window with custom dark theme
-            self.root = tk.Tk()
-            self.logger.info("Using Modern UI with custom dark theme")
-        else:
-            # Standard UI: ttkbootstrap Window with theme support
-            saved_theme = MainWindow.load_theme_preference()
-            self.root = ttk.Window(themename=saved_theme)
-            self.logger.info(f"Using theme: {saved_theme}")
+        # Create UI window with ttkbootstrap theme support
+        saved_theme = MainWindow.load_theme_preference()
+        self.root = ttk.Window(themename=saved_theme)
+        self.logger.info(f"Using theme: {saved_theme}")
         self.main_window = None
 
         # Configure root window
@@ -183,25 +165,14 @@ class Application:
     def run(self):
         """Run the application"""
         try:
-            if self.modern_ui:
-                self.logger.info("Loading Modern UI...")
-                from ui.modern_main_window import ModernMainWindow
-                self.main_window = ModernMainWindow(
-                    self.root,
-                    self.state,
-                    self.event_bus,
-                    self.config,
-                    live_mode=self.live_mode
-                )
-            else:
-                # Phase 8.5: Create main window with live mode flag
-                self.main_window = MainWindow(
-                    self.root,
-                    self.state,
-                    self.event_bus,
-                    self.config,
-                    live_mode=self.live_mode  # Pass live mode flag
-                )
+            # Phase 8.5: Create main window with live mode flag
+            self.main_window = MainWindow(
+                self.root,
+                self.state,
+                self.event_bus,
+                self.config,
+                live_mode=self.live_mode  # Pass live mode flag
+            )
 
             # Auto-load games if directory exists (skip in live mode)
             if not self.live_mode:
@@ -288,31 +259,11 @@ Phase 8.5: Live mode connects to Rugs.fun via Playwright automation.
         help='Enable live browser automation mode (requires CV-BOILER-PLATE-FORK)'
     )
 
-    parser.add_argument(
-        '--modern',
-        action='store_true',
-        help='Enable new modern UI (overrides saved preference)'
-    )
-
-    parser.add_argument(
-        '--standard',
-        action='store_true',
-        help='Enable standard UI (overrides saved preference)'
-    )
 
     args = parser.parse_args()
 
-    # Determine UI style: command line overrides saved preference
-    # If neither --modern nor --standard specified, load from preference (pass None)
-    if args.modern:
-        modern_ui = True
-    elif args.standard:
-        modern_ui = False
-    else:
-        modern_ui = None  # Will load from saved preference
-
     # Create and run application
-    app = Application(live_mode=args.live, modern_ui=modern_ui)
+    app = Application(live_mode=args.live)
 
     try:
         app.run()

@@ -16,7 +16,7 @@ from core import ReplayEngine, TradeManager
 from core.game_queue import GameQueue
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
-from ui.tk_dispatcher import TkDispatcher
+from services.ui_dispatcher import TkDispatcher
 from ui.bot_config_panel import BotConfigPanel  # Phase 8.4
 from ui.balance_edit_dialog import BalanceUnlockDialog, BalanceRelockDialog, BalanceEditEntry
 from bot import BotInterface, BotController, list_strategies
