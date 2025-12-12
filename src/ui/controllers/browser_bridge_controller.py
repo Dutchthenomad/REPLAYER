@@ -13,8 +13,8 @@ import tkinter as tk
 import asyncio
 import logging
 from typing import Callable, Optional
-from bot.browser_executor import BrowserExecutor
-from bot.browser_bridge import BridgeStatus
+from browser.executor import BrowserExecutor
+from browser.bridge import BridgeStatus
 from ui.browser_connection_dialog import BrowserConnectionDialog
 
 logger = logging.getLogger(__name__)

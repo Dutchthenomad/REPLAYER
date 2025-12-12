@@ -16,11 +16,11 @@ import asyncio
 
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
-from browser_automation.persistent_profile import (
+from browser.profiles import (
     PersistentProfileConfig,
     build_launch_options
 )
-from browser_automation.automation import connect_phantom_wallet, wait_for_game_ready
+from browser.automation import connect_phantom_wallet, wait_for_game_ready
 
 
 class BrowserStatus(Enum):
