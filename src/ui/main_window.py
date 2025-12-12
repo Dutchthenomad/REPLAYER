@@ -29,8 +29,8 @@ from bot import BotInterface, BotController, list_strategies
 from bot.async_executor import AsyncBotExecutor
 from bot.execution_mode import ExecutionMode  # Phase 8.4
 from bot.ui_controller import BotUIController  # Phase 8.4
-from bot.browser_executor import BrowserExecutor  # Phase 8.5
-from bot.browser_bridge import get_browser_bridge, BridgeStatus  # Phase 9.3
+from browser.executor import BrowserExecutor  # Phase 2: Browser consolidation
+from browser.bridge import get_browser_bridge, BridgeStatus  # Phase 2: Browser consolidation
 from sources import WebSocketFeed
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class MainWindow:
         self.browser_connected = False
 
         try:
-            from bot.browser_executor import BrowserExecutor
+            from browser.executor import BrowserExecutor
             self.browser_executor = BrowserExecutor(profile_name="rugs_fun_phantom")
             logger.info("BrowserExecutor available - user can connect via Browser menu")
         except Exception as e:
