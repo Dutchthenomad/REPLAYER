@@ -1,5 +1,5 @@
 # REPLAYER - Production Documentation
-**Version**: 0.10.6 | **Date**: December 8, 2025 | **Status**: Phase 10.6 Complete
+**Version**: 0.10.7 | **Date**: December 12, 2025 | **Status**: Phase 10.7 Complete (Raw Capture + Auth Workaround)
 
 ---
 
@@ -35,19 +35,22 @@ cd src && python3 -m pytest tests/ -v --tb=short
 
 ## Production State
 
-### What's Working (Phase 9 Complete)
+### What's Working (Phase 10.7 Complete)
 - CDP Browser Connection to system Chrome
 - Phantom wallet persistence via Chrome profile
 - Button selectors (BUY, SELL, percentages, sidebets)
 - Multi-strategy selector system (text -> class -> structural -> ARIA)
 - Incremental button clicking (human-like behavior)
-- 275 tests passing
+- **Raw WebSocket Capture Tool** (Developer Tools menu)
+- **Hardcoded credentials workaround** for auth-gated events
+- 737 tests passing
 - Modern UI with theme-aware charts
 
 ### What's Next (Phase 11)
 - RL model integration for live trading
 - Browser automation for real trades
 - Portfolio management dashboard
+- **Bug fixes from Phase 10.7 testing**
 
 ### Phase 10: Human Demo Recording System (Complete)
 **Goal**: Record human gameplay to train RL bot with realistic behavior patterns.
@@ -60,6 +63,7 @@ cd src && python3 -m pytest tests/ -v --tb=short
 | 10.4 | Complete | WebSocket foundation layer (game transition events) |
 | 10.5 | Complete | Unified recording configuration system |
 | 10.6 | Complete | Unified recording integration with dual-state validation |
+| 10.7 | Complete | Raw Capture Tool + Hardcoded credentials workaround |
 
 **Key Achievements**:
 - Game-aware recording with automatic GAME_START/GAME_END detection
@@ -69,11 +73,13 @@ cd src && python3 -m pytest tests/ -v --tb=short
 - **Phase 10.6**: TradingController fully integrated with RecordingController
 - **Phase 10.6**: Dual-state validation (local vs server) for drift detection
 - **Phase 10.6**: Auto-start/stop recording on WebSocket connect/disconnect
+- **Phase 10.7**: Raw WebSocket Capture Tool for protocol debugging
+- **Phase 10.7**: Hardcoded credentials workaround (server only sends auth events to authenticated clients)
 
 **References**:
-- `docs/WEBSOCKET_EVENTS_SPEC.md` - Full protocol documentation
 - `docs/plans/2025-12-07-unified-recording-config-design.md` - Phase 10.5 design
 - `docs/plans/2025-12-07-phase-10.6-unified-recording-integration.md` - Phase 10.6 design
+- `docs/plans/2025-12-10-websocket-raw-capture-tool-design.md` - Phase 10.7 design
 
 ---
 
@@ -94,6 +100,7 @@ cd src && python3 -m pytest tests/ -v --tb=short
 | `src/bot/browser_executor.py` | Browser automation | 517 |
 | `src/ui/main_window.py` | Main UI | 1730 |
 | `src/services/event_bus.py` | Pub/sub | ~200 |
+| `src/debug/raw_capture_recorder.py` | Raw WebSocket capture | 280 |
 
 ### Thread Safety Rules
 1. UI updates from workers -> `TkDispatcher.submit()`
@@ -187,8 +194,9 @@ src/
 ├── services/       # EventBus, logger
 ├── models/         # GameTick, Position, SideBet
 ├── sources/        # WebSocket feed
+├── debug/          # Raw capture, protocol debugging
 ├── ml/             # ML symlinks to rugs-rl-bot
-└── tests/          # 275 tests
+└── tests/          # 737 tests
 ```
 
 ### Browser Automation
@@ -272,6 +280,66 @@ Symlink: `src/rugs_recordings` -> `/home/nomad/rugs_recordings/`
 | 10.4 | Complete | WebSocket foundation layer (game transitions) |
 | 10.5 | Complete | Unified recording configuration system |
 | 10.6 | Complete | Unified recording integration with dual-state validation |
+| 10.7 | Complete | Raw Capture Tool + Hardcoded credentials workaround |
+
+---
+
+## Phase 10.7: Raw Capture Tool & Auth Workaround
+
+### Raw WebSocket Capture Tool
+
+**Purpose**: Capture ALL raw Socket.IO events for protocol debugging and documentation.
+
+**Location**: `Developer Tools` menu in main window
+
+**Menu Structure**:
+```
+Developer Tools
+├── Start Raw Capture (toggles to "⏺ Stop Raw Capture")
+├── ─────────────────
+├── Analyze Last Capture
+├── Open Captures Folder
+├── ─────────────────
+└── Show Capture Status
+```
+
+**Output**: `/home/nomad/rugs_recordings/raw_captures/`
+
+**Files Created**:
+- `src/debug/__init__.py`
+- `src/debug/raw_capture_recorder.py` (280 lines)
+- `scripts/analyze_raw_capture.py` (CLI analysis tool)
+- `src/tests/test_debug/test_raw_capture_recorder.py` (19 tests)
+
+### Hardcoded Credentials Workaround
+
+**Problem**: Server only sends `usernameStatus` and `playerUpdate` events to authenticated clients. Our WebSocket connection is read-only/unauthenticated.
+
+**Solution**: Hardcode Dutch's credentials and extract state from `gameStatePlayerUpdate` events (which are broadcast to all clients).
+
+**In `src/sources/websocket_feed.py`**:
+```python
+HARDCODED_PLAYER_ID = "did:privy:cmaibr7rt0094jp0mc2mbpfu4"
+HARDCODED_USERNAME = "Dutch"
+```
+
+**How it works**:
+1. On WebSocket connect, auto-confirm identity using hardcoded credentials
+2. Filter `gameStatePlayerUpdate` events for Dutch's player ID
+3. Extract: PnL, pnlPercent, positionQty, avgCost, totalInvested, hasActiveTrades, sidebet
+4. Update `_last_server_state` for Phase 11 reconciliation
+5. Emit `player_state_update` event for UI/recording
+
+**Events captured (from raw capture analysis)**:
+| Event Type | Count | Percentage |
+|------------|-------|------------|
+| gameStateUpdate | 510 | 92.1% |
+| standard/newTrade | 31 | 5.6% |
+| newChatMessage | 11 | 2.0% |
+| connect | 1 | 0.2% |
+| battleEventUpdate | 1 | 0.2% |
+
+**Key Finding**: No `usernameStatus` or `playerUpdate` events in unauthenticated capture.
 
 ---
 
@@ -302,8 +370,16 @@ if abs(local_balance - server_balance) > Decimal('0.000001'):
 - Chat messages
 - Other players' leaderboard data
 
-**Full Protocol Reference**: `docs/WEBSOCKET_EVENTS_SPEC.md`
+---
+
+## Known Issues / Bugs to Fix
+
+Phase 10.7 implementation needs live testing. Potential issues to investigate:
+1. UI freeze when stopping raw capture (fixed with background thread, but verify)
+2. Verify `gameStatePlayerUpdate` filtering works in live environment
+3. Verify `player_state_update` event properly reaches recording system
+4. Test identity confirmation terminal output displays correctly
 
 ---
 
-*Phase 10.6 Complete | December 8, 2025*
+*Phase 10.7 Complete | December 12, 2025*

@@ -219,6 +219,10 @@ class LiveFeedController:
                         except Exception as rec_e:
                             logger.error(f"Failed to auto-stop recording: {rec_e}")
 
+                    # Phase 10.8: Reset server state UI
+                    if hasattr(self.parent, '_reset_server_state'):
+                        self.parent._reset_server_state()
+
                 self.root.after(0, handle_disconnected)
 
             @self.parent.live_feed.on('gameComplete')

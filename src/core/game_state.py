@@ -37,6 +37,7 @@ class StateEvents(Enum):
     PHASE_CHANGED = "phase_changed"
     BOT_ACTION = "bot_action"
     SELL_PERCENTAGE_CHANGED = "sell_percentage_changed"  # Phase 8.1
+    STATE_RECONCILED = "state_reconciled"  # Phase 11: Server state sync
 
 @dataclass
 class StateSnapshot:
@@ -269,6 +270,97 @@ class GameState:
                 current_price=self._state.get('current_price', Decimal('1.0')),
                 phase=self._state.get('current_phase', 'UNKNOWN'),
             )
+
+    # ========== Phase 11: Server State Reconciliation ==========
+
+    def reconcile_with_server(self, server_state: 'ServerState') -> Dict[str, Any]:
+        """
+        Reconcile local state with server truth (Phase 11).
+
+        The server (playerUpdate WebSocket event) is the source of truth.
+        This method updates local state to match server and returns any drift detected.
+
+        Args:
+            server_state: ServerState object from WebSocket playerUpdate
+
+        Returns:
+            Dict of any drift detected: {'field': {'local': x, 'server': y}}
+        """
+        from models.recording_models import ServerState
+
+        drifts = {}
+        with self._lock:
+            # Balance reconciliation
+            server_cash = server_state.cash
+            local_balance = self._state['balance']
+            if local_balance != server_cash:
+                drifts['balance'] = {
+                    'local': local_balance,
+                    'server': server_cash,
+                    'diff': abs(local_balance - server_cash)
+                }
+                self._state['balance'] = server_cash
+                logger.info(f"Balance reconciled: {local_balance} -> {server_cash}")
+
+            # Position reconciliation
+            server_position_qty = server_state.position_qty
+            server_avg_cost = server_state.avg_cost
+
+            if server_position_qty == Decimal('0'):
+                # Server says no position
+                if self._state['position'] and self._state['position'].get('status') == 'active':
+                    drifts['position'] = {
+                        'local': 'active',
+                        'server': 'none',
+                        'local_qty': self._state['position'].get('amount', Decimal('0'))
+                    }
+                    self._state['position'] = None
+                    logger.info("Position reconciled: closed (server has no position)")
+            else:
+                # Server says we have a position
+                if not self._state['position'] or self._state['position'].get('status') != 'active':
+                    # Local has no position but server does - create one
+                    self._state['position'] = {
+                        'entry_price': server_avg_cost,
+                        'amount': server_position_qty,
+                        'entry_tick': self._state.get('current_tick', 0),
+                        'status': 'active'
+                    }
+                    drifts['position'] = {
+                        'local': 'none',
+                        'server': 'active',
+                        'server_qty': server_position_qty
+                    }
+                    logger.info(f"Position reconciled: opened from server (qty={server_position_qty})")
+                else:
+                    # Both have position - check for qty/price drift
+                    local_qty = self._state['position'].get('amount', Decimal('0'))
+                    local_entry = self._state['position'].get('entry_price', Decimal('0'))
+
+                    if local_qty != server_position_qty:
+                        drifts['position_qty'] = {
+                            'local': local_qty,
+                            'server': server_position_qty,
+                            'diff': abs(local_qty - server_position_qty)
+                        }
+                        self._state['position']['amount'] = server_position_qty
+                        logger.info(f"Position qty reconciled: {local_qty} -> {server_position_qty}")
+
+                    if local_entry != server_avg_cost and server_avg_cost > 0:
+                        drifts['entry_price'] = {
+                            'local': local_entry,
+                            'server': server_avg_cost,
+                            'diff': abs(local_entry - server_avg_cost)
+                        }
+                        self._state['position']['entry_price'] = server_avg_cost
+                        logger.info(f"Entry price reconciled: {local_entry} -> {server_avg_cost}")
+
+        # Emit event outside lock to prevent deadlocks
+        if drifts:
+            self._emit(StateEvents.STATE_RECONCILED, drifts)
+            logger.warning(f"State drift detected and reconciled: {list(drifts.keys())}")
+
+        return drifts
 
     # ========== State Mutation Methods ==========
     

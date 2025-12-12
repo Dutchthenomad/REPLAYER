@@ -15,6 +15,7 @@ import threading
 from core import ReplayEngine, TradeManager
 from core.game_queue import GameQueue
 from core.demo_recorder import DemoRecorderSink  # Phase 10
+from debug.raw_capture_recorder import RawCaptureRecorder  # Raw capture debug tool
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
 from ui.tk_dispatcher import TkDispatcher
@@ -58,6 +59,12 @@ class MainWindow:
         self.manual_balance: Optional[Decimal] = None
         self.tracked_balance: Decimal = self.state.get('balance')
 
+        # Phase 10.8: Server state tracking (from WebSocket)
+        self.server_username: Optional[str] = None
+        self.server_player_id: Optional[str] = None
+        self.server_balance: Optional[Decimal] = None
+        self.server_authenticated = False
+
         # Phase 8.5: Initialize browser executor (user controls connection via menu)
         self.browser_executor = None
         self.browser_connected = False
@@ -83,6 +90,13 @@ class MainWindow:
         demo_dir = Path(config.FILES.get('recordings_dir', 'rugs_recordings')) / 'demonstrations'
         self.demo_recorder = DemoRecorderSink(demo_dir)
         logger.info(f"DemoRecorderSink initialized: {demo_dir}")
+
+        # Raw WebSocket capture for protocol debugging
+        self.raw_capture_recorder = RawCaptureRecorder()
+        self.raw_capture_recorder.on_capture_started = self._on_raw_capture_started
+        self.raw_capture_recorder.on_capture_stopped = self._on_raw_capture_stopped
+        self.raw_capture_recorder.on_event_captured = self._on_raw_event_captured
+        logger.info("RawCaptureRecorder initialized for WebSocket debugging")
 
         # Initialize game queue for multi-game sessions
         recordings_dir = config.FILES['recordings_dir']
@@ -333,6 +347,33 @@ class MainWindow:
         ui_style_menu.add_command(label="Standard ✓", state=tk.DISABLED)
         ui_style_menu.add_command(label="Modern (Game-Like)", command=lambda: self._set_ui_style('modern'))
 
+        # ========== DEVELOPER TOOLS MENU (Raw Capture Debug) ==========
+        dev_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Developer Tools", menu=dev_menu)
+
+        # Raw capture toggle (changes text based on state)
+        dev_menu.add_command(
+            label="Start Raw Capture",
+            command=self._toggle_raw_capture
+        )
+        self.dev_menu = dev_menu
+        self.dev_capture_item_index = 0  # Index of "Start/Stop Raw Capture"
+
+        dev_menu.add_separator()
+        dev_menu.add_command(
+            label="Analyze Last Capture",
+            command=self._analyze_last_capture
+        )
+        dev_menu.add_command(
+            label="Open Captures Folder",
+            command=self._open_captures_folder
+        )
+        dev_menu.add_separator()
+        dev_menu.add_command(
+            label="Show Capture Status",
+            command=self._show_capture_status
+        )
+
         # Help Menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -382,6 +423,16 @@ class MainWindow:
             fg='white'
         )
         self.phase_label.pack(side=tk.RIGHT, padx=10)
+
+        # Phase 10.8: Player profile label (shows authenticated username)
+        self.player_profile_label = tk.Label(
+            status_bar,
+            text="👤 Not Authenticated",
+            font=('Arial', 10, 'bold'),
+            bg='#000000',
+            fg='#666666'  # Gray when not authenticated
+        )
+        self.player_profile_label.pack(side=tk.RIGHT, padx=15)
 
         # Browser status (right) - Phase 8.5
         self.browser_status_label = tk.Label(
@@ -905,6 +956,10 @@ class MainWindow:
         self.event_bus.subscribe(Events.GAME_START, self._handle_game_start_for_recording)
         self.event_bus.subscribe(Events.GAME_END, self._handle_game_end_for_recording)
 
+        # Phase 10.8: Subscribe to player events (server state)
+        self.event_bus.subscribe(Events.PLAYER_IDENTITY, self._handle_player_identity)
+        self.event_bus.subscribe(Events.PLAYER_UPDATE, self._handle_player_update)
+
         # Subscribe to state events
         from core.game_state import StateEvents
         self.state.subscribe(StateEvents.BALANCE_CHANGED, self._handle_balance_changed)
@@ -1146,11 +1201,106 @@ class MainWindow:
             # Track P&L balance for later re-lock decision
             self.tracked_balance = new_balance
 
+            # Phase 11: Skip UI update when authenticated - server state is truth
+            # Server updates come via _handle_player_update() with green indicator
+            if self.server_authenticated:
+                logger.debug(f"Skipping local balance UI update (server authenticated): {new_balance}")
+                return
+
             # Marshal to UI thread via TkDispatcher (only update label when locked)
             if self.balance_locked:
                 self.ui_dispatcher.submit(
                     lambda: self.balance_label.config(text=f"WALLET: {new_balance:.4f} SOL")
                 )
+
+    # ========================================================================
+    # PHASE 10.8: PLAYER IDENTITY / SERVER STATE
+    # ========================================================================
+
+    def _handle_player_identity(self, event):
+        """
+        Handle player identity event from WebSocket (usernameStatus).
+
+        This event fires once on connection when user is logged in with wallet.
+        Updates the profile label to show authenticated username.
+        """
+        data = event.get('data', {})
+        username = data.get('username')
+        player_id = data.get('player_id')
+
+        if username:
+            self.server_username = username
+            self.server_player_id = player_id
+            self.server_authenticated = True
+
+            # Update UI on main thread
+            def update_profile_ui():
+                self.player_profile_label.config(
+                    text=f"👤 {username}",
+                    fg='#00ff88'  # Green = authenticated
+                )
+                logger.info(f"Player authenticated: {username}")
+
+            self.ui_dispatcher.submit(update_profile_ui)
+
+    def _handle_player_update(self, event):
+        """
+        Handle player update event from WebSocket (playerUpdate).
+
+        This event fires after server-side trades with the TRUE wallet state.
+        Reconciles local GameState with server truth (Phase 11).
+        """
+        data = event.get('data', {})
+        server_state = data.get('server_state')
+
+        if server_state:
+            # Extract server balance for UI
+            cash = getattr(server_state, 'cash', None)
+            if cash is not None:
+                self.server_balance = Decimal(str(cash))
+
+                # Phase 11: Reconcile local state with server truth
+                drifts = self.state.reconcile_with_server(server_state)
+                if drifts:
+                    logger.info(f"State reconciled with server: {list(drifts.keys())}")
+
+                # Update wallet display with server truth
+                def update_wallet_ui():
+                    self.balance_label.config(
+                        text=f"WALLET: {self.server_balance:.4f} SOL",
+                        fg='#00ff88'  # Green = server-verified
+                    )
+                    logger.debug(f"Server balance updated: {self.server_balance}")
+
+                self.ui_dispatcher.submit(update_wallet_ui)
+
+    def _reset_server_state(self):
+        """Reset server state tracking (called on disconnect)."""
+        self.server_username = None
+        self.server_player_id = None
+        self.server_balance = None
+        self.server_authenticated = False
+
+        # Update UI
+        def reset_profile_ui():
+            self.player_profile_label.config(
+                text="👤 Not Authenticated",
+                fg='#666666'  # Gray = not authenticated
+            )
+            self.balance_label.config(fg='#ffcc00')  # Yellow = local tracking
+
+        self.ui_dispatcher.submit(reset_profile_ui)
+
+    def get_latest_server_state(self):
+        """
+        Get the latest server state from WebSocket feed (Phase 11).
+
+        Returns:
+            ServerState or None if not connected/authenticated
+        """
+        if not self.live_feed_connected or not self.live_feed:
+            return None
+        return self.live_feed.get_last_server_state()
 
     # ========================================================================
     # BALANCE LOCK / UNLOCK
@@ -1708,6 +1858,136 @@ Recordings Directory: {self.recording_controller.recordings_path}
             logger.error(f"Failed to get recording status: {e}")
             messagebox.showerror("Error", f"Failed to get status: {e}")
 
+    # ========================================================================
+    # RAW CAPTURE HANDLERS (Developer Tools)
+    # ========================================================================
+
+    def _toggle_raw_capture(self):
+        """Toggle raw WebSocket capture on/off."""
+        try:
+            if self.raw_capture_recorder.is_capturing:
+                # Stop capture
+                summary = self.raw_capture_recorder.stop_capture()
+                if summary:
+                    self.log(f"Raw capture stopped: {summary['total_events']} events")
+            else:
+                # Start capture
+                capture_file = self.raw_capture_recorder.start_capture()
+                if capture_file:
+                    self.log(f"Raw capture started: {capture_file.name}")
+                else:
+                    self.toast.show("Failed to start capture", "error")
+        except Exception as e:
+            logger.error(f"Failed to toggle raw capture: {e}")
+            self.toast.show(f"Error: {e}", "error")
+
+    def _on_raw_capture_started(self, capture_file):
+        """Callback when raw capture starts."""
+        def update_ui():
+            self.dev_menu.entryconfig(
+                self.dev_capture_item_index,
+                label="⏺ Stop Raw Capture"
+            )
+            self.toast.show(f"Capturing to: {capture_file.name}", "success")
+        self.ui_dispatcher.submit(update_ui)
+
+    def _on_raw_capture_stopped(self, capture_file, event_counts):
+        """Callback when raw capture stops."""
+        def update_ui():
+            self.dev_menu.entryconfig(
+                self.dev_capture_item_index,
+                label="Start Raw Capture"
+            )
+            total = sum(event_counts.values())
+            self.toast.show(f"Capture complete: {total} events", "info")
+        self.ui_dispatcher.submit(update_ui)
+
+    def _on_raw_event_captured(self, event_name, seq_num):
+        """Callback for each captured event (throttled logging)."""
+        # Only log every 100th event to avoid spam
+        if seq_num % 100 == 0:
+            logger.debug(f"Raw capture: {seq_num} events captured (last: {event_name})")
+
+    def _analyze_last_capture(self):
+        """Analyze the most recent capture file."""
+        import subprocess
+        try:
+            capture_file = self.raw_capture_recorder.get_last_capture_file()
+            if not capture_file:
+                self.toast.show("No captures found", "info")
+                return
+
+            # Run analysis script
+            script_path = Path(__file__).parent.parent.parent / 'scripts' / 'analyze_raw_capture.py'
+            if not script_path.exists():
+                self.toast.show("Analysis script not found", "error")
+                return
+
+            # Run with --report flag to generate summary
+            result = subprocess.run(
+                ['python3', str(script_path), str(capture_file), '--report'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                self.toast.show("Analysis complete - check captures folder", "success")
+                self.log(result.stdout)
+            else:
+                self.toast.show(f"Analysis failed: {result.stderr}", "error")
+
+        except subprocess.TimeoutExpired:
+            self.toast.show("Analysis timed out", "error")
+        except Exception as e:
+            logger.error(f"Failed to analyze capture: {e}")
+            self.toast.show(f"Error: {e}", "error")
+
+    def _open_captures_folder(self):
+        """Open the raw captures folder in file manager."""
+        import subprocess
+        try:
+            captures_dir = self.raw_capture_recorder.capture_dir
+            captures_dir.mkdir(parents=True, exist_ok=True)
+
+            # Open folder (Linux)
+            subprocess.Popen(['xdg-open', str(captures_dir)])
+            self.toast.show(f"Opened: {captures_dir}", "info")
+        except Exception as e:
+            logger.error(f"Failed to open captures folder: {e}")
+            self.toast.show(f"Error: {e}", "error")
+
+    def _show_capture_status(self):
+        """Show current raw capture status in a dialog."""
+        try:
+            status = self.raw_capture_recorder.get_status()
+
+            # Build event counts display
+            event_counts_str = "None"
+            if status['event_counts']:
+                lines = [f"  {k}: {v}" for k, v in sorted(status['event_counts'].items(), key=lambda x: -x[1])]
+                event_counts_str = "\n".join(lines[:10])  # Top 10
+                if len(status['event_counts']) > 10:
+                    event_counts_str += f"\n  ... and {len(status['event_counts']) - 10} more"
+
+            status_text = f"""Raw Capture Status
+
+Capturing: {'Yes' if status['is_capturing'] else 'No'}
+Connected: {'Yes' if status['connected'] else 'No'}
+Total Events: {status['total_events']}
+
+Current File: {status['capture_file'] or 'None'}
+
+Event Counts (Top 10):
+{event_counts_str}
+
+Captures Directory: {self.raw_capture_recorder.capture_dir}
+"""
+            messagebox.showinfo("Raw Capture Status", status_text)
+        except Exception as e:
+            logger.error(f"Failed to get capture status: {e}")
+            messagebox.showerror("Error", f"Failed to get status: {e}")
+
     def shutdown(self):
         """Cleanup dispatcher resources during application shutdown."""
         # Phase 8.5: Stop browser if connected
@@ -1735,6 +2015,14 @@ Recordings Directory: {self.recording_controller.recordings_path}
                 logger.info("Demo recorder closed")
             except Exception as e:
                 logger.error(f"Error closing demo recorder: {e}")
+
+        # Stop raw capture if running
+        if self.raw_capture_recorder and self.raw_capture_recorder.is_capturing:
+            try:
+                self.raw_capture_recorder.stop_capture()
+                logger.info("Raw capture stopped during shutdown")
+            except Exception as e:
+                logger.error(f"Error stopping raw capture: {e}")
 
         # Phase 3.4: Delegate live feed cleanup to LiveFeedController
         self.live_feed_controller.cleanup()

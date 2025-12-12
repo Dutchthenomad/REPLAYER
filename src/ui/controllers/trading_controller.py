@@ -107,6 +107,8 @@ class TradingController:
         with local state snapshot for zero-tolerance validation against
         server state.
 
+        Phase 11: Now includes server state for dual-state validation.
+
         Args:
             button: Button text (e.g., 'BUY', '+0.01', '25%')
             amount: Trade amount (for BUY/SELL/SIDEBET actions)
@@ -123,11 +125,17 @@ class TradingController:
                 # Capture local state snapshot for validation
                 local_state = self.state.capture_local_snapshot(bet_amount)
 
-                # Record to new unified system
+                # Phase 11: Get server state for dual-state validation
+                server_state = None
+                if hasattr(self.parent, 'get_latest_server_state'):
+                    server_state = self.parent.get_latest_server_state()
+
+                # Record to new unified system with server state
                 self.recording_controller.on_button_press(
                     button=button,
                     local_state=local_state,
-                    amount=amount
+                    amount=amount,
+                    server_state=server_state
                 )
                 logger.debug(f"Recorded button press (Phase 10.6): {button}")
 

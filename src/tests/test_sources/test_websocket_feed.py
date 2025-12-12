@@ -506,6 +506,99 @@ class TestWebSocketFeed:
         assert received_events[0]['cash'] == 5.0
         assert received_events[0]['positionQty'] == 1.0
 
+    def test_player_leaderboard_event_emission(self, mock_socketio):
+        """Test player_leaderboard event is emitted correctly"""
+        feed = WebSocketFeed(log_level='ERROR')
+
+        received_events = []
+
+        @feed.on('player_leaderboard')
+        def handler(data):
+            received_events.append(data)
+
+        # Simulate emitting player_leaderboard
+        leaderboard_data = {
+            'rank': 1164,
+            'total': 2595,
+            'player_entry': {
+                'playerId': 'did:privy:test123',
+                'username': 'TestPlayer',
+                'pnl': -0.015559657
+            }
+        }
+        feed._emit_event('player_leaderboard', leaderboard_data)
+
+        assert len(received_events) == 1
+        assert received_events[0]['rank'] == 1164
+        assert received_events[0]['total'] == 2595
+        assert received_events[0]['player_entry']['username'] == 'TestPlayer'
+
+    def test_identity_from_leaderboard_fallback(self, mock_socketio):
+        """Test identity can be set from playerLeaderboardPosition as fallback"""
+        feed = WebSocketFeed(log_level='ERROR')
+
+        received_events = []
+
+        @feed.on('player_identity')
+        def handler(data):
+            received_events.append(data)
+
+        # Initially no identity
+        assert feed.player_id is None
+        assert feed.username is None
+
+        # Simulate leaderboard event with player entry
+        feed._emit_event('player_identity', {
+            'player_id': 'did:privy:fromleaderboard',
+            'username': 'LeaderboardUser',
+            'source': 'leaderboard'
+        })
+
+        assert len(received_events) == 1
+        assert received_events[0]['player_id'] == 'did:privy:fromleaderboard'
+        assert received_events[0]['username'] == 'LeaderboardUser'
+        assert received_events[0]['source'] == 'leaderboard'
+
+    def test_authentication_status_initial(self, mock_socketio):
+        """Test get_authentication_status returns correct initial state"""
+        feed = WebSocketFeed(log_level='ERROR')
+
+        status = feed.get_authentication_status()
+
+        assert status['confirmed'] is False
+        assert status['player_id'] is None
+        assert status['username'] is None
+        assert status['source'] is None
+        assert status['balance'] is None
+
+    def test_authentication_status_after_confirm(self, mock_socketio):
+        """Test get_authentication_status after identity confirmed"""
+        feed = WebSocketFeed(log_level='ERROR')
+
+        # Simulate identity confirmation
+        feed._confirm_identity('did:privy:test123', 'TestUser', 'usernameStatus')
+
+        status = feed.get_authentication_status()
+
+        assert status['confirmed'] is True
+        assert status['player_id'] == 'did:privy:test123'
+        assert status['username'] == 'TestUser'
+        assert status['source'] == 'usernameStatus'
+
+    def test_balance_update_tracking(self, mock_socketio):
+        """Test balance updates are tracked"""
+        feed = WebSocketFeed(log_level='ERROR')
+
+        # Initial state
+        assert feed._last_known_balance is None
+
+        # Update balance
+        feed._update_balance(5.1234, 'playerUpdate')
+
+        assert feed._last_known_balance == 5.1234
+        status = feed.get_authentication_status()
+        assert status['balance'] == 5.1234
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

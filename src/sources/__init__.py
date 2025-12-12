@@ -22,8 +22,6 @@ from sources.feed_degradation import (
     OperatingMode,
     GracefulDegradationManager
 )
-# Phase 10.4C: Player state handler
-from sources.player_state_handler import PlayerStateHandler
 # Phase 10.4D: Price history handler
 from sources.price_history_handler import PriceHistoryHandler
 # Phase 10.5C: Data integrity monitor
@@ -47,8 +45,6 @@ __all__ = [
     # Phase 10.4A: Extracted degradation
     'OperatingMode',
     'GracefulDegradationManager',
-    # Phase 10.4C: Player state handler
-    'PlayerStateHandler',
     # Phase 10.4D: Price history handler
     'PriceHistoryHandler',
     # Phase 10.5C: Data integrity monitor
