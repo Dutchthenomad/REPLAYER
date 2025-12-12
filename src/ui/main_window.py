@@ -18,7 +18,7 @@ from core.demo_recorder import DemoRecorderSink  # Phase 10
 from debug.raw_capture_recorder import RawCaptureRecorder  # Raw capture debug tool
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
-from ui.tk_dispatcher import TkDispatcher
+from services.ui_dispatcher import TkDispatcher  # Phase 1: Moved to services
 from ui.builders import (  # Phase Issue-4: Extracted builders
     MenuBarBuilder, StatusBarBuilder, ChartBuilder,
     PlaybackBuilder, BettingBuilder, ActionBuilder
