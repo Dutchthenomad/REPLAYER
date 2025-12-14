@@ -22,33 +22,32 @@ from sources.feed_degradation import (
 class TestOperatingMode:
     """Tests for OperatingMode enum-like class"""
 
-    def test_modes_exist(self):
-        """Test all operating modes are defined"""
-        assert hasattr(OperatingMode, 'NORMAL')
-        assert hasattr(OperatingMode, 'DEGRADED')
-        assert hasattr(OperatingMode, 'MINIMAL')
-        assert hasattr(OperatingMode, 'OFFLINE')
-
-    def test_mode_values(self):
-        """Test mode values are strings"""
-        assert OperatingMode.NORMAL == "NORMAL"
-        assert OperatingMode.DEGRADED == "DEGRADED"
-        assert OperatingMode.MINIMAL == "MINIMAL"
-        assert OperatingMode.OFFLINE == "OFFLINE"
+    @pytest.mark.parametrize("mode,expected", [
+        (OperatingMode.NORMAL, "NORMAL"),
+        (OperatingMode.DEGRADED, "DEGRADED"),
+        (OperatingMode.MINIMAL, "MINIMAL"),
+        (OperatingMode.OFFLINE, "OFFLINE"),
+    ])
+    def test_mode_values(self, mode, expected):
+        """Test all mode values are correct strings"""
+        assert mode == expected
 
 
 class TestGracefulDegradationManager:
     """Tests for GracefulDegradationManager"""
 
-    def test_initialization_defaults(self):
-        """Test default initialization"""
+    @pytest.mark.parametrize("attr,expected", [
+        ("error_threshold", 10),
+        ("spike_threshold", 5),
+        ("recovery_window_sec", 60.0),
+        ("current_mode", OperatingMode.NORMAL),
+        ("errors_in_window", 0),
+        ("spikes_in_window", 0),
+    ])
+    def test_initialization_defaults(self, attr, expected):
+        """Test all default values are correct"""
         manager = GracefulDegradationManager()
-        assert manager.error_threshold == 10
-        assert manager.spike_threshold == 5
-        assert manager.recovery_window_sec == 60.0
-        assert manager.current_mode == OperatingMode.NORMAL
-        assert manager.errors_in_window == 0
-        assert manager.spikes_in_window == 0
+        assert getattr(manager, attr) == expected
 
     def test_initialization_custom(self):
         """Test custom initialization"""

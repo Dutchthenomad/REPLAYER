@@ -31,21 +31,15 @@ from services.recording_state_machine import (
 class TestRecordingState:
     """Tests for RecordingState enum"""
 
-    def test_idle_value(self):
-        """Test IDLE state value"""
-        assert RecordingState.IDLE.value == "idle"
-
-    def test_monitoring_value(self):
-        """Test MONITORING state value"""
-        assert RecordingState.MONITORING.value == "monitoring"
-
-    def test_recording_value(self):
-        """Test RECORDING state value"""
-        assert RecordingState.RECORDING.value == "recording"
-
-    def test_finishing_game_value(self):
-        """Test FINISHING_GAME state value"""
-        assert RecordingState.FINISHING_GAME.value == "finishing_game"
+    @pytest.mark.parametrize("state,expected", [
+        (RecordingState.IDLE, "idle"),
+        (RecordingState.MONITORING, "monitoring"),
+        (RecordingState.RECORDING, "recording"),
+        (RecordingState.FINISHING_GAME, "finishing_game"),
+    ])
+    def test_state_values(self, state, expected):
+        """Test all state values are correct"""
+        assert state.value == expected
 
 
 class TestRecordingStateMachineInitialization:
