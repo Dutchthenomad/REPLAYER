@@ -98,6 +98,16 @@ class StatusBarBuilder:
         )
         browser_status_label.pack(side=tk.RIGHT, padx=10)
 
+        # Event source indicator (left, after price)
+        source_label = tk.Label(
+            status_bar,
+            text="\U0001F534 No Source",  # 🔴
+            font=('Helvetica', 9),
+            bg='#000000',
+            fg='#ff4444'  # Red when no source
+        )
+        source_label.pack(side=tk.LEFT, padx=10)
+
         logger.debug("StatusBarBuilder: Status bar built")
 
         return {
@@ -107,4 +117,5 @@ class StatusBarBuilder:
             'phase_label': phase_label,
             'player_profile_label': player_profile_label,
             'browser_status_label': browser_status_label,
+            'source_label': source_label,
         }
