@@ -29,6 +29,11 @@ from decimal import Decimal
 from enum import Enum
 from dataclasses import dataclass
 
+from sources.cdp_websocket_interceptor import CDPWebSocketInterceptor
+from services.event_source_manager import EventSourceManager, EventSource
+from services.rag_ingester import RAGIngester
+from services.event_bus import Events, event_bus
+
 logger = logging.getLogger(__name__)
 
 
@@ -237,6 +242,20 @@ class BrowserBridge:
         # Click statistics for debugging
         self._click_stats: Dict[str, Dict[str, int]] = {}
 
+        # CDP WebSocket interception components (Task 8)
+        self._cdp_interceptor = CDPWebSocketInterceptor()
+        self._event_source_manager = EventSourceManager()
+        self._rag_ingester = RAGIngester()
+
+        # Wire up event flow from CDP interceptor
+        def on_cdp_event(event):
+            # Publish to EventBus for all subscribers
+            event_bus.publish(Events.WS_RAW_EVENT, {'data': event})
+            # Catalog for RAG
+            self._rag_ingester.catalog(event)
+
+        self._cdp_interceptor.on_event = on_cdp_event
+
         logger.info("BrowserBridge initialized (PRODUCTION FIX)")
 
     def _set_status(self, status: BridgeStatus):
@@ -444,6 +463,9 @@ class BrowserBridge:
             if success:
                 self._set_status(BridgeStatus.CONNECTED)
                 logger.info("Browser bridge connected!")
+
+                # Task 8: Start CDP WebSocket interception
+                await self._start_cdp_interception()
             else:
                 self._set_status(BridgeStatus.ERROR)
                 logger.error("Browser bridge connection failed")
@@ -455,6 +477,9 @@ class BrowserBridge:
     async def _do_disconnect(self):
         """Actually disconnect from browser (async)"""
         try:
+            # Task 8: Stop CDP WebSocket interception
+            await self._stop_cdp_interception()
+
             if self.cdp_manager:
                 await self.cdp_manager.disconnect()
                 self.cdp_manager = None
@@ -465,6 +490,58 @@ class BrowserBridge:
         except Exception as e:
             logger.error(f"Disconnect error: {e}", exc_info=True)
             self._set_status(BridgeStatus.ERROR)
+
+    # ========================================================================
+    # CDP WEBSOCKET INTERCEPTION (Task 8)
+    # ========================================================================
+
+    async def _start_cdp_interception(self):
+        """
+        Start CDP WebSocket interception.
+
+        Creates a CDP session and wires it to the interceptor.
+        """
+        try:
+            if not self.cdp_manager or not self.cdp_manager.context:
+                logger.warning("Cannot start CDP interception - no CDP manager or context")
+                return
+
+            # Create a CDP session from the browser context
+            cdp_session = await self.cdp_manager.context.new_cdp_session(
+                self.cdp_manager.page
+            )
+
+            # Connect the interceptor
+            if self._cdp_interceptor.connect(cdp_session):
+                self._event_source_manager.set_cdp_available(True)
+                self._event_source_manager.switch_to_best_source()
+                self._rag_ingester.start_session()
+                logger.info("CDP WebSocket interception started")
+            else:
+                logger.error("Failed to connect CDP interceptor")
+
+        except Exception as e:
+            logger.error(f"Failed to start CDP interception: {e}", exc_info=True)
+
+    async def _stop_cdp_interception(self):
+        """
+        Stop CDP WebSocket interception.
+
+        Disconnects the interceptor and updates event source manager.
+        """
+        try:
+            self._cdp_interceptor.disconnect()
+            self._event_source_manager.set_cdp_available(False)
+            self._event_source_manager.switch_to_best_source()
+            self._rag_ingester.stop_session()
+            logger.info("CDP WebSocket interception stopped")
+
+        except Exception as e:
+            logger.error(f"Failed to stop CDP interception: {e}", exc_info=True)
+
+    # ========================================================================
+    # BUTTON CLICK IMPLEMENTATIONS
+    # ========================================================================
 
     async def _do_click_with_retry(self, button: str) -> ClickResult:
         """
