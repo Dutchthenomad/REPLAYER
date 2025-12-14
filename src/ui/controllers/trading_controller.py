@@ -7,12 +7,18 @@ Handles:
 - Bet amount management (increment, clear, half, double, max)
 - Sell percentage management (10%, 25%, 50%, 100%)
 - UI updates for trade state
+
+Phase 10.6: Records ALL button presses to RecordingController with
+dual-state validation (local vs server).
 """
 
 import tkinter as tk
 from decimal import Decimal
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 import logging
+
+if TYPE_CHECKING:
+    from ui.controllers.recording_controller import RecordingController
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +45,11 @@ class TradingController:
         # Notifications
         toast,
         # Callbacks
-        log_callback: Callable[[str], None]
+        log_callback: Callable[[str], None],
+        # Phase 10.6: Recording controller (replaces demo_recorder)
+        recording_controller: Optional["RecordingController"] = None,
+        # Legacy: Keep demo_recorder for backwards compatibility during migration
+        demo_recorder=None
     ):
         """
         Initialize TradingController with dependencies.
@@ -55,6 +65,8 @@ class TradingController:
             ui_dispatcher: TkDispatcher for thread-safe UI updates
             toast: Toast notification widget
             log_callback: Logging function
+            recording_controller: RecordingController for Phase 10.6 recording
+            demo_recorder: DEPRECATED - Legacy DemoRecorderSink (Phase 10.1-10.3)
         """
         self.parent = parent_window
         self.trade_manager = trade_manager
@@ -75,7 +87,70 @@ class TradingController:
         # Callbacks
         self.log = log_callback
 
+        # Phase 10.6: Recording controller (primary)
+        self.recording_controller = recording_controller
+
+        # Legacy: Demo recorder (deprecated, kept for backwards compatibility)
+        self.demo_recorder = demo_recorder
+
         logger.info("TradingController initialized")
+
+    # ========================================================================
+    # RECORDING (Phase 10.6 - Unified with Validation)
+    # ========================================================================
+
+    def _record_button_press(self, button: str, amount: Decimal = None):
+        """
+        Record a button press with dual-state validation.
+
+        Phase 10.6: Records ALL button presses to RecordingController
+        with local state snapshot for zero-tolerance validation against
+        server state.
+
+        Phase 11: Now includes server state for dual-state validation.
+
+        Args:
+            button: Button text (e.g., 'BUY', '+0.01', '25%')
+            amount: Trade amount (for BUY/SELL/SIDEBET actions)
+        """
+        try:
+            # Get current bet amount from entry
+            try:
+                bet_amount = Decimal(self.bet_entry.get())
+            except Exception:
+                bet_amount = Decimal('0')
+
+            # Phase 10.6: Use new RecordingController
+            if self.recording_controller:
+                # Capture local state snapshot for validation
+                local_state = self.state.capture_local_snapshot(bet_amount)
+
+                # Phase 11: Get server state for dual-state validation
+                server_state = None
+                if hasattr(self.parent, 'get_latest_server_state'):
+                    server_state = self.parent.get_latest_server_state()
+
+                # Record to new unified system with server state
+                self.recording_controller.on_button_press(
+                    button=button,
+                    local_state=local_state,
+                    amount=amount,
+                    server_state=server_state
+                )
+                logger.debug(f"Recorded button press (Phase 10.6): {button}")
+
+            # Legacy: Also record to old system during migration
+            elif self.demo_recorder and self.demo_recorder.is_game_active():
+                state_before = self.state.capture_demo_snapshot(bet_amount)
+                self.demo_recorder.record_button_press(
+                    button=button,
+                    state_before=state_before,
+                    amount=amount
+                )
+                logger.debug(f"Recorded button press (legacy): {button}")
+
+        except Exception as e:
+            logger.error(f"Failed to record button press: {e}")
 
     # ========================================================================
     # TRADE EXECUTION
@@ -91,6 +166,9 @@ class TradingController:
         if amount is None:
             return  # Validation failed (toast already shown), but browser click already sent
 
+        # Phase 10: Record the action
+        self._record_button_press('BUY', amount)
+
         result = self.trade_manager.execute_buy(amount)
 
         if result['success']:
@@ -104,6 +182,9 @@ class TradingController:
         """Execute sell action using TradeManager (Phase 8.2: supports partial sells, Phase 9.3: syncs to browser)"""
         # Phase 9.3: Also click SELL in browser if connected
         self.browser_bridge.on_sell_clicked()
+
+        # Phase 10: Record the action
+        self._record_button_press('SELL')
 
         result = self.trade_manager.execute_sell()
 
@@ -134,6 +215,9 @@ class TradingController:
         if amount is None:
             return  # Validation failed (toast already shown), but browser click already sent
 
+        # Phase 10: Record the action
+        self._record_button_press('SIDEBET', amount)
+
         result = self.trade_manager.execute_sidebet(amount)
 
         if result['success']:
@@ -160,6 +244,10 @@ class TradingController:
         """
         # Phase 9.3: Also click percentage button in browser if connected
         self.browser_bridge.on_percentage_clicked(percentage)
+
+        # Phase 10: Record the action
+        button_text = f"{int(percentage * 100)}%"
+        self._record_button_press(button_text)
 
         # Update GameState with new percentage
         success = self.state.set_sell_percentage(Decimal(str(percentage)))
@@ -215,6 +303,9 @@ class TradingController:
         button_text = f"+{amount}"
         self.browser_bridge.on_increment_clicked(button_text)
 
+        # Phase 10: Record the action
+        self._record_button_press(button_text)
+
         # Then update local UI
         try:
             current_amount = Decimal(self.bet_entry.get())
@@ -231,6 +322,9 @@ class TradingController:
         # Phase 9.3: ALWAYS click X (clear) button in browser FIRST
         self.browser_bridge.on_clear_clicked()
 
+        # Phase 10: Record the action
+        self._record_button_press('X')
+
         # Then update local UI
         self.bet_entry.delete(0, tk.END)
         self.bet_entry.insert(0, "0")
@@ -240,6 +334,9 @@ class TradingController:
         """Halve bet amount (1/2 button) - Phase 9.3: syncs to browser"""
         # Phase 9.3: ALWAYS click 1/2 button in browser FIRST
         self.browser_bridge.on_increment_clicked('1/2')
+
+        # Phase 10: Record the action
+        self._record_button_press('1/2')
 
         # Then update local UI
         try:
@@ -256,6 +353,9 @@ class TradingController:
         # Phase 9.3: ALWAYS click X2 button in browser FIRST
         self.browser_bridge.on_increment_clicked('X2')
 
+        # Phase 10: Record the action
+        self._record_button_press('X2')
+
         # Then update local UI
         try:
             current = Decimal(self.bet_entry.get())
@@ -270,6 +370,9 @@ class TradingController:
         """Set bet to max (MAX button) - Phase 9.3: syncs to browser"""
         # Phase 9.3: ALWAYS click MAX button in browser FIRST
         self.browser_bridge.on_increment_clicked('MAX')
+
+        # Phase 10: Record the action
+        self._record_button_press('MAX')
 
         # Then update local UI
         balance = self.state.get('balance')

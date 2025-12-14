@@ -27,11 +27,20 @@ class SideBet:
     placed_price: Decimal
     status: str = SideBetStatus.ACTIVE
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary"""
+    def to_dict(self, preserve_precision: bool = False) -> dict:
+        """Convert to dictionary
+
+        Args:
+            preserve_precision: If True, keep Decimals as strings
+        """
+        def convert(value):
+            if isinstance(value, Decimal):
+                return str(value) if preserve_precision else float(value)
+            return value
+
         return {
-            'amount': float(self.amount),
+            'amount': convert(self.amount),
             'placed_tick': self.placed_tick,
-            'placed_price': float(self.placed_price),
+            'placed_price': convert(self.placed_price),
             'status': self.status
         }

@@ -30,512 +30,31 @@ from collections import deque  # AUDIT FIX: For efficient latency tracking
 # REPLAYER imports
 from models import GameTick
 
-
-class LatencySpikeDetector:
-    """
-    Detects latency spikes in WebSocket signal delivery.
-
-    PHASE 3.5 AUDIT FIX: Alerts when latency exceeds threshold.
-
-    Uses rolling statistics to detect anomalous latency values.
-
-    NOTE: Thresholds significantly relaxed (2025-12-01) to prevent spam.
-    Normal network jitter of 100-300ms is NOT a spike.
-    Only truly severe latency (>10 seconds) should trigger alerts.
-    """
-
-    def __init__(
-        self,
-        window_size: int = 100,
-        spike_threshold_std: float = 10.0,  # Relaxed from 2.0 - only extreme outliers
-        absolute_threshold_ms: float = 10000.0  # Relaxed from 2000ms to 10 seconds
-    ):
-        """
-        Initialize spike detector.
-
-        Args:
-            window_size: Number of samples for rolling statistics
-            spike_threshold_std: Standard deviations above mean to trigger spike
-            absolute_threshold_ms: Absolute threshold (ms) that always triggers spike
-        """
-        self.window_size = window_size
-        self.spike_threshold_std = spike_threshold_std
-        self.absolute_threshold_ms = absolute_threshold_ms
-
-        self.latencies: deque = deque(maxlen=window_size)
-        self._lock = threading.Lock()
-
-        # Statistics
-        self.total_samples = 0
-        self.total_spikes = 0
-        self.last_spike_time: Optional[float] = None
-        self.last_spike_value: Optional[float] = None
-
-        # Rate limiting for warnings (prevent spam)
-        self._last_warning_time: float = 0
-        self._warning_cooldown_sec: float = 30.0  # Only warn once per 30 seconds
-
-    def record(self, latency_ms: float) -> Optional[Dict[str, Any]]:
-        """
-        Record a latency sample and check for spike.
-
-        Args:
-            latency_ms: Latency in milliseconds
-
-        Returns:
-            Spike info dict if spike detected, None otherwise
-        """
-        with self._lock:
-            self.latencies.append(latency_ms)
-            self.total_samples += 1
-
-            # Need minimum samples for statistics
-            if len(self.latencies) < 10:
-                return None
-
-            # Calculate rolling statistics
-            mean = sum(self.latencies) / len(self.latencies)
-            variance = sum((x - mean) ** 2 for x in self.latencies) / len(self.latencies)
-            std = variance ** 0.5 if variance > 0 else 0
-
-            # Check for spike
-            is_spike = False
-            spike_reason = None
-
-            # Check absolute threshold
-            if latency_ms > self.absolute_threshold_ms:
-                is_spike = True
-                spike_reason = f"Absolute threshold exceeded: {latency_ms:.0f}ms > {self.absolute_threshold_ms:.0f}ms"
-
-            # Check standard deviation threshold
-            elif std > 0:
-                z_score = (latency_ms - mean) / std
-                if z_score > self.spike_threshold_std:
-                    is_spike = True
-                    spike_reason = f"Statistical spike: {z_score:.1f} std devs above mean ({mean:.0f}ms)"
-
-            if is_spike:
-                self.total_spikes += 1
-                self.last_spike_time = time.time()
-                self.last_spike_value = latency_ms
-
-                # Rate limit: only return spike info if cooldown has passed
-                # This prevents warning spam while still tracking statistics
-                now = time.time()
-                if now - self._last_warning_time >= self._warning_cooldown_sec:
-                    self._last_warning_time = now
-                    return {
-                        'latency_ms': latency_ms,
-                        'mean_ms': mean,
-                        'std_ms': std,
-                        'reason': spike_reason,
-                        'spike_count': self.total_spikes,
-                        'timestamp': self.last_spike_time
-                    }
-                # Spike detected but suppressed due to rate limiting
-                return None
-
-            return None
-
-    def get_stats(self) -> Dict[str, Any]:
-        """Get spike detector statistics"""
-        with self._lock:
-            if self.latencies:
-                mean = sum(self.latencies) / len(self.latencies)
-                max_lat = max(self.latencies)
-                min_lat = min(self.latencies)
-            else:
-                mean = max_lat = min_lat = 0
-
-            return {
-                'total_samples': self.total_samples,
-                'total_spikes': self.total_spikes,
-                'spike_rate': (self.total_spikes / self.total_samples * 100)
-                    if self.total_samples > 0 else 0.0,
-                'mean_latency_ms': mean,
-                'max_latency_ms': max_lat,
-                'min_latency_ms': min_lat,
-                'last_spike_time': self.last_spike_time,
-                'last_spike_value_ms': self.last_spike_value
-            }
-
-
-class ConnectionHealth:
-    """
-    Connection health status enum.
-
-    PHASE 3.2 AUDIT FIX: Track connection quality.
-    """
-    HEALTHY = "HEALTHY"          # Connected, receiving signals
-    DEGRADED = "DEGRADED"        # Connected but high latency/drops
-    STALE = "STALE"              # Connected but no recent signals
-    DISCONNECTED = "DISCONNECTED"  # Not connected
-    UNKNOWN = "UNKNOWN"          # Initial state
-
-
-class ConnectionHealthMonitor:
-    """
-    Monitors WebSocket connection health.
-
-    PHASE 3.2 AUDIT FIX: Detects connection issues before they cause problems.
-
-    Metrics tracked:
-    - Time since last signal
-    - Average latency
-    - Error rate
-    - Drop rate
-    """
-
-    def __init__(
-        self,
-        stale_threshold_sec: float = 10.0,
-        latency_threshold_ms: float = 1000.0,
-        error_rate_threshold: float = 5.0
-    ):
-        """
-        Initialize health monitor.
-
-        Args:
-            stale_threshold_sec: Seconds without signal before STALE
-            latency_threshold_ms: Avg latency (ms) threshold for DEGRADED
-            error_rate_threshold: Error rate (%) threshold for DEGRADED
-        """
-        self.stale_threshold_sec = stale_threshold_sec
-        self.latency_threshold_ms = latency_threshold_ms
-        self.error_rate_threshold = error_rate_threshold
-
-        self.last_signal_time: Optional[float] = None
-        self.is_connected = False
-        self._lock = threading.Lock()
-
-    def record_signal(self):
-        """Record that a signal was received"""
-        with self._lock:
-            self.last_signal_time = time.time()
-
-    def set_connected(self, connected: bool):
-        """Update connection state"""
-        with self._lock:
-            self.is_connected = connected
-            if connected:
-                self.last_signal_time = time.time()
-
-    def get_signal_age(self) -> Optional[float]:
-        """Get seconds since last signal, or None if never received"""
-        with self._lock:
-            if self.last_signal_time is None:
-                return None
-            return time.time() - self.last_signal_time
-
-    def check_health(
-        self,
-        avg_latency_ms: float = 0.0,
-        error_rate: float = 0.0,
-        drop_rate: float = 0.0
-    ) -> Dict[str, Any]:
-        """
-        Check connection health status.
-
-        Args:
-            avg_latency_ms: Average latency in milliseconds
-            error_rate: Error rate percentage
-            drop_rate: Drop rate percentage (from rate limiter)
-
-        Returns:
-            Dict with status, issues list, and metrics
-        """
-        with self._lock:
-            issues = []
-            status = ConnectionHealth.UNKNOWN
-
-            # Check connection
-            if not self.is_connected:
-                return {
-                    'status': ConnectionHealth.DISCONNECTED,
-                    'issues': ['Not connected to server'],
-                    'signal_age_sec': None,
-                    'avg_latency_ms': avg_latency_ms,
-                    'error_rate': error_rate,
-                    'drop_rate': drop_rate
-                }
-
-            # Check signal freshness
-            signal_age = None
-            if self.last_signal_time:
-                signal_age = time.time() - self.last_signal_time
-
-                if signal_age > self.stale_threshold_sec:
-                    issues.append(f'No signals for {signal_age:.1f}s')
-                    status = ConnectionHealth.STALE
-
-            # Check latency
-            if avg_latency_ms > self.latency_threshold_ms:
-                issues.append(f'High latency: {avg_latency_ms:.0f}ms')
-                if status != ConnectionHealth.STALE:
-                    status = ConnectionHealth.DEGRADED
-
-            # Check error rate
-            if error_rate > self.error_rate_threshold:
-                issues.append(f'High error rate: {error_rate:.1f}%')
-                if status != ConnectionHealth.STALE:
-                    status = ConnectionHealth.DEGRADED
-
-            # Check drop rate
-            if drop_rate > 10.0:  # More than 10% drops
-                issues.append(f'High drop rate: {drop_rate:.1f}%')
-                if status != ConnectionHealth.STALE:
-                    status = ConnectionHealth.DEGRADED
-
-            # If no issues, we're healthy
-            if not issues:
-                status = ConnectionHealth.HEALTHY
-
-            return {
-                'status': status,
-                'issues': issues,
-                'signal_age_sec': signal_age,
-                'avg_latency_ms': avg_latency_ms,
-                'error_rate': error_rate,
-                'drop_rate': drop_rate
-            }
-
-
-class OperatingMode:
-    """
-    Operating mode for graceful degradation.
-
-    PHASE 3.6 AUDIT FIX: Defines system operating states.
-    """
-    NORMAL = "NORMAL"              # Full functionality
-    DEGRADED = "DEGRADED"          # Reduced functionality (high latency/errors)
-    MINIMAL = "MINIMAL"            # Minimal functionality (severe issues)
-    OFFLINE = "OFFLINE"            # No connection
-
-
-class GracefulDegradationManager:
-    """
-    Manages graceful degradation based on system health.
-
-    PHASE 3.6 AUDIT FIX: Reduces functionality when issues detected to maintain stability.
-
-    Degradation levels:
-    - NORMAL: Full processing, all features enabled
-    - DEGRADED: Skip non-critical processing, log warnings
-    - MINIMAL: Only essential processing, buffer aggressively
-    - OFFLINE: No processing, queue for retry
-    """
-
-    def __init__(
-        self,
-        error_threshold: int = 10,
-        spike_threshold: int = 5,
-        recovery_window_sec: float = 60.0
-    ):
-        """
-        Initialize degradation manager.
-
-        Args:
-            error_threshold: Errors in window before degradation
-            spike_threshold: Latency spikes in window before degradation
-            recovery_window_sec: Seconds without issues before recovery
-        """
-        self.error_threshold = error_threshold
-        self.spike_threshold = spike_threshold
-        self.recovery_window_sec = recovery_window_sec
-
-        self.current_mode = OperatingMode.NORMAL
-        self.mode_history: deque = deque(maxlen=20)
-
-        # Tracking
-        self.errors_in_window = 0
-        self.spikes_in_window = 0
-        self.last_issue_time: Optional[float] = None
-        self.degradation_start_time: Optional[float] = None
-        self._lock = threading.Lock()
-
-        # Callbacks
-        self.on_mode_change: Optional[Callable] = None
-
-    def record_error(self):
-        """Record an error occurrence"""
-        with self._lock:
-            self.errors_in_window += 1
-            self.last_issue_time = time.time()
-            self._evaluate_mode()
-
-    def record_spike(self):
-        """Record a latency spike"""
-        with self._lock:
-            self.spikes_in_window += 1
-            self.last_issue_time = time.time()
-            self._evaluate_mode()
-
-    def record_disconnect(self):
-        """Record a disconnect event"""
-        with self._lock:
-            self._set_mode(OperatingMode.OFFLINE)
-
-    def record_reconnect(self):
-        """Record a reconnect event"""
-        with self._lock:
-            # Start in DEGRADED after reconnect, will recover to NORMAL if stable
-            if self.current_mode == OperatingMode.OFFLINE:
-                self._set_mode(OperatingMode.DEGRADED)
-
-    def check_recovery(self):
-        """Check if system has recovered and can return to normal mode"""
-        with self._lock:
-            if self.current_mode == OperatingMode.NORMAL:
-                return  # Already normal
-
-            if self.current_mode == OperatingMode.OFFLINE:
-                return  # Can't recover without reconnect
-
-            if self.last_issue_time is None:
-                return  # No issues recorded
-
-            elapsed = time.time() - self.last_issue_time
-            if elapsed >= self.recovery_window_sec:
-                # No issues for recovery window - recover
-                self.errors_in_window = 0
-                self.spikes_in_window = 0
-                self._set_mode(OperatingMode.NORMAL)
-
-    def _evaluate_mode(self):
-        """Evaluate current conditions and set appropriate mode"""
-        if self.current_mode == OperatingMode.OFFLINE:
-            return  # Stay offline until reconnect
-
-        # Check for MINIMAL conditions (severe)
-        if self.errors_in_window >= self.error_threshold * 2:
-            self._set_mode(OperatingMode.MINIMAL)
-            return
-
-        # Check for DEGRADED conditions
-        if (self.errors_in_window >= self.error_threshold or
-            self.spikes_in_window >= self.spike_threshold):
-            self._set_mode(OperatingMode.DEGRADED)
-            return
-
-    def _set_mode(self, new_mode: str):
-        """Set operating mode with history tracking"""
-        if new_mode == self.current_mode:
-            return
-
-        old_mode = self.current_mode
-        self.current_mode = new_mode
-
-        # Record in history
-        self.mode_history.append({
-            'from': old_mode,
-            'to': new_mode,
-            'timestamp': time.time(),
-            'errors': self.errors_in_window,
-            'spikes': self.spikes_in_window
-        })
-
-        # Track degradation start
-        if new_mode != OperatingMode.NORMAL and old_mode == OperatingMode.NORMAL:
-            self.degradation_start_time = time.time()
-        elif new_mode == OperatingMode.NORMAL:
-            self.degradation_start_time = None
-
-        # Call callback if set
-        if self.on_mode_change:
-            try:
-                self.on_mode_change(old_mode, new_mode)
-            except Exception:
-                pass  # Don't let callback errors affect degradation logic
-
-    def should_skip_non_critical(self) -> bool:
-        """Check if non-critical processing should be skipped"""
-        return self.current_mode in [OperatingMode.DEGRADED, OperatingMode.MINIMAL]
-
-    def should_buffer_aggressively(self) -> bool:
-        """Check if aggressive buffering is needed"""
-        return self.current_mode == OperatingMode.MINIMAL
-
-    def get_status(self) -> Dict[str, Any]:
-        """Get current degradation status"""
-        with self._lock:
-            degradation_duration = None
-            if self.degradation_start_time:
-                degradation_duration = time.time() - self.degradation_start_time
-
-            return {
-                'mode': self.current_mode,
-                'errors_in_window': self.errors_in_window,
-                'spikes_in_window': self.spikes_in_window,
-                'last_issue_time': self.last_issue_time,
-                'degradation_duration_sec': degradation_duration,
-                'recent_transitions': list(self.mode_history)[-5:]
-            }
-
-
-class TokenBucketRateLimiter:
-    """
-    Token bucket rate limiter for WebSocket flood protection.
-
-    PHASE 3.1 AUDIT FIX: Prevents data floods from overwhelming the system.
-
-    Args:
-        rate: Maximum tokens per second (signals/sec)
-        burst: Maximum burst capacity (default: 2x rate)
-    """
-
-    def __init__(self, rate: float = 20.0, burst: int = None):
-        self.rate = rate
-        self.burst = burst if burst is not None else int(rate * 2)
-        self.tokens = float(self.burst)
-        self.last_update = time.time()
-        self._lock = threading.Lock()
-
-        # Statistics
-        self.total_requests = 0
-        self.total_allowed = 0
-        self.total_dropped = 0
-
-    def acquire(self) -> bool:
-        """
-        Attempt to acquire a token.
-
-        Returns:
-            True if token acquired (request allowed), False if rate limited
-        """
-        with self._lock:
-            now = time.time()
-            elapsed = now - self.last_update
-            self.last_update = now
-
-            # Refill tokens based on elapsed time
-            self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
-
-            self.total_requests += 1
-
-            if self.tokens >= 1.0:
-                self.tokens -= 1.0
-                self.total_allowed += 1
-                return True
-            else:
-                self.total_dropped += 1
-                return False
-
-    def get_stats(self) -> Dict[str, Any]:
-        """Get rate limiter statistics"""
-        with self._lock:
-            return {
-                'rate': self.rate,
-                'burst': self.burst,
-                'tokens_available': self.tokens,
-                'total_requests': self.total_requests,
-                'total_allowed': self.total_allowed,
-                'total_dropped': self.total_dropped,
-                'drop_rate': (self.total_dropped / self.total_requests * 100)
-                    if self.total_requests > 0 else 0.0
-            }
+# Phase 10.4A: Extracted modules
+from sources.feed_monitors import (
+    LatencySpikeDetector,
+    ConnectionHealth,
+    ConnectionHealthMonitor
+)
+from sources.feed_rate_limiter import (
+    TokenBucketRateLimiter,
+    PriorityRateLimiter
+)
+from sources.feed_degradation import (
+    OperatingMode,
+    GracefulDegradationManager
+)
 
 # Phase 3 refactoring: GameSignal and GameStateMachine extracted to own module
 from sources.game_state_machine import GameSignal, GameStateMachine
+
+logger = logging.getLogger(__name__)
+
+# Hardcoded credentials for Dutch (workaround for unauthenticated WebSocket)
+# The server only sends usernameStatus to authenticated clients, so we
+# pre-configure the identity and extract state from gameStatePlayerUpdate events
+HARDCODED_PLAYER_ID = "did:privy:cmaibr7rt0094jp0mc2mbpfu4"
+HARDCODED_USERNAME = "Dutch"
 
 
 class WebSocketFeed:
@@ -562,8 +81,8 @@ class WebSocketFeed:
         )
         self.state_machine = GameStateMachine()
 
-        # PHASE 3.1 AUDIT FIX: Rate limiter to prevent data floods
-        self.rate_limiter = TokenBucketRateLimiter(rate=rate_limit)
+        # PHASE 3.1 AUDIT FIX: Rate limiter to prevent data floods (with critical bypass)
+        self.rate_limiter = PriorityRateLimiter(rate=rate_limit)
 
         # PHASE 3.2 AUDIT FIX: Connection health monitor
         self.health_monitor = ConnectionHealthMonitor()
@@ -582,7 +101,7 @@ class WebSocketFeed:
             'total_ticks': 0,
             'total_games': 0,
             'noise_filtered': 0,
-            'latencies': deque(maxlen=100),  # AUDIT FIX: O(1) operations, auto-evicts oldest
+            'latencies': deque(maxlen=1000),  # AUDIT FIX: O(1) operations, extended history
             'phase_transitions': 0,
             'anomalies': 0,
             'errors': 0,  # AUDIT FIX: Track callback errors
@@ -596,10 +115,22 @@ class WebSocketFeed:
         self.is_connected = False
         self.event_handlers = {}
 
+        # Phase 10.7: Player state tracking
+        self.player_id: Optional[str] = None
+        self.username: Optional[str] = None
+        self.last_player_update: Optional[Dict[str, Any]] = None
+
+        # Phase 10.8: Authentication state tracking
+        self._identity_confirmed = False  # True once usernameStatus OR playerLeaderboardPosition received
+        self._identity_source: Optional[str] = None  # 'usernameStatus' or 'leaderboard'
+        self._last_known_balance: Optional[float] = None  # From playerUpdate
+        self._last_server_state: Optional[Dict[str, Any]] = None  # Phase 11: Full server state for reconciliation
+        self._profile_cache_path = self._get_profile_cache_path()
+
         # AUDIT FIX: Guard to prevent duplicate event listener registration
         self._listeners_setup = False
 
-        # Setup logging
+        # Setup logging (MUST be before _load_cached_profile)
         self.logger = logging.getLogger('WebSocketFeed')
         self.logger.setLevel(getattr(logging, log_level.upper()))
         if not self.logger.handlers:
@@ -607,6 +138,9 @@ class WebSocketFeed:
             formatter = logging.Formatter('%(levelname)s: %(message)s')
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+
+        # Load cached profile as fallback (after logger setup)
+        self._load_cached_profile()
 
         # Setup Socket.IO event handlers
         self._setup_event_listeners()
@@ -625,6 +159,141 @@ class WebSocketFeed:
             'new_mode': new_mode,
             'status': self.degradation_manager.get_status()
         })
+
+    # ========================================================================
+    # PHASE 10.8: Profile Cache Methods
+    # ========================================================================
+
+    def _get_profile_cache_path(self) -> str:
+        """Get path to profile cache file"""
+        import os
+        from pathlib import Path
+        config_dir = Path(os.getenv('RUGS_CONFIG_DIR', str(Path.home() / '.rugs_viewer')))
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return str(config_dir / 'profile_cache.json')
+
+    def _load_cached_profile(self):
+        """Load cached profile as fallback (doesn't confirm identity, just shows last known)"""
+        import json
+        try:
+            with open(self._profile_cache_path, 'r') as f:
+                data = json.load(f)
+                # Store as "last known" but don't confirm identity
+                self._cached_player_id = data.get('player_id')
+                self._cached_username = data.get('username')
+                self._cached_balance = data.get('last_balance')
+                if self._cached_username:
+                    self.logger.info(f"📋 Cached profile loaded: {self._cached_username}")
+        except (FileNotFoundError, json.JSONDecodeError):
+            self._cached_player_id = None
+            self._cached_username = None
+            self._cached_balance = None
+
+    def _save_profile_cache(self):
+        """Save current profile to cache for redundancy"""
+        import json
+        if not self.player_id or not self.username:
+            return
+        try:
+            data = {
+                'player_id': self.player_id,
+                'username': self.username,
+                'last_balance': self._last_known_balance,
+                'updated_at': datetime.now().isoformat()
+            }
+            with open(self._profile_cache_path, 'w') as f:
+                json.dump(data, f, indent=2)
+            self.logger.debug(f"Profile cache saved: {self.username}")
+        except Exception as e:
+            self.logger.error(f"Failed to save profile cache: {e}")
+
+    def _confirm_identity(self, player_id: str, username: str, source: str):
+        """
+        Confirm player identity and display prominent terminal output.
+
+        Args:
+            player_id: Player's Privy DID
+            username: Display name
+            source: Source of identity ('usernameStatus' or 'leaderboard')
+        """
+        # Skip if already confirmed with same identity
+        if self._identity_confirmed and self.player_id == player_id:
+            return
+
+        self.player_id = player_id
+        self.username = username
+        self._identity_confirmed = True
+        self._identity_source = source
+
+        # Save to cache for redundancy
+        self._save_profile_cache()
+
+        # CLEAR TERMINAL OUTPUT - Identity Confirmation
+        player_id_short = player_id[:30] + '...' if len(player_id) > 30 else player_id
+        print("\n" + "=" * 60)
+        print("✅ PLAYER IDENTITY CONFIRMED")
+        print("=" * 60)
+        print(f"   Username:  {username}")
+        print(f"   Player ID: {player_id_short}")
+        print(f"   Source:    {source}")
+        if self._last_known_balance is not None:
+            print(f"   Balance:   {self._last_known_balance:.4f} SOL")
+        print("=" * 60 + "\n")
+
+        # Also log at WARNING level for log files
+        self.logger.warning(f"✅ IDENTITY CONFIRMED: {username} ({player_id_short}) via {source}")
+
+        # Emit event
+        self._emit_event('player_identity', {
+            'player_id': player_id,
+            'username': username,
+            'source': source,
+            'confirmed': True
+        })
+
+    def _update_balance(self, cash: float, source: str = 'playerUpdate'):
+        """Update known balance and display if changed significantly"""
+        old_balance = self._last_known_balance
+        self._last_known_balance = cash
+
+        # Save updated balance to cache
+        self._save_profile_cache()
+
+        # Only print if balance changed significantly (>0.0001 SOL)
+        if old_balance is None or abs(cash - old_balance) > 0.0001:
+            self.logger.warning(f"💰 Balance: {cash:.4f} SOL (via {source})")
+
+    def get_authentication_status(self) -> Dict[str, Any]:
+        """Get current authentication status for UI display"""
+        return {
+            'confirmed': self._identity_confirmed,
+            'player_id': self.player_id,
+            'username': self.username,
+            'source': self._identity_source,
+            'balance': self._last_known_balance,
+            'cached_username': getattr(self, '_cached_username', None),
+            'cached_balance': getattr(self, '_cached_balance', None)
+        }
+
+    def get_last_server_state(self) -> Optional['ServerState']:
+        """
+        Get the last known server state for reconciliation (Phase 11).
+
+        Returns ServerState object if available, None if no playerUpdate received yet.
+        """
+        if self._last_server_state is None:
+            return None
+
+        from decimal import Decimal
+        from models.recording_models import ServerState
+
+        return ServerState(
+            cash=Decimal(str(self._last_server_state.get('cash', 0))),
+            position_qty=Decimal(str(self._last_server_state.get('positionQty', 0))),
+            avg_cost=Decimal(str(self._last_server_state.get('avgCost', 0))),
+            cumulative_pnl=Decimal(str(self._last_server_state.get('cumulativePnL', 0))),
+            total_invested=Decimal(str(self._last_server_state.get('totalInvested', 0))),
+        )
 
     def _setup_event_listeners(self):
         """
@@ -650,6 +319,15 @@ class WebSocketFeed:
                 self.health_monitor.set_connected(True)
                 self.logger.info('✅ Connected to Rugs.fun backend')
                 self.logger.info(f'   Socket ID: {self.sio.sid}')
+
+                # Auto-confirm identity using hardcoded credentials
+                # (Server doesn't send usernameStatus to unauthenticated clients)
+                self._confirm_identity(
+                    HARDCODED_PLAYER_ID,
+                    HARDCODED_USERNAME,
+                    'hardcoded_credentials'
+                )
+
                 self._emit_event('connected', {'socketId': self.sio.sid})
             except Exception as e:
                 self.logger.error(f"Error in connect handler: {e}", exc_info=True)
@@ -746,12 +424,165 @@ class WebSocketFeed:
                 self.logger.error(f"Error handling game state update: {e}", exc_info=True)
                 self.metrics['errors'] += 1
 
+        # Phase 10.7: Player identity event (once on connect)
+        # This is the PRIMARY source of identity - usernameStatus fires once when authenticated
+        @self.sio.on('usernameStatus')
+        def on_username_status(*args):
+            try:
+                # Handle trace argument format: [{__trace:...}, {actual_data}]
+                # The actual identity data is the LAST argument
+                data = args[-1] if args else {}
+                if isinstance(data, dict):
+                    player_id = data.get('id')
+                    username = data.get('username')
+                    if player_id and username:
+                        # Use centralized identity confirmation
+                        self._confirm_identity(player_id, username, 'usernameStatus')
+                else:
+                    self.logger.warning(f'⚠️ usernameStatus received unexpected format: {type(data)}')
+            except Exception as e:
+                self.logger.error(f"Error in usernameStatus handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
+        # Phase 10.7: Player state update (after each server-side trade)
+        # This provides ongoing validation and balance updates
+        # Phase 11: Now also stores full state for reconciliation
+        @self.sio.on('playerUpdate')
+        def on_player_update(*args):
+            try:
+                # Handle potential trace argument format
+                data = args[-1] if args else {}
+                if isinstance(data, dict):
+                    self.last_player_update = data
+                    # Phase 11: Store full server state for reconciliation
+                    self._last_server_state = data
+
+                    cash = data.get('cash', 0)
+                    pos_qty = data.get('positionQty', 0)
+
+                    # Update balance tracking
+                    self._update_balance(cash, 'playerUpdate')
+
+                    # Log position info
+                    self.logger.warning(f'💰 Player state: cash={cash:.4f}, pos={pos_qty:.4f}')
+
+                    # Emit event for UI
+                    self._emit_event('player_update', data)
+            except Exception as e:
+                self.logger.error(f"Error in playerUpdate handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
+        # Phase 10.8: Player leaderboard position (secondary auth confirmation)
+        # This fires intermittently and can confirm identity if usernameStatus was missed
+        @self.sio.on('playerLeaderboardPosition')
+        def on_player_leaderboard_position(*args):
+            try:
+                # Handle potential trace argument format: [{__trace:...}, {actual_data}]
+                data = args[-1] if args else {}
+                if isinstance(data, dict):
+                    player_entry = data.get('playerEntry', {})
+                    rank = data.get('rank')
+                    total = data.get('total')
+                    player_id = player_entry.get('playerId')
+                    username = player_entry.get('username')
+                    pnl = player_entry.get('pnl', 0)
+
+                    # Use as fallback identity if not yet confirmed
+                    if player_id and username and not self._identity_confirmed:
+                        self._confirm_identity(player_id, username, 'playerLeaderboardPosition')
+
+                    # Log leaderboard position
+                    if rank and total:
+                        self.logger.warning(f'🏆 Leaderboard: #{rank}/{total} (PnL: {pnl:+.4f} SOL)')
+
+                    # Emit event
+                    self._emit_event('player_leaderboard', {
+                        'rank': rank,
+                        'total': total,
+                        'player_entry': player_entry
+                    })
+            except Exception as e:
+                self.logger.error(f"Error in playerLeaderboardPosition handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
+        # gameStatePlayerUpdate: Personal leaderboard entry with PnL, position, etc.
+        # This is the PRIMARY source of player state when using hardcoded credentials
+        # (since playerUpdate is not sent to unauthenticated clients)
+        @self.sio.on('gameStatePlayerUpdate')
+        def on_game_state_player_update(*args):
+            try:
+                # Handle potential trace argument format
+                data = args[-1] if args else {}
+                if not isinstance(data, dict):
+                    return
+
+                leaderboard_entry = data.get('leaderboardEntry', {})
+                player_id = leaderboard_entry.get('id')
+
+                # Only process if this is OUR player (match hardcoded ID)
+                if player_id != HARDCODED_PLAYER_ID:
+                    return
+
+                # Extract player state
+                pnl = leaderboard_entry.get('pnl', 0)
+                pnl_percent = leaderboard_entry.get('pnlPercent', 0)
+                position_qty = leaderboard_entry.get('positionQty', 0)
+                avg_cost = leaderboard_entry.get('avgCost', 0)
+                total_invested = leaderboard_entry.get('totalInvested', 0)
+                has_active_trades = leaderboard_entry.get('hasActiveTrades', False)
+                sidebet = leaderboard_entry.get('sideBet')
+                sidebet_pnl = leaderboard_entry.get('sidebetPnl', 0)
+
+                # Build server state for reconciliation (Phase 11 compatible)
+                # Note: gameStatePlayerUpdate doesn't include 'cash', so we leave it as None
+                self._last_server_state = {
+                    'positionQty': position_qty,
+                    'avgCost': avg_cost,
+                    'cumulativePnL': pnl,
+                    'totalInvested': total_invested,
+                    'pnlPercent': pnl_percent,
+                    'hasActiveTrades': has_active_trades,
+                    'sideBet': sidebet,
+                    'sidebetPnl': sidebet_pnl,
+                }
+
+                # Log significant state changes
+                if has_active_trades or position_qty > 0:
+                    self.logger.warning(
+                        f'💰 Player state: pos={position_qty:.6f}, '
+                        f'pnl={pnl:+.6f} ({pnl_percent:+.2f}%), '
+                        f'invested={total_invested:.6f}'
+                    )
+
+                # Emit event for UI/recording
+                self._emit_event('player_state_update', {
+                    'game_id': data.get('gameId'),
+                    'player_id': player_id,
+                    'pnl': pnl,
+                    'pnl_percent': pnl_percent,
+                    'position_qty': position_qty,
+                    'avg_cost': avg_cost,
+                    'total_invested': total_invested,
+                    'has_active_trades': has_active_trades,
+                    'sidebet': sidebet,
+                    'sidebet_pnl': sidebet_pnl,
+                })
+
+            except Exception as e:
+                self.logger.error(f"Error in gameStatePlayerUpdate handler: {e}", exc_info=True)
+                self.metrics['errors'] += 1
+
         # Catch-all for noise tracking
         @self.sio.on('*')
         def catch_all(event, *args):
             # AUDIT FIX: Error boundary for catch-all handler
             try:
-                if event != 'gameStateUpdate':
+                # Phase 10.8: Don't count player events as noise
+                tracked_events = {
+                    'gameStateUpdate', 'usernameStatus', 'playerUpdate',
+                    'playerLeaderboardPosition', 'gameStatePlayerUpdate'
+                }
+                if event not in tracked_events:
                     self.metrics['noise_filtered'] += 1
                     self.logger.debug(f'❌ NOISE filtered: {event}')
             except Exception as e:
@@ -761,17 +592,6 @@ class WebSocketFeed:
     def _handle_game_state_update(self, raw_data: Dict[str, Any]):
         """Handle gameStateUpdate event - PRIMARY SIGNAL SOURCE"""
         receive_time = time.time() * 1000  # milliseconds
-
-        # PHASE 3.1 AUDIT FIX: Apply rate limiting
-        if not self.rate_limiter.acquire():
-            self.metrics['rate_limited'] += 1
-            # Log every 100th rate-limited signal to avoid log spam
-            if self.metrics['rate_limited'] % 100 == 1:
-                self.logger.warning(
-                    f"Rate limiting active: {self.metrics['rate_limited']} signals dropped "
-                    f"(drop rate: {self.rate_limiter.get_stats()['drop_rate']:.1f}%)"
-                )
-            return  # Drop this signal
 
         # Calculate tick interval
         if self.last_tick_time:
@@ -826,6 +646,18 @@ class WebSocketFeed:
 
         # Create signal object
         signal = GameSignal(**signal_dict)
+
+        # PHASE 3.1 AUDIT FIX: Apply rate limiting with critical bypass
+        if not self.rate_limiter.should_process(signal):
+            self.metrics['rate_limited'] += 1
+            if self.metrics['rate_limited'] % 100 == 1:
+                stats = self.rate_limiter.get_stats()
+                drop_rate = stats.get('drop_rate', 0.0)
+                self.logger.warning(
+                    f"Rate limiting active: {self.metrics['rate_limited']} signals dropped "
+                    f"(drop rate: {drop_rate:.1f}%)"
+                )
+            return  # Drop this signal
 
         # Update metrics
         self.metrics['total_signals'] += 1
@@ -1005,6 +837,21 @@ class WebSocketFeed:
     def get_last_signal(self) -> Optional[GameSignal]:
         """Get the last received signal"""
         return self.last_signal
+
+    def get_player_info(self) -> Dict[str, Any]:
+        """
+        Get current player identity and state.
+
+        Phase 10.7: Returns player ID, username, and last server update.
+
+        Returns:
+            Dict with player_id, username, and last_update
+        """
+        return {
+            'player_id': self.player_id,
+            'username': self.username,
+            'last_update': self.last_player_update
+        }
 
     def signal_to_game_tick(self, signal: GameSignal) -> GameTick:
         """

@@ -2,7 +2,7 @@
 Game Tick data model
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Any
 import logging
@@ -35,6 +35,15 @@ class GameTick:
     rugged: bool
     cooldown_timer: int
     trade_count: int
+
+    def __post_init__(self):
+        """Coerce price to Decimal with safe precision"""
+        if not isinstance(self.price, Decimal):
+            try:
+                self.price = Decimal(str(round(float(self.price), 8)))
+            except (InvalidOperation, ValueError, TypeError) as e:
+                logger.error(f"Invalid price value: {self.price} ({e}), defaulting to 1.0")
+                self.price = Decimal('1.0')
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'GameTick':
@@ -89,13 +98,22 @@ class GameTick:
             self.phase not in ["COOLDOWN", "RUG_EVENT", "RUG_EVENT_1", "RUG_EVENT_2", "UNKNOWN"]
         )
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
+    def to_dict(self, preserve_precision: bool = False) -> Dict[str, Any]:
+        """Convert to dictionary
+
+        Args:
+            preserve_precision: If True, keep Decimals as strings
+        """
+        def convert(val):
+            if isinstance(val, Decimal):
+                return str(val) if preserve_precision else float(val)
+            return val
+
         return {
             'game_id': self.game_id,
             'tick': self.tick,
             'timestamp': self.timestamp,
-            'price': float(self.price),
+            'price': convert(self.price),
             'phase': self.phase,
             'active': self.active,
             'rugged': self.rugged,

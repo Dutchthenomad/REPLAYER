@@ -274,6 +274,7 @@ class PerformanceLogger:
 
 # Global logger service instance
 _logger_service = None
+_logging_configured = False
 
 
 def setup_logging(config: Optional[Dict] = None) -> logging.Logger:
@@ -286,7 +287,10 @@ def setup_logging(config: Optional[Dict] = None) -> logging.Logger:
     Returns:
         Configured root logger
     """
-    global _logger_service
+    global _logger_service, _logging_configured
+
+    if _logging_configured and _logger_service is not None:
+        return logging.getLogger()
     
     if _logger_service is None:
         # Import config if available
@@ -306,6 +310,7 @@ def setup_logging(config: Optional[Dict] = None) -> logging.Logger:
             log_config = config or {}
         
         _logger_service = LoggerService(log_config)
+        _logging_configured = True
     
     return logging.getLogger()
 
@@ -326,11 +331,12 @@ def log_performance(operation: str, duration: float, metadata: Optional[Dict] = 
 
 def cleanup_logging():
     """Clean up logging resources"""
-    global _logger_service
+    global _logger_service, _logging_configured
     
     if _logger_service:
         _logger_service.cleanup()
         _logger_service = None
+        _logging_configured = False
 
 
 # Convenience function for module-level logger

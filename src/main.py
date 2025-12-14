@@ -4,7 +4,12 @@ Clean, modular implementation
 Phase 8.5: Added --live flag for browser automation mode
 """
 
+__version__ = "2.0.0"
+
 import sys
+import os
+import signal
+import platform
 from pathlib import Path
 
 # Add parent directory to Python path for browser_automation imports
@@ -40,115 +45,161 @@ class Application:
             live_mode: If True, enable live browser automation mode (Phase 8.5)
             modern_ui: If True, use the new Modern UI (Game-like). If None, load from preference.
         """
-        # Initialize logging first
-        self.logger = setup_logging()
-        self.logger.info("="*60)
-        self.logger.info("Rugs Replay Viewer - Starting Application")
-        if live_mode:
-            self.logger.info("MODE: LIVE BROWSER AUTOMATION (Phase 8.5)")
-        else:
-            self.logger.info("MODE: REPLAY")
-        self.logger.info("="*60)
-
-        # Phase 8.5: Store live mode flag
-        self.live_mode = live_mode
-
-        # Import MainWindow for preference loading
-        from ui.main_window import MainWindow
-
-        # Load UI style preference if not explicitly specified
-        if modern_ui is None:
-            ui_style = MainWindow.load_ui_style_preference()
-            self.modern_ui = (ui_style == 'modern')
-            self.logger.info(f"UI Style: {ui_style} (from preference)")
-        else:
-            self.modern_ui = modern_ui
-            self.logger.info(f"UI Style: {'modern' if modern_ui else 'standard'} (from command line)")
-
-        # PRODUCTION FIX: Validate configuration at startup
-        # Catches invalid settings before they cause runtime errors
-        try:
-            config.validate()
-            self.logger.info("Configuration validated successfully")
-        except Exception as e:
-            self.logger.critical(f"Configuration validation failed: {e}")
-            # Show error dialog before exiting
-            import tkinter.messagebox as messagebox
-            messagebox.showerror(
-                "Configuration Error",
-                f"Invalid configuration detected:\n\n{e}\n\nPlease check your config.py settings."
-            )
-            sys.exit(1)
-
-        # Initialize core components
-        self.config = config
-        self.state = GameState(config.FINANCIAL['initial_balance'])
+        self._initialized_components = []
+        self.main_window: Optional[MainWindow] = None
+        self.root: Optional[tk.Tk] = None
+        self.state: Optional[GameState] = None
         self.event_bus = event_bus
 
-        # Start event bus
-        self.event_bus.start()
+        try:
+            # Initialize logging first
+            self.logger = setup_logging()
+            self._initialized_components.append("logging")
+            self.logger.info("=" * 60)
+            self.logger.info("Rugs Replay Viewer - Starting Application")
+            if live_mode:
+                self.logger.info("MODE: LIVE BROWSER AUTOMATION (Phase 8.5)")
+            else:
+                self.logger.info("MODE: REPLAY")
+            self.logger.info("=" * 60)
 
-        # Setup event handlers
-        self._setup_event_handlers()
+            # Phase 8.5: Store live mode flag
+            self.live_mode = live_mode
 
-        # Create UI window
-        # Modern UI uses plain tk.Tk() with its own dark theme
-        # Standard UI uses ttkbootstrap.Window for theming support
-        if self.modern_ui:
-            # Modern UI: Plain Tk window with custom dark theme
-            self.root = tk.Tk()
-            self.logger.info("Using Modern UI with custom dark theme")
-        else:
-            # Standard UI: ttkbootstrap Window with theme support
-            saved_theme = MainWindow.load_theme_preference()
-            self.root = ttk.Window(themename=saved_theme)
-            self.logger.info(f"Using theme: {saved_theme}")
-        self.main_window = None
+            # Load UI style preference if not explicitly specified
+            if modern_ui is None:
+                try:
+                    ui_style = MainWindow.load_ui_style_preference()
+                    if ui_style not in ("modern", "standard"):
+                        raise ValueError(f"Unknown UI style '{ui_style}'")
+                    self.modern_ui = ui_style == "modern"
+                    self.logger.info(f"UI Style: {ui_style} (from preference)")
+                except Exception as e:
+                    self.logger.warning(f"Could not load UI preference: {e}, defaulting to standard")
+                    ui_style = "standard"
+                    self.modern_ui = False
+            else:
+                self.modern_ui = modern_ui
+                ui_style = "modern" if modern_ui else "standard"
+                self.logger.info(
+                    f"UI Style: {ui_style} (from command line)"
+                )
 
-        # Configure root window
-        self._configure_root()
+            # Validate configuration at startup
+            try:
+                config.validate()
+                self.logger.info("Configuration validated successfully")
+            except Exception as e:
+                self.logger.critical(f"Configuration validation failed: {e}")
+                self._show_error_and_exit(
+                    (
+                        "Invalid configuration detected:\n\n"
+                        f"{e}\n\nPlease check your config.py settings."
+                    )
+                )
 
-        self.logger.info("Application initialized successfully")
-    
+            # Initialize core components
+            self.config = config
+            self.state = GameState(config.FINANCIAL["initial_balance"])
+
+            # Start event bus
+            self.event_bus.start()
+            self._initialized_components.append("event_bus")
+
+            # Setup event handlers
+            self._setup_event_handlers()
+
+            # Create UI window
+            # Modern UI uses plain tk.Tk() with its own dark theme
+            # Standard UI uses ttkbootstrap.Window for theming support
+            if self.modern_ui:
+                # Modern UI: Plain Tk window with custom dark theme
+                self.root = tk.Tk()
+                self.logger.info("Using Modern UI with custom dark theme")
+            else:
+                # Standard UI: ttkbootstrap Window with theme support
+                saved_theme = MainWindow.load_theme_preference()
+                self.root = ttk.Window(themename=saved_theme)
+                self.logger.info(f"Using theme: {saved_theme}")
+
+            # Configure root window
+            self._configure_root()
+
+            self.logger.info("Application initialized successfully")
+        except Exception:
+            self._emergency_cleanup()
+            raise
+
+    def _show_error_and_exit(self, message: str):
+        """Show error dialog if possible, then exit"""
+        try:
+            import tkinter as tk
+            import tkinter.messagebox as messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("REPLAYER Error", message)
+            root.destroy()
+        except Exception:
+            print(f"FATAL ERROR: {message}", file=sys.stderr)
+        finally:
+            sys.exit(1)
+
+    def _emergency_cleanup(self):
+        """Clean up partially initialized components"""
+        for component in reversed(self._initialized_components):
+            try:
+                if component == "event_bus":
+                    self.event_bus.stop()
+                elif component == "logging":
+                    logging.shutdown()
+            except Exception:
+                pass
+
     def _configure_root(self):
         """Configure the root tkinter window"""
         self.root.title("Rugs.fun Replay Viewer - Professional Edition")
         self.root.geometry(f"{config.UI['window_width']}x{config.UI['window_height']}")
-        
+
         # Set minimum size
-        self.root.minsize(800, 600)
-        
+        min_width = config.UI.get('min_width', 800)
+        min_height = config.UI.get('min_height', 600)
+        self.root.minsize(min_width, min_height)
+
         # Configure grid weights for responsive design
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
-        
+
         # Set icon if available
-        icon_path = Path(__file__).parent / 'assets' / 'icon.ico'
+        assets_dir = Path(__file__).parent / 'assets'
+        icon_path = assets_dir / ('icon.ico' if platform.system() == 'Windows' else 'icon.png')
+        if not icon_path.exists():
+            icon_path = assets_dir / 'icon.ico'
         if icon_path.exists():
             try:
                 self.root.iconbitmap(str(icon_path))
             except Exception as e:
                 self.logger.warning(f"Could not set icon: {e}")
-        
+
         # Bind close event
         self.root.protocol("WM_DELETE_WINDOW", self.shutdown)
-    
+
     def _setup_event_handlers(self):
         """Setup global event handlers"""
         # Application lifecycle events
         self.event_bus.subscribe(Events.UI_ERROR, self._handle_ui_error)
-        
+
         # Game events
         self.event_bus.subscribe(Events.GAME_START, self._handle_game_start)
         self.event_bus.subscribe(Events.GAME_END, self._handle_game_end)
         self.event_bus.subscribe(Events.GAME_RUG, self._handle_rug_event)
-        
+
         # Trading events
         self.event_bus.subscribe(Events.TRADE_EXECUTED, self._handle_trade_executed)
         self.event_bus.subscribe(Events.TRADE_FAILED, self._handle_trade_failed)
-        
+
         self.logger.debug("Event handlers configured")
-    
+
     def _handle_ui_error(self, event):
         """Handle UI errors"""
         data = event.get('data', {})
@@ -179,7 +230,7 @@ class Application:
         """Handle failed trade"""
         data = event.get('data', {})
         self.logger.warning(f"Trade failed: {data}")
-    
+
     def run(self):
         """Run the application"""
         try:
@@ -235,6 +286,13 @@ class Application:
     def shutdown(self):
         """Clean shutdown of application"""
         self.logger.info("Shutting down application...")
+
+        def timeout_handler(signum, frame):
+            self.logger.warning("Shutdown timeout - forcing exit")
+            os._exit(1)
+
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(10)
         
         try:
             # Save configuration
@@ -260,6 +318,7 @@ class Application:
             self.logger.error(f"Error during shutdown: {e}")
         
         finally:
+            signal.alarm(0)
             self.logger.info("Application shutdown complete")
             sys.exit(0)
 
@@ -311,17 +370,23 @@ Phase 8.5: Live mode connects to Rugs.fun via Playwright automation.
     else:
         modern_ui = None  # Will load from saved preference
 
-    # Create and run application
-    app = Application(live_mode=args.live, modern_ui=modern_ui)
-
+    app = None
     try:
+        app = Application(live_mode=args.live, modern_ui=modern_ui)
         app.run()
     except KeyboardInterrupt:
         print("\nInterrupted by user")
-        app.shutdown()
     except Exception as e:
         logging.critical(f"Unhandled exception: {e}", exc_info=True)
-        app.shutdown()
+    finally:
+        if app is not None:
+            try:
+                app.shutdown()
+            except KeyboardInterrupt:
+                print("\nForced exit during shutdown")
+                os._exit(130)
+            except Exception as e:
+                logging.error(f"Error during shutdown: {e}")
 
 
 if __name__ == "__main__":

@@ -33,7 +33,12 @@ class SidebetStrategy(TradingStrategy):
         """Make sidebet-focused trading decision"""
 
         if not observation:
-            return ("WAIT", None, "No game state available")
+            return self._validate_action(
+                "WAIT",
+                None,
+                "No game state available",
+                info.get("valid_actions", [])
+            )
 
         # Extract state
         state = observation['current_state']
@@ -44,11 +49,15 @@ class SidebetStrategy(TradingStrategy):
         price = Decimal(str(state['price']))
         tick = state['tick']
         balance = Decimal(str(wallet['balance']))
+        valid_actions = info.get("valid_actions", [])
+
+        def decide_action(action: str, amount: Optional[Decimal], reasoning: str):
+            return self._validate_action(action, amount, reasoning, valid_actions)
 
         # PRIORITY 1: Place sidebets frequently for testing
         if sidebet is None and info['can_sidebet']:
             if balance >= self.SIDEBET_AMOUNT:
-                return (
+                return decide_action(
                     "SIDE",
                     self.SIDEBET_AMOUNT,
                     f"Testing sidebet at tick {tick}"
@@ -57,7 +66,7 @@ class SidebetStrategy(TradingStrategy):
         # PRIORITY 2: Trade normally
         if position is None and info['can_buy']:
             if price < self.BUY_THRESHOLD and balance >= self.BUY_AMOUNT:
-                return (
+                return decide_action(
                     "BUY",
                     self.BUY_AMOUNT,
                     f"Entry at {price:.2f}x"
@@ -68,14 +77,14 @@ class SidebetStrategy(TradingStrategy):
             pnl_pct = Decimal(str(position['current_pnl_percent']))
 
             if pnl_pct > self.TAKE_PROFIT:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     "Quick profit"
                 )
 
         # Default: wait
-        return (
+        return decide_action(
             "WAIT",
             None,
             "Waiting for sidebet opportunity"

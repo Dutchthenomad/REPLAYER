@@ -116,8 +116,15 @@ def build_launch_options(config: PersistentProfileConfig) -> dict:
     env = os.environ.copy()
 
     # AUDIT FIX: Explicitly set PLAYWRIGHT_BROWSERS_PATH to avoid /root/.cache/ issue
-    # Use absolute hardcoded path to avoid Path.home() resolving to /root/ in subprocess
-    env['PLAYWRIGHT_BROWSERS_PATH'] = "/home/nomad/.cache/ms-playwright"
+    # Use per-user cache path unless overridden via environment variable
+    env['PLAYWRIGHT_BROWSERS_PATH'] = str(
+        Path(
+            os.getenv(
+                "PLAYWRIGHT_BROWSERS_PATH",
+                Path.home() / ".cache" / "ms-playwright"
+            )
+        ).expanduser()
+    )
 
     options = {
         "user_data_dir": str(config.user_data_dir),

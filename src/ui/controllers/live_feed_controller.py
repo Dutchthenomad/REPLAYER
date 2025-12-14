@@ -7,12 +7,18 @@ Handles:
 - Live mode state management
 - Feed source switching
 - UI updates for live feed status
+
+Phase 10.6: Auto-starts recording when WebSocket connects,
+auto-stops when disconnected.
 """
 
 import tkinter as tk
 import threading
 import logging
-from typing import Callable
+from typing import Callable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ui.controllers.recording_controller import RecordingController
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +69,29 @@ class LiveFeedController:
         # Callbacks
         self.log = log_callback
 
+        # Phase 10.5: Track current game for GAME_START/GAME_END events
+        self._current_game_id: str = None
+
+        # Phase 10.6: Recording controller for auto-start/stop
+        self._recording_controller: Optional["RecordingController"] = None
+
+        # Phase 10.7: Player identity tracking
+        self._player_id: Optional[str] = None
+        self._username: Optional[str] = None
+
         logger.info("LiveFeedController initialized")
+
+    def set_recording_controller(self, controller: "RecordingController") -> None:
+        """
+        Set the recording controller for auto-start/stop recording.
+
+        Phase 10.6: Must be called after RecordingController is created.
+
+        Args:
+            controller: RecordingController instance
+        """
+        self._recording_controller = controller
+        logger.debug("Recording controller set for auto-start/stop")
 
     # ========================================================================
     # LIVE FEED CONNECTION
@@ -105,6 +133,25 @@ class LiveFeedController:
 
                         # Publish to event bus for UI updates
                         from services.event_bus import Events
+
+                        # Phase 10.5: Detect game transitions for recording
+                        game_id = tick.game_id
+                        if game_id and game_id != self._current_game_id:
+                            # New game started
+                            if self._current_game_id is not None:
+                                # Previous game ended
+                                logger.debug(f"Live feed: Game ended - {self._current_game_id}")
+                                self.event_bus.publish(Events.GAME_END, {
+                                    'game_id': self._current_game_id,
+                                    'clean': True  # Assume clean transition
+                                })
+                            # New game starting
+                            logger.debug(f"Live feed: Game started - {game_id}")
+                            self._current_game_id = game_id
+                            self.event_bus.publish(Events.GAME_START, {
+                                'game_id': game_id
+                            })
+
                         self.event_bus.publish(Events.GAME_TICK, {'tick': tick})
                     except Exception as e:
                         logger.error(f"Error processing live signal: {e}", exc_info=True)
@@ -137,6 +184,14 @@ class LiveFeedController:
                     if hasattr(self.parent, 'phase_label'):
                         self.parent.phase_label.config(text="PHASE: LIVE FEED", fg='#00ff88')
 
+                    # Phase 10.6: Auto-start recording
+                    if self._recording_controller:
+                        try:
+                            self._recording_controller.start_session()
+                            self.log("📹 Recording started automatically")
+                        except Exception as rec_e:
+                            logger.error(f"Failed to auto-start recording: {rec_e}")
+
                 self.root.after(0, handle_connected)
 
             @self.parent.live_feed.on('disconnected')
@@ -156,6 +211,18 @@ class LiveFeedController:
                     if hasattr(self.parent, 'phase_label'):
                         self.parent.phase_label.config(text="PHASE: DISCONNECTED", fg='#ff3366')
 
+                    # Phase 10.6: Auto-stop recording
+                    if self._recording_controller and self._recording_controller.is_active:
+                        try:
+                            self._recording_controller.stop_session()
+                            self.log("📹 Recording stopped automatically")
+                        except Exception as rec_e:
+                            logger.error(f"Failed to auto-stop recording: {rec_e}")
+
+                    # Phase 10.8: Reset server state UI
+                    if hasattr(self.parent, '_reset_server_state'):
+                        self.parent._reset_server_state()
+
                 self.root.after(0, handle_disconnected)
 
             @self.parent.live_feed.on('gameComplete')
@@ -165,10 +232,74 @@ class LiveFeedController:
 
                 # Marshal to Tkinter main thread with captured value
                 def handle_game_complete(captured_data=data_snapshot):
+                    from services.event_bus import Events
+
                     game_num = captured_data.get('gameNumber', 0)
+                    seed_data = captured_data.get('seedData')
                     self.log(f"💥 Game {game_num} complete")
 
+                    # Phase 10.5: Publish GAME_END with seed data
+                    if self._current_game_id:
+                        logger.debug(f"Live feed: Game complete - {self._current_game_id}")
+                        self.event_bus.publish(Events.GAME_END, {
+                            'game_id': self._current_game_id,
+                            'clean': True,
+                            'seed_data': seed_data
+                        })
+                        # Reset for next game
+                        self._current_game_id = None
+
                 self.root.after(0, handle_game_complete)
+
+            # Phase 10.7: Player identity event (once on connect)
+            @self.parent.live_feed.on('player_identity')
+            def on_player_identity(info):
+                # PRODUCTION FIX: Capture info snapshot
+                info_snapshot = dict(info) if hasattr(info, 'items') else {}
+
+                def handle_identity(captured_info=info_snapshot):
+                    from services.event_bus import Events
+
+                    self._player_id = captured_info.get('player_id')
+                    self._username = captured_info.get('username')
+                    self.log(f"👤 Logged in as: {self._username}")
+
+                    # Set player info on recording controller
+                    if self._recording_controller:
+                        self._recording_controller.set_player_info(
+                            self._player_id,
+                            self._username
+                        )
+
+                    # Publish to EventBus for other consumers
+                    self.event_bus.publish(Events.PLAYER_IDENTITY, captured_info)
+
+                self.root.after(0, handle_identity)
+
+            # Phase 10.7: Player update event (after each trade)
+            @self.parent.live_feed.on('player_update')
+            def on_player_update(data):
+                # PRODUCTION FIX: Capture data snapshot
+                data_snapshot = dict(data) if hasattr(data, 'items') else {}
+
+                def handle_update(captured_data=data_snapshot):
+                    from services.event_bus import Events
+                    from models.recording_models import ServerState
+
+                    # Create ServerState from WebSocket data
+                    server_state = ServerState.from_websocket(captured_data)
+
+                    # Forward to recording controller
+                    if self._recording_controller:
+                        self._recording_controller.update_server_state(server_state)
+
+                    # Publish to EventBus for other consumers
+                    self.event_bus.publish(Events.PLAYER_UPDATE, {
+                        'server_state': server_state,
+                        'raw_data': captured_data
+                    })
+
+                self.root.after(0, handle_update)
 
             # Bug 6 Fix: Connect to feed in background thread (non-blocking)
             # This prevents UI freeze during Socket.IO handshake (up to 20s timeout)
@@ -211,6 +342,11 @@ class LiveFeedController:
             self.parent.live_feed.disconnect()
             self.parent.live_feed = None
             self.parent.live_feed_connected = False
+            # Phase 10.5: Reset game tracking
+            self._current_game_id = None
+            # Phase 10.7: Reset player tracking
+            self._player_id = None
+            self._username = None
             self.toast.show("Live feed disconnected", "info")
             if hasattr(self.parent, 'phase_label'):
                 self.parent.phase_label.config(text="PHASE: DISCONNECTED", fg='white')
@@ -250,5 +386,10 @@ class LiveFeedController:
                 self.parent.live_feed.disconnect()
                 self.parent.live_feed = None
                 self.parent.live_feed_connected = False
+                # Phase 10.5: Reset game tracking
+                self._current_game_id = None
+                # Phase 10.7: Reset player tracking
+                self._player_id = None
+                self._username = None
             except Exception as e:
                 logger.error(f"Error disconnecting live feed during shutdown: {e}", exc_info=True)

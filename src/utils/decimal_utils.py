@@ -12,18 +12,78 @@ logger = logging.getLogger(__name__)
 # Type alias for numeric types
 Numeric = Union[Decimal, float, str, int]
 
+__all__ = [
+    "to_decimal",
+    "to_float",
+    "safe_float",
+    "round_sol",
+    "round_price",
+    "round_percent",
+    "floor_sol",
+    "safe_divide",
+    "percentage_change",
+    "calculate_pnl",
+    "is_valid_amount",
+    "clamp",
+    "format_sol",
+    "format_price",
+    "format_percent",
+    "format_pnl",
+    "decimal_equal",
+    "is_positive",
+    "is_negative",
+    "is_zero",
+    "sum_decimals",
+    "average_decimals",
+    "ZERO",
+    "ONE",
+    "HUNDRED",
+    "THOUSAND",
+    "PERCENT_10",
+    "PERCENT_25",
+    "PERCENT_50",
+    "PERCENT_75",
+    "SOL_PRECISION",
+    "MIN_SOL_AMOUNT",
+    "MAX_PERCENTAGE",
+]
+
+_QUANTIZER_CACHE = {
+    4: Decimal("0.0001"),
+    6: Decimal("0.000001"),
+    9: Decimal("0.000000001"),
+}
+
+
+def _get_quantizer(precision: int) -> Decimal:
+    """Return cached quantizer for given precision."""
+    if precision not in _QUANTIZER_CACHE:
+        _QUANTIZER_CACHE[precision] = Decimal(10) ** -precision
+    return _QUANTIZER_CACHE[precision]
+
+
+def _validate_precision(precision: int) -> int:
+    if precision < 0:
+        raise ValueError(f"Precision must be non-negative, got {precision}")
+    return precision
+
 
 # ========================================================================
 # CONVERSION UTILITIES
 # ========================================================================
 
-def to_decimal(value: Numeric, default: Optional[Decimal] = None) -> Decimal:
+def to_decimal(
+    value: Numeric,
+    default: Optional[Decimal] = None,
+    round_places: Optional[int] = None
+) -> Decimal:
     """
     Safely convert value to Decimal
     
     Args:
         value: Value to convert
         default: Default value if conversion fails
+        round_places: Optional rounding precision after conversion
         
     Returns:
         Decimal value
@@ -35,8 +95,12 @@ def to_decimal(value: Numeric, default: Optional[Decimal] = None) -> Decimal:
         return value
     
     try:
-        # Convert to string first to avoid float precision issues
-        return Decimal(str(value))
+        result = Decimal(str(value))
+        if round_places is not None:
+            precision = _validate_precision(round_places)
+            quantizer = _get_quantizer(precision)
+            result = result.quantize(quantizer, rounding=ROUND_HALF_UP)
+        return result
     except (InvalidOperation, ValueError, TypeError) as e:
         if default is not None:
             logger.warning(f"Failed to convert {value} to Decimal: {e}, using default {default}")
@@ -94,10 +158,8 @@ def round_sol(value: Decimal, precision: int = 4) -> Decimal:
     Returns:
         Rounded Decimal
     """
-    if precision < 0:
-        raise ValueError(f"Precision must be non-negative, got {precision}")
-    
-    quantizer = Decimal(10) ** -precision
+    _validate_precision(precision)
+    quantizer = _get_quantizer(precision)
     return value.quantize(quantizer, rounding=ROUND_HALF_UP)
 
 
@@ -112,7 +174,8 @@ def round_price(value: Decimal, precision: int = 6) -> Decimal:
     Returns:
         Rounded price
     """
-    quantizer = Decimal(10) ** -precision
+    _validate_precision(precision)
+    quantizer = _get_quantizer(precision)
     return value.quantize(quantizer, rounding=ROUND_HALF_UP)
 
 
@@ -127,7 +190,8 @@ def round_percent(value: Decimal, precision: int = 2) -> Decimal:
     Returns:
         Rounded percentage
     """
-    quantizer = Decimal(10) ** -precision
+    _validate_precision(precision)
+    quantizer = _get_quantizer(precision)
     return value.quantize(quantizer, rounding=ROUND_HALF_UP)
 
 
@@ -142,7 +206,8 @@ def floor_sol(value: Decimal, precision: int = 4) -> Decimal:
     Returns:
         Floored Decimal
     """
-    quantizer = Decimal(10) ** -precision
+    _validate_precision(precision)
+    quantizer = _get_quantizer(precision)
     return value.quantize(quantizer, rounding=ROUND_DOWN)
 
 
@@ -198,8 +263,8 @@ def percentage_change(
     if old == 0:
         if new == 0:
             return Decimal('0')
-        # Infinite increase
-        return Decimal('999999') if new > 0 else Decimal('-999999')
+        logger.debug("Percentage change from zero; returning sentinel max percentage")
+        return MAX_PERCENTAGE if new > 0 else -MAX_PERCENTAGE
     
     change = ((new - old) / old) * 100
     return round_percent(change, precision)
@@ -224,6 +289,13 @@ def calculate_pnl(
     entry = to_decimal(entry_price)
     exit = to_decimal(exit_price)
     amt = to_decimal(amount)
+
+    if amt <= 0:
+        raise ValueError(f"Amount must be positive, got {amt}")
+    if entry <= 0:
+        raise ValueError(f"Entry price must be positive, got {entry}")
+    if exit < 0:
+        raise ValueError(f"Exit price cannot be negative, got {exit}")
     
     # For price multiplier trading:
     # If you buy at 2x and sell at 4x, you've doubled your money (100% gain)
@@ -473,3 +545,4 @@ PERCENT_75 = Decimal('0.75')
 # SOL precision
 SOL_PRECISION = 9  # Solana has 9 decimal places
 MIN_SOL_AMOUNT = Decimal('0.000000001')  # 1 lamport
+MAX_PERCENTAGE = Decimal('999999999')

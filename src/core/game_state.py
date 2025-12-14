@@ -12,10 +12,12 @@ from collections import defaultdict, deque
 import logging
 from enum import Enum
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
 # AUDIT FIX: Bounded history to prevent unbounded memory growth
-MAX_HISTORY_SIZE = 10000  # Max snapshots to keep
+MAX_HISTORY_SIZE = config.MEMORY.get('max_state_history', 1000)  # Configurable cap
 MAX_TRANSACTION_LOG_SIZE = 1000  # Max transactions to keep
 MAX_CLOSED_POSITIONS_SIZE = 500  # Max closed positions to keep
 
@@ -35,6 +37,7 @@ class StateEvents(Enum):
     PHASE_CHANGED = "phase_changed"
     BOT_ACTION = "bot_action"
     SELL_PERCENTAGE_CHANGED = "sell_percentage_changed"  # Phase 8.1
+    STATE_RECONCILED = "state_reconciled"  # Phase 11: Server state sync
 
 @dataclass
 class StateSnapshot:
@@ -166,7 +169,199 @@ class GameState:
                 'cooldown_timer': 0,  # Not tracked in state
                 'trade_count': 0,  # Not tracked in state
             })
-    
+
+    def capture_demo_snapshot(self, bet_amount: Decimal) -> 'DemoStateSnapshot':
+        """
+        Capture state snapshot for demo recording (Phase 10).
+
+        Returns models.demo_action.StateSnapshot with all state context
+        needed for imitation learning.
+
+        Args:
+            bet_amount: Current bet amount from UI (not tracked in GameState)
+
+        Returns:
+            StateSnapshot from models.demo_action (not core.game_state.StateSnapshot)
+        """
+        from models.demo_action import StateSnapshot as DemoStateSnapshot
+
+        with self._lock:
+            # Convert position to dict with string Decimals for JSON
+            position_dict = None
+            if self._state['position']:
+                pos = self._state['position']
+                position_dict = {
+                    'entry_price': str(pos.get('entry_price', Decimal('0'))),
+                    'amount': str(pos.get('amount', Decimal('0'))),
+                    'entry_tick': pos.get('entry_tick', 0),
+                    'entry_time': pos.get('entry_time'),
+                }
+
+            # Convert sidebet to dict with string Decimals for JSON
+            sidebet_dict = None
+            if self._state['sidebet']:
+                sb = self._state['sidebet']
+                sidebet_dict = {
+                    'amount': str(sb.get('amount', Decimal('0'))),
+                    'placed_tick': sb.get('placed_tick', 0),
+                    'placed_time': sb.get('placed_time'),
+                }
+
+            return DemoStateSnapshot(
+                balance=self._state['balance'],
+                position=position_dict,
+                sidebet=sidebet_dict,
+                bet_amount=bet_amount,
+                sell_percentage=self._state.get('sell_percentage', Decimal('1.0')),
+                current_tick=self._state.get('current_tick', 0),
+                current_price=self._state.get('current_price', Decimal('1.0')),
+                phase=self._state.get('current_phase', 'UNKNOWN'),
+            )
+
+    def capture_local_snapshot(self, bet_amount: Decimal) -> 'LocalStateSnapshot':
+        """
+        Capture state snapshot for Phase 10.6 validation-aware recording.
+
+        Returns LocalStateSnapshot with all state context needed for
+        zero-tolerance validation against server state.
+
+        Args:
+            bet_amount: Current bet amount from UI (not tracked in GameState)
+
+        Returns:
+            LocalStateSnapshot from models.recording_models
+        """
+        from models.recording_models import LocalStateSnapshot
+
+        with self._lock:
+            # Get position details
+            position_qty = Decimal('0')
+            position_entry_price = None
+            position_pnl = None
+
+            if self._state['position']:
+                pos = self._state['position']
+                position_qty = pos.get('amount', Decimal('0'))
+                position_entry_price = pos.get('entry_price')
+                # Calculate PnL if we have entry price and current price
+                if position_entry_price and self._state.get('current_price'):
+                    current_price = self._state['current_price']
+                    position_pnl = (current_price - position_entry_price) * position_qty
+
+            # Get sidebet details
+            sidebet_active = False
+            sidebet_amount = None
+
+            if self._state['sidebet']:
+                sb = self._state['sidebet']
+                sidebet_active = True
+                sidebet_amount = sb.get('amount', Decimal('0'))
+
+            return LocalStateSnapshot(
+                balance=self._state['balance'],
+                position_qty=position_qty,
+                position_entry_price=position_entry_price,
+                position_pnl=position_pnl,
+                sidebet_active=sidebet_active,
+                sidebet_amount=sidebet_amount,
+                bet_amount=bet_amount,
+                sell_percentage=self._state.get('sell_percentage', Decimal('1.0')),
+                current_tick=self._state.get('current_tick', 0),
+                current_price=self._state.get('current_price', Decimal('1.0')),
+                phase=self._state.get('current_phase', 'UNKNOWN'),
+            )
+
+    # ========== Phase 11: Server State Reconciliation ==========
+
+    def reconcile_with_server(self, server_state: 'ServerState') -> Dict[str, Any]:
+        """
+        Reconcile local state with server truth (Phase 11).
+
+        The server (playerUpdate WebSocket event) is the source of truth.
+        This method updates local state to match server and returns any drift detected.
+
+        Args:
+            server_state: ServerState object from WebSocket playerUpdate
+
+        Returns:
+            Dict of any drift detected: {'field': {'local': x, 'server': y}}
+        """
+        from models.recording_models import ServerState
+
+        drifts = {}
+        with self._lock:
+            # Balance reconciliation
+            server_cash = server_state.cash
+            local_balance = self._state['balance']
+            if local_balance != server_cash:
+                drifts['balance'] = {
+                    'local': local_balance,
+                    'server': server_cash,
+                    'diff': abs(local_balance - server_cash)
+                }
+                self._state['balance'] = server_cash
+                logger.info(f"Balance reconciled: {local_balance} -> {server_cash}")
+
+            # Position reconciliation
+            server_position_qty = server_state.position_qty
+            server_avg_cost = server_state.avg_cost
+
+            if server_position_qty == Decimal('0'):
+                # Server says no position
+                if self._state['position'] and self._state['position'].get('status') == 'active':
+                    drifts['position'] = {
+                        'local': 'active',
+                        'server': 'none',
+                        'local_qty': self._state['position'].get('amount', Decimal('0'))
+                    }
+                    self._state['position'] = None
+                    logger.info("Position reconciled: closed (server has no position)")
+            else:
+                # Server says we have a position
+                if not self._state['position'] or self._state['position'].get('status') != 'active':
+                    # Local has no position but server does - create one
+                    self._state['position'] = {
+                        'entry_price': server_avg_cost,
+                        'amount': server_position_qty,
+                        'entry_tick': self._state.get('current_tick', 0),
+                        'status': 'active'
+                    }
+                    drifts['position'] = {
+                        'local': 'none',
+                        'server': 'active',
+                        'server_qty': server_position_qty
+                    }
+                    logger.info(f"Position reconciled: opened from server (qty={server_position_qty})")
+                else:
+                    # Both have position - check for qty/price drift
+                    local_qty = self._state['position'].get('amount', Decimal('0'))
+                    local_entry = self._state['position'].get('entry_price', Decimal('0'))
+
+                    if local_qty != server_position_qty:
+                        drifts['position_qty'] = {
+                            'local': local_qty,
+                            'server': server_position_qty,
+                            'diff': abs(local_qty - server_position_qty)
+                        }
+                        self._state['position']['amount'] = server_position_qty
+                        logger.info(f"Position qty reconciled: {local_qty} -> {server_position_qty}")
+
+                    if local_entry != server_avg_cost and server_avg_cost > 0:
+                        drifts['entry_price'] = {
+                            'local': local_entry,
+                            'server': server_avg_cost,
+                            'diff': abs(local_entry - server_avg_cost)
+                        }
+                        self._state['position']['entry_price'] = server_avg_cost
+                        logger.info(f"Entry price reconciled: {local_entry} -> {server_avg_cost}")
+
+        # Emit event outside lock to prevent deadlocks
+        if drifts:
+            self._emit(StateEvents.STATE_RECONCILED, drifts)
+            logger.warning(f"State drift detected and reconciled: {list(drifts.keys())}")
+
+        return drifts
+
     # ========== State Mutation Methods ==========
     
     def update(self, **kwargs) -> bool:

@@ -37,7 +37,12 @@ class ConservativeStrategy(TradingStrategy):
         """Make conservative trading decision"""
 
         if not observation:
-            return ("WAIT", None, "No game state available")
+            return self._validate_action(
+                "WAIT",
+                None,
+                "No game state available",
+                info.get("valid_actions", [])
+            )
 
         # Extract state
         state = observation['current_state']
@@ -48,11 +53,15 @@ class ConservativeStrategy(TradingStrategy):
         price = Decimal(str(state['price']))
         tick = state['tick']
         balance = Decimal(str(wallet['balance']))
+        valid_actions = info.get("valid_actions", [])
+
+        def decide_action(action: str, amount: Optional[Decimal], reasoning: str):
+            return self._validate_action(action, amount, reasoning, valid_actions)
 
         # No position - look to buy at good price
         if position is None and info['can_buy']:
             if price < self.BUY_THRESHOLD and balance >= self.BUY_AMOUNT:
-                return (
+                return decide_action(
                     "BUY",
                     self.BUY_AMOUNT,
                     f"Entry at {price:.2f}x (low price, good entry point)"
@@ -64,7 +73,7 @@ class ConservativeStrategy(TradingStrategy):
 
             # Take profit at 20%
             if pnl_pct > self.TAKE_PROFIT:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"Take profit at +{pnl_pct:.1f}% (target: {self.TAKE_PROFIT}%)"
@@ -72,7 +81,7 @@ class ConservativeStrategy(TradingStrategy):
 
             # Cut losses at -15%
             if pnl_pct < self.STOP_LOSS:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"Stop loss at {pnl_pct:.1f}% (limit: {self.STOP_LOSS}%)"
@@ -80,7 +89,7 @@ class ConservativeStrategy(TradingStrategy):
 
             # Emergency exit if price too high (bubble risk)
             if price > self.BUBBLE_EXIT:
-                return (
+                return decide_action(
                     "SELL",
                     None,
                     f"Exit at {price:.2f}x (bubble risk, take gains)"
@@ -89,7 +98,7 @@ class ConservativeStrategy(TradingStrategy):
         # Place sidebet conservatively (late game only)
         if sidebet is None and info['can_sidebet']:
             if tick > self.SIDEBET_TICK and balance >= self.SIDEBET_AMOUNT:
-                return (
+                return decide_action(
                     "SIDE",
                     self.SIDEBET_AMOUNT,
                     f"Sidebet at tick {tick} (late game rug risk)"
@@ -98,13 +107,13 @@ class ConservativeStrategy(TradingStrategy):
         # Default: wait
         if position:
             pnl_pct = Decimal(str(position['current_pnl_percent']))
-            return (
+            return decide_action(
                 "WAIT",
                 None,
                 f"Holding position (Price: {price:.2f}x, P&L: {pnl_pct:.1f}%)"
             )
         else:
-            return (
+            return decide_action(
                 "WAIT",
                 None,
                 f"Waiting for entry (Price: {price:.2f}x too high)"

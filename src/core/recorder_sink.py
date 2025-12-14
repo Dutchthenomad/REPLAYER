@@ -70,6 +70,7 @@ class RecorderSink:
         self.tick_count = 0
         self.error_count = 0
         self.max_errors = 5  # Stop recording after this many errors
+        self._flushing = False
         
         # Performance metrics
         self.total_bytes_written = 0
@@ -257,11 +258,9 @@ class RecorderSink:
             if len(self.buffer) >= self.max_buffer_size:
                 logger.error(f"Buffer overflow detected ({len(self.buffer)}/{self.max_buffer_size}), forcing emergency flush")
                 try:
-                    with self._safe_file_operation():
-                        self._flush()
+                    self._emergency_flush()
                 except Exception as e:
                     logger.error(f"Emergency flush failed: {e}")
-                    # If emergency flush fails, we're in trouble - stop recording
                     self.stop_recording()
                     return False
 
@@ -445,7 +444,22 @@ class RecorderSink:
                 self.error_count = 0
                 self.total_bytes_written = 0
 
-            return summary
+        return summary
+
+    def _emergency_flush(self):
+        """Non-blocking emergency flush - drops oldest if already flushing"""
+        if self._flushing:
+            drop_count = max(1, len(self.buffer) // 4)
+            del self.buffer[:drop_count]
+            logger.warning(f"Emergency flush: dropped {drop_count} oldest ticks while flushing")
+            return
+
+        self._flushing = True
+        try:
+            with self._safe_file_operation():
+                self._flush()
+        finally:
+            self._flushing = False
 
     def is_recording(self) -> bool:
         """Check if currently recording"""
