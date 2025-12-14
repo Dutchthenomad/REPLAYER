@@ -19,6 +19,10 @@ from debug.raw_capture_recorder import RawCaptureRecorder  # Raw capture debug t
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
 from ui.tk_dispatcher import TkDispatcher
+from ui.builders import (  # Phase Issue-4: Extracted builders
+    MenuBarBuilder, StatusBarBuilder, ChartBuilder,
+    PlaybackBuilder, BettingBuilder, ActionBuilder
+)
 from ui.bot_config_panel import BotConfigPanel  # Phase 8.4
 from ui.balance_edit_dialog import BalanceUnlockDialog, BalanceRelockDialog, BalanceEditEntry
 from bot import BotInterface, BotController, list_strategies
@@ -154,230 +158,58 @@ class MainWindow:
         logger.info("MainWindow initialized with ReplayEngine and async bot executor")
 
     def _create_menu_bar(self):
-        """Create menu bar for additional functionality"""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        """Create menu bar using MenuBarBuilder (Phase Issue-4: Extracted)"""
+        # Callbacks dictionary - uses lambdas to defer controller access
+        callbacks = {
+            'load_file': lambda: self.replay_controller.load_file_dialog() if hasattr(self, 'replay_controller') else None,
+            'exit_app': self.root.quit,
+            'toggle_playback': lambda: self.replay_controller.toggle_play_pause() if hasattr(self, 'replay_controller') else None,
+            'reset_game': lambda: self.replay_controller.reset_game() if hasattr(self, 'replay_controller') else None,
+            'show_recording_config': self._show_recording_config,
+            'stop_recording': self._stop_recording_session,
+            'toggle_recording': lambda: self.replay_controller.toggle_recording() if hasattr(self, 'replay_controller') else None,
+            'open_recordings_folder': lambda: self.replay_controller.open_recordings_folder() if hasattr(self, 'replay_controller') else None,
+            'show_recording_status': self._show_recording_status,
+            'start_demo_session': self._start_demo_session,
+            'end_demo_session': self._end_demo_session,
+            'start_demo_game': self._start_demo_game,
+            'end_demo_game': self._end_demo_game,
+            'show_demo_status': self._show_demo_status,
+            'toggle_bot': lambda: self.bot_manager.toggle_bot_from_menu() if hasattr(self, 'bot_manager') else None,
+            'show_bot_config': lambda: self.root.after(0, self.bot_manager.show_bot_config) if hasattr(self, 'bot_manager') else None,
+            'show_timing_metrics': lambda: self.root.after(0, self.bot_manager.show_timing_metrics) if hasattr(self, 'bot_manager') else None,
+            'toggle_timing_overlay': lambda: self.bot_manager.toggle_timing_overlay() if hasattr(self, 'bot_manager') else None,
+            'toggle_live_feed': lambda: self.live_feed_controller.toggle_live_feed_from_menu() if hasattr(self, 'live_feed_controller') else None,
+            'connect_browser': lambda: self.root.after(0, self.browser_bridge_controller.connect_browser_bridge) if hasattr(self, 'browser_bridge_controller') else None,
+            'disconnect_browser': lambda: self.root.after(0, self.browser_bridge_controller.disconnect_browser_bridge) if hasattr(self, 'browser_bridge_controller') else None,
+            'change_theme': self._change_theme,
+            'set_ui_style': self._set_ui_style,
+            'toggle_raw_capture': self._toggle_raw_capture,
+            'analyze_capture': self._analyze_last_capture,
+            'open_captures_folder': self._open_captures_folder,
+            'show_capture_status': self._show_capture_status,
+            'show_about': self._show_about,
+        }
 
-        # File Menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Open Recording...", command=lambda: self.replay_controller.load_file_dialog() if hasattr(self, 'replay_controller') else None)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.quit)
+        # Variables for checkbutton menus
+        variables = {
+            'recording_var': self.recording_var,
+            'bot_var': self.bot_var,
+            'live_feed_var': self.live_feed_var,
+            'timing_overlay_var': self.timing_overlay_var,
+        }
 
-        # Playback Menu
-        playback_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Playback", menu=playback_menu)
-        playback_menu.add_command(label="Play/Pause", command=lambda: self.replay_controller.toggle_play_pause() if hasattr(self, 'replay_controller') else None)
-        playback_menu.add_command(label="Stop", command=lambda: self.replay_controller.reset_game() if hasattr(self, 'replay_controller') else None)
+        # Build menu bar
+        builder = MenuBarBuilder(self.root, callbacks, variables)
+        menubar, refs = builder.build()
 
-        # Recording Menu
-        recording_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Recording", menu=recording_menu)
-
-        # Phase 10.5: Unified Recording Session
-        recording_menu.add_command(
-            label="Configure & Start Recording...",
-            command=self._show_recording_config
-        )
-        recording_menu.add_command(
-            label="Stop Recording",
-            command=self._stop_recording_session
-        )
-        recording_menu.add_separator()
-
-        # Recording toggle - tracks replay_engine.auto_recording state (variable created in _create_ui())
-        recording_menu.add_checkbutton(
-            label="Enable Auto-Recording (Legacy)",
-            variable=self.recording_var,
-            command=lambda: self.replay_controller.toggle_recording() if hasattr(self, 'replay_controller') else None
-        )
-        recording_menu.add_separator()
-        recording_menu.add_command(label="Open Recordings Folder", command=lambda: self.replay_controller.open_recordings_folder() if hasattr(self, 'replay_controller') else None)
-        recording_menu.add_command(label="Show Recording Status", command=self._show_recording_status)
-
-        # Phase 10: Demo Recording submenu (legacy - kept for backwards compatibility)
-        demo_menu = tk.Menu(recording_menu, tearoff=0)
-        recording_menu.add_cascade(label="Demo Recording (Legacy)", menu=demo_menu)
-        demo_menu.add_command(label="Start Session", command=self._start_demo_session)
-        demo_menu.add_command(label="End Session", command=self._end_demo_session)
-        demo_menu.add_separator()
-        demo_menu.add_command(label="Start Game", command=self._start_demo_game)
-        demo_menu.add_command(label="End Game", command=self._end_demo_game)
-        demo_menu.add_separator()
-        demo_menu.add_command(label="Show Status", command=self._show_demo_status)
-
-        # Bot Menu
-        bot_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Bot", menu=bot_menu)
-
-        # bot_var created in _create_ui()
-        bot_menu.add_checkbutton(
-            label="Enable Bot",
-            variable=self.bot_var,
-            command=self.bot_manager.toggle_bot_from_menu
-        )
-
-        # Phase 8.4: Add configuration menu item
-        bot_menu.add_separator()
-        bot_menu.add_command(
-            label="Configuration...",
-            command=lambda: self.root.after(0, self.bot_manager.show_bot_config)
-        )
-
-        # Phase 8.6: Add timing metrics menu item
-        bot_menu.add_command(
-            label="Timing Metrics...",
-            command=lambda: self.root.after(0, self.bot_manager.show_timing_metrics)
-        )
-
-        # Phase A: Add timing overlay toggle (variable created in _create_ui())
-        bot_menu.add_separator()
-        bot_menu.add_checkbutton(
-            label="Show Timing Overlay",
-            variable=self.timing_overlay_var,
-            command=self.bot_manager.toggle_timing_overlay
-        )
-
-        # Live Feed Menu
-        live_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Live Feed", menu=live_menu)
-
-        # live_feed_var created in _create_ui()
-        live_menu.add_checkbutton(
-            label="Connect to Live Feed",
-            variable=self.live_feed_var,
-            command=lambda: self.live_feed_controller.toggle_live_feed_from_menu()
-        )
-
-        # ========== BROWSER MENU (Phase 9.3: CDP Bridge) ==========
-        browser_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Browser", menu=browser_menu)
-
-        # Phase 9.3: Browser Bridge menu (uses CDP connection)
-        browser_menu.add_command(
-            label="Connect to Browser",
-            command=lambda: self.root.after(0, self.browser_bridge_controller.connect_browser_bridge)
-        )
-
-        browser_menu.add_separator()
-
-        # Status indicators (disabled, display only)
-        browser_menu.add_command(
-            label="⚫ Status: Disconnected",
-            state=tk.DISABLED
-        )
-
-        browser_menu.add_command(
-            label="Profile: rugs_bot",
-            state=tk.DISABLED
-        )
-
-        browser_menu.add_separator()
-
-        # Disconnect command (initially disabled)
-        browser_menu.add_command(
-            label="Disconnect Browser",
-            command=lambda: self.root.after(0, self.browser_bridge_controller.disconnect_browser_bridge),
-            state=tk.DISABLED
-        )
-
-        # Store menu references for status updates
-        self.browser_menu = browser_menu
-        self.browser_status_item_index = 2  # "⚫ Status: Disconnected"
-        self.browser_disconnect_item_index = 5  # "Disconnect Browser"
-        self.browser_connect_item_index = 0  # "Connect to Browser"
-
-        # View Menu (Phase 3: UI Theming)
-        view_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="View", menu=view_menu)
-
-        # Theme submenu with submenus for dark/light categories
-        theme_menu = tk.Menu(view_menu, tearoff=0)
-        view_menu.add_cascade(label="Theme", menu=theme_menu)
-
-        # Dark themes submenu
-        dark_theme_menu = tk.Menu(theme_menu, tearoff=0)
-        theme_menu.add_cascade(label="Dark Themes", menu=dark_theme_menu)
-
-        dark_themes = [
-            ('cyborg', 'Cyborg - Neon gaming style'),
-            ('darkly', 'Darkly - Professional dark'),
-            ('superhero', 'Superhero - Bold & vibrant'),
-            ('solar', 'Solar - Warm dark theme'),
-            ('vapor', 'Vapor - Vaporwave aesthetic'),
-        ]
-
-        for theme_id, theme_label in dark_themes:
-            dark_theme_menu.add_command(
-                label=theme_label,
-                command=lambda t=theme_id: self._change_theme(t)
-            )
-
-        # Light themes submenu
-        light_theme_menu = tk.Menu(theme_menu, tearoff=0)
-        theme_menu.add_cascade(label="Light Themes", menu=light_theme_menu)
-
-        light_themes = [
-            ('cosmo', 'Cosmo - Professional blue'),
-            ('flatly', 'Flatly - Modern flat design'),
-            ('litera', 'Litera - Clean serif style'),
-            ('minty', 'Minty - Fresh green accent'),
-            ('lumen', 'Lumen - Bright & clean'),
-            ('sandstone', 'Sandstone - Warm earth tones'),
-            ('yeti', 'Yeti - Cool blue minimal'),
-            ('pulse', 'Pulse - Vibrant purple'),
-            ('united', 'United - Ubuntu-inspired'),
-            ('morph', 'Morph - Soft neumorphic'),
-            ('journal', 'Journal - Serif elegant'),
-            ('simplex', 'Simplex - Minimalist clean'),
-            ('cerculean', 'Cerculean - Sky blue fresh'),
-        ]
-
-        for theme_id, theme_label in light_themes:
-            light_theme_menu.add_command(
-                label=theme_label,
-                command=lambda t=theme_id: self._change_theme(t)
-            )
-
-        # UI Style submenu (Phase: Modern UI)
-        view_menu.add_separator()
-        ui_style_menu = tk.Menu(view_menu, tearoff=0)
-        view_menu.add_cascade(label="UI Style", menu=ui_style_menu)
-        ui_style_menu.add_command(label="Standard ✓", state=tk.DISABLED)
-        ui_style_menu.add_command(label="Modern (Game-Like)", command=lambda: self._set_ui_style('modern'))
-
-        # ========== DEVELOPER TOOLS MENU (Raw Capture Debug) ==========
-        dev_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Developer Tools", menu=dev_menu)
-
-        # Raw capture toggle (changes text based on state)
-        dev_menu.add_command(
-            label="Start Raw Capture",
-            command=self._toggle_raw_capture
-        )
-        self.dev_menu = dev_menu
-        self.dev_capture_item_index = 0  # Index of "Start/Stop Raw Capture"
-
-        dev_menu.add_separator()
-        dev_menu.add_command(
-            label="Analyze Last Capture",
-            command=self._analyze_last_capture
-        )
-        dev_menu.add_command(
-            label="Open Captures Folder",
-            command=self._open_captures_folder
-        )
-        dev_menu.add_separator()
-        dev_menu.add_command(
-            label="Show Capture Status",
-            command=self._show_capture_status
-        )
-
-        # Help Menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="About", command=self._show_about)
+        # Store menu references for dynamic updates
+        self.browser_menu = refs['browser_menu']
+        self.dev_menu = refs['dev_menu']
+        self.browser_status_item_index = refs['browser_status_item_index']
+        self.browser_disconnect_item_index = refs['browser_disconnect_item_index']
+        self.browser_connect_item_index = refs['browser_connect_item_index']
+        self.dev_capture_item_index = refs['dev_capture_item_index']
 
     def _create_ui(self):
         """Create UI matching the user's mockup design"""
@@ -389,261 +221,58 @@ class MainWindow:
         self.live_feed_var = tk.BooleanVar(value=self.live_feed_connected)
         self.timing_overlay_var = tk.BooleanVar(value=False)  # Hidden by default
 
-        # ========== ROW 1: STATUS BAR (minimal height) ==========
-        status_bar = tk.Frame(self.root, bg='#000000', height=30)
-        status_bar.pack(fill=tk.X)
-        status_bar.pack_propagate(False)  # Fixed height
+        # ========== ROW 1: STATUS BAR (Phase Issue-4: Using builder) ==========
+        status_widgets = StatusBarBuilder(self.root).build()
+        self.tick_label = status_widgets['tick_label']
+        self.price_label = status_widgets['price_label']
+        self.phase_label = status_widgets['phase_label']
+        self.player_profile_label = status_widgets['player_profile_label']
+        self.browser_status_label = status_widgets['browser_status_label']
 
-        # Tick (left)
-        self.tick_label = tk.Label(
-            status_bar,
-            text="TICK: 0",
-            font=('Arial', 11, 'bold'),
-            bg='#000000',
-            fg='white'
-        )
-        self.tick_label.pack(side=tk.LEFT, padx=10)
+        # ========== ROW 2: CHART AREA (Phase Issue-4: Using builder) ==========
+        chart_widgets = ChartBuilder(self.root).build()
+        self.chart = chart_widgets['chart']
 
-        # Price (center-left)
-        self.price_label = tk.Label(
-            status_bar,
-            text="PRICE: 1.0000 X",
-            font=('Arial', 11, 'bold'),
-            bg='#000000',
-            fg='white'
-        )
-        self.price_label.pack(side=tk.LEFT, padx=20)
+        # ========== ROW 3: PLAYBACK CONTROLS (Phase Issue-4: Using builder) ==========
+        playback_callbacks = {
+            'load_game': lambda: self.replay_controller.load_game() if hasattr(self, 'replay_controller') else None,
+            'toggle_playback': lambda: self.replay_controller.toggle_playback() if hasattr(self, 'replay_controller') else None,
+            'step_forward': lambda: self.replay_controller.step_forward() if hasattr(self, 'replay_controller') else None,
+            'reset_game': lambda: self.replay_controller.reset_game() if hasattr(self, 'replay_controller') else None,
+            'set_speed': lambda s: self.replay_controller.set_playback_speed(s) if hasattr(self, 'replay_controller') else None,
+        }
+        playback_widgets = PlaybackBuilder(self.root, playback_callbacks).build()
+        self.load_button = playback_widgets['load_button']
+        self.play_button = playback_widgets['play_button']
+        self.step_button = playback_widgets['step_button']
+        self.reset_button = playback_widgets['reset_button']
+        self.speed_label = playback_widgets['speed_label']
 
-        # Phase (right)
-        self.phase_label = tk.Label(
-            status_bar,
-            text="PHASE: UNKNOWN",
-            font=('Arial', 11, 'bold'),
-            bg='#000000',
-            fg='white'
-        )
-        self.phase_label.pack(side=tk.RIGHT, padx=10)
-
-        # Phase 10.8: Player profile label (shows authenticated username)
-        self.player_profile_label = tk.Label(
-            status_bar,
-            text="👤 Not Authenticated",
-            font=('Arial', 10, 'bold'),
-            bg='#000000',
-            fg='#666666'  # Gray when not authenticated
-        )
-        self.player_profile_label.pack(side=tk.RIGHT, padx=15)
-
-        # Browser status (right) - Phase 8.5
-        self.browser_status_label = tk.Label(
-            status_bar,
-            text="BROWSER: ⚫ Not Connected",
-            font=('Arial', 9),
-            bg='#000000',
-            fg='#888888'  # Gray when disconnected
-        )
-        self.browser_status_label.pack(side=tk.RIGHT, padx=10)
-
-        # ========== ROW 2: CHART AREA (expands to fill) ==========
-        chart_container = tk.Frame(self.root, bg='#0a0a0a')
-        chart_container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-        # Chart widget (MAXIMIZED - no fixed dimensions)
-        self.chart = ChartWidget(chart_container)
-        self.chart.pack(fill=tk.BOTH, expand=True)
-
-        # Zoom controls (overlaid at bottom-left of chart)
-        zoom_overlay = tk.Frame(chart_container, bg='#2a2a2a')
-        zoom_overlay.place(x=10, y=10, anchor='nw')
-
-        tk.Button(
-            zoom_overlay,
-            text="+ ZOOM IN",
-            command=self.chart.zoom_in,
-            bg='#333333',
-            fg='white',
-            font=('Arial', 9),
-            bd=1,
-            relief=tk.RAISED
-        ).pack(side=tk.LEFT, padx=2)
-
-        tk.Button(
-            zoom_overlay,
-            text="+ ZOOM OUT",
-            command=self.chart.zoom_out,
-            bg='#333333',
-            fg='white',
-            font=('Arial', 9),
-            bd=1,
-            relief=tk.RAISED
-        ).pack(side=tk.LEFT, padx=2)
-
-        tk.Button(
-            zoom_overlay,
-            text="RESET ZOOM",
-            command=self.chart.reset_zoom,
-            bg='#333333',
-            fg='white',
-            font=('Arial', 9),
-            bd=1,
-            relief=tk.RAISED
-        ).pack(side=tk.LEFT, padx=2)
-
-        # ========== ROW 3: PLAYBACK CONTROLS ==========
-        playback_row = tk.Frame(self.root, bg='#1a1a1a', height=40)
-        playback_row.pack(fill=tk.X)
-        playback_row.pack_propagate(False)
-
-        # Left side - playback buttons
-        playback_left = tk.Frame(playback_row, bg='#1a1a1a')
-        playback_left.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        btn_style = {'font': ('Arial', 10), 'width': 12, 'bd': 1, 'relief': tk.RAISED}
-
-        self.load_button = tk.Button(
-            playback_left,
-            text="LOAD GAME",
-            command=lambda: self.replay_controller.load_game() if hasattr(self, 'replay_controller') else None,
-            bg='#444444',
-            fg='white',
-            **btn_style
-        )
-        self.load_button.pack(side=tk.LEFT, padx=5)
-
-        self.play_button = tk.Button(
-            playback_left,
-            text="PLAY",
-            command=lambda: self.replay_controller.toggle_playback() if hasattr(self, 'replay_controller') else None,
-            bg='#444444',
-            fg='white',
-            state=tk.DISABLED,
-            **btn_style
-        )
-        self.play_button.pack(side=tk.LEFT, padx=5)
-
-        self.step_button = tk.Button(
-            playback_left,
-            text="STEP",
-            command=lambda: self.replay_controller.step_forward() if hasattr(self, 'replay_controller') else None,
-            bg='#444444',
-            fg='white',
-            state=tk.DISABLED,
-            **btn_style
-        )
-        self.step_button.pack(side=tk.LEFT, padx=5)
-
-        self.reset_button = tk.Button(
-            playback_left,
-            text="RESET",
-            command=lambda: self.replay_controller.reset_game() if hasattr(self, 'replay_controller') else None,
-            bg='#444444',
-            fg='white',
-            state=tk.DISABLED,
-            **btn_style
-        )
-        self.reset_button.pack(side=tk.LEFT, padx=5)
-
-        # Right side - playback speed controls
-        speed_frame = tk.Frame(playback_row, bg='#1a1a1a')
-        speed_frame.pack(side=tk.RIGHT, padx=10)
-
-        self.speed_label = tk.Label(
-            speed_frame,
-            text="SPEED: 1.0X",
-            font=('Arial', 10, 'bold'),
-            bg='#1a1a1a',
-            fg='white'
-        )
-        self.speed_label.pack(side=tk.LEFT, padx=5)
-
-        # Speed buttons
-        speed_btn_style = {'font': ('Arial', 8), 'width': 5, 'bd': 1, 'relief': tk.RAISED}
-        tk.Button(speed_frame, text="0.25x", command=lambda: self.replay_controller.set_playback_speed(0.25) if hasattr(self, 'replay_controller') else None, bg='#333333', fg='white', **speed_btn_style).pack(side=tk.LEFT, padx=1)
-        tk.Button(speed_frame, text="0.5x", command=lambda: self.replay_controller.set_playback_speed(0.5) if hasattr(self, 'replay_controller') else None, bg='#333333', fg='white', **speed_btn_style).pack(side=tk.LEFT, padx=1)
-        tk.Button(speed_frame, text="1x", command=lambda: self.replay_controller.set_playback_speed(1.0) if hasattr(self, 'replay_controller') else None, bg='#444444', fg='white', **speed_btn_style).pack(side=tk.LEFT, padx=1)
-        tk.Button(speed_frame, text="2x", command=lambda: self.replay_controller.set_playback_speed(2.0) if hasattr(self, 'replay_controller') else None, bg='#333333', fg='white', **speed_btn_style).pack(side=tk.LEFT, padx=1)
-        tk.Button(speed_frame, text="5x", command=lambda: self.replay_controller.set_playback_speed(5.0) if hasattr(self, 'replay_controller') else None, bg='#333333', fg='white', **speed_btn_style).pack(side=tk.LEFT, padx=1)
-
-        # ========== ROW 4: BET AMOUNT CONTROLS ==========
-        bet_row = tk.Frame(self.root, bg='#1a1a1a', height=40)
-        bet_row.pack(fill=tk.X)
-        bet_row.pack_propagate(False)
-
-        # Left - bet amount display
-        bet_left = tk.Frame(bet_row, bg='#1a1a1a')
-        bet_left.pack(side=tk.LEFT, padx=10)
-
-        self.bet_entry = tk.Entry(
-            bet_left,
-            bg='#000000',
-            fg='white',
-            font=('Arial', 14, 'bold'),
-            width=8,
-            bd=1,
-            relief=tk.SOLID,
-            justify=tk.RIGHT
-        )
-        self.bet_entry.pack(side=tk.LEFT)
-        self.bet_entry.insert(0, str(self.config.FINANCIAL['default_bet']))
-
-        tk.Label(bet_left, text="SOL", bg='#1a1a1a', fg='white', font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
-
-        # Center - bet adjustment buttons
-        bet_center = tk.Frame(bet_row, bg='#1a1a1a')
-        bet_center.pack(side=tk.LEFT, padx=10)
-
-        bet_btn_style = {'font': ('Arial', 9), 'width': 6, 'bd': 1, 'relief': tk.RAISED}
-
-        # Store button references for BotUIController access (Phase A.2)
-        self.clear_button = tk.Button(bet_center, text="X", command=lambda: self.trading_controller.clear_bet_amount() if hasattr(self, 'trading_controller') else None, bg='#333333', fg='white', **bet_btn_style)
-        self.clear_button.pack(side=tk.LEFT, padx=2)
-
-        self.increment_001_button = tk.Button(bet_center, text="+0.001", command=lambda: self.trading_controller.increment_bet_amount(Decimal('0.001')) if hasattr(self, 'trading_controller') else None, bg='#333333', fg='white', **bet_btn_style)
-        self.increment_001_button.pack(side=tk.LEFT, padx=2)
-
-        self.increment_01_button = tk.Button(bet_center, text="+0.01", command=lambda: self.trading_controller.increment_bet_amount(Decimal('0.01')) if hasattr(self, 'trading_controller') else None, bg='#333333', fg='white', **bet_btn_style)
-        self.increment_01_button.pack(side=tk.LEFT, padx=2)
-
-        self.increment_10_button = tk.Button(bet_center, text="+0.1", command=lambda: self.trading_controller.increment_bet_amount(Decimal('0.1')) if hasattr(self, 'trading_controller') else None, bg='#333333', fg='white', **bet_btn_style)
-        self.increment_10_button.pack(side=tk.LEFT, padx=2)
-
-        self.increment_1_button = tk.Button(bet_center, text="+1", command=lambda: self.trading_controller.increment_bet_amount(Decimal('1')) if hasattr(self, 'trading_controller') else None, bg='#333333', fg='white', **bet_btn_style)
-        self.increment_1_button.pack(side=tk.LEFT, padx=2)
-
-        self.half_button = tk.Button(bet_center, text="1/2", command=lambda: self.trading_controller.half_bet_amount() if hasattr(self, 'trading_controller') else None, bg='#333333', fg='white', **bet_btn_style)
-        self.half_button.pack(side=tk.LEFT, padx=2)
-
-        self.double_button = tk.Button(bet_center, text="X2", command=lambda: self.trading_controller.double_bet_amount() if hasattr(self, 'trading_controller') else None, bg='#333333', fg='white', **bet_btn_style)
-        self.double_button.pack(side=tk.LEFT, padx=2)
-
-        self.max_button = tk.Button(bet_center, text="MAX", command=lambda: self.trading_controller.max_bet_amount() if hasattr(self, 'trading_controller') else None, bg='#333333', fg='white', **bet_btn_style)
-        self.max_button.pack(side=tk.LEFT, padx=2)
-
-        # Right - wallet balance + lock control
-        balance_container = tk.Frame(bet_row, bg='#1a1a1a')
-        balance_container.pack(side=tk.RIGHT, padx=5)
-
-        self.balance_lock_button = tk.Button(
-            balance_container,
-            text="🔒",
-            command=self._toggle_balance_lock,
-            bg='#333333',
-            fg='white',
-            font=('Arial', 10, 'bold'),
-            bd=1,
-            relief=tk.RAISED,
-            width=3
-        )
-        self.balance_lock_button.pack(side=tk.RIGHT, padx=4)
-
-        self.balance_label = tk.Label(
-            balance_container,
-            text=f"WALLET: {self.state.get('balance'):.3f}",
-            font=('Arial', 11, 'bold'),
-            bg='#1a1a1a',
-            fg='#ffcc00'
-        )
-        self.balance_label.pack(side=tk.RIGHT, padx=4)
+        # ========== ROW 4: BET AMOUNT CONTROLS (Phase Issue-4: Using builder) ==========
+        bet_callbacks = {
+            'clear_bet': lambda: self.trading_controller.clear_bet_amount() if hasattr(self, 'trading_controller') else None,
+            'increment_bet': lambda a: self.trading_controller.increment_bet_amount(a) if hasattr(self, 'trading_controller') else None,
+            'half_bet': lambda: self.trading_controller.half_bet_amount() if hasattr(self, 'trading_controller') else None,
+            'double_bet': lambda: self.trading_controller.double_bet_amount() if hasattr(self, 'trading_controller') else None,
+            'max_bet': lambda: self.trading_controller.max_bet_amount() if hasattr(self, 'trading_controller') else None,
+            'toggle_balance_lock': self._toggle_balance_lock,
+        }
+        bet_widgets = BettingBuilder(
+            self.root, bet_callbacks,
+            Decimal(str(self.config.FINANCIAL['default_bet'])),
+            self.state.get('balance')
+        ).build()
+        self.bet_entry = bet_widgets['bet_entry']
+        self.clear_button = bet_widgets['clear_button']
+        self.increment_001_button = bet_widgets['increment_001_button']
+        self.increment_01_button = bet_widgets['increment_01_button']
+        self.increment_10_button = bet_widgets['increment_10_button']
+        self.increment_1_button = bet_widgets['increment_1_button']
+        self.half_button = bet_widgets['half_button']
+        self.double_button = bet_widgets['double_button']
+        self.max_button = bet_widgets['max_button']
+        self.balance_label = bet_widgets['balance_label']
+        self.balance_lock_button = bet_widgets['balance_lock_button']
 
         # ========== ROW 5: ACTION BUTTONS ==========
         action_row = tk.Frame(self.root, bg='#1a1a1a', height=80)
