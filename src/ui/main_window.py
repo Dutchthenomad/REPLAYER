@@ -18,7 +18,7 @@ from core.demo_recorder import DemoRecorderSink  # Phase 10
 from debug.raw_capture_recorder import RawCaptureRecorder  # Raw capture debug tool
 from models import GameTick
 from ui.widgets import ChartWidget, ToastNotification
-from ui.tk_dispatcher import TkDispatcher
+from services.ui_dispatcher import TkDispatcher  # Phase 1: Moved to services
 from ui.builders import (  # Phase Issue-4: Extracted builders
     MenuBarBuilder, StatusBarBuilder, ChartBuilder,
     PlaybackBuilder, BettingBuilder, ActionBuilder
@@ -29,8 +29,8 @@ from bot import BotInterface, BotController, list_strategies
 from bot.async_executor import AsyncBotExecutor
 from bot.execution_mode import ExecutionMode  # Phase 8.4
 from bot.ui_controller import BotUIController  # Phase 8.4
-from bot.browser_executor import BrowserExecutor  # Phase 8.5
-from bot.browser_bridge import get_browser_bridge, BridgeStatus  # Phase 9.3
+from browser.executor import BrowserExecutor  # Phase 2: Browser consolidation
+from browser.bridge import get_browser_bridge, BridgeStatus  # Phase 2: Browser consolidation
 from sources import WebSocketFeed
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class MainWindow:
         self.browser_connected = False
 
         try:
-            from bot.browser_executor import BrowserExecutor
+            from browser.executor import BrowserExecutor
             self.browser_executor = BrowserExecutor(profile_name="rugs_fun_phantom")
             logger.info("BrowserExecutor available - user can connect via Browser menu")
         except Exception as e:

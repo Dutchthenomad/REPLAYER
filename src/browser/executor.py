@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from decimal import Decimal
 
-# Phase 1 Refactoring: Extracted modules
-from bot.browser_timing import ExecutionTiming, TimingMetrics
-from bot.browser_selectors import (
+# Phase 2 Refactoring: Browser module consolidation
+from browser.dom.timing import ExecutionTiming, TimingMetrics
+from browser.dom.selectors import (
     BUY_BUTTON_SELECTORS,
     SELL_BUTTON_SELECTORS,
     SIDEBET_BUTTON_SELECTORS,
@@ -35,9 +35,9 @@ from bot.browser_selectors import (
     POSITION_SELECTORS,
 )
 
-# Phase 9.1: Use CDP Browser Manager for reliable wallet persistence
+# Phase 2: Browser consolidation - Use CDP Browser Manager for reliable wallet persistence
 try:
-    from browser_automation.cdp_browser_manager import CDPBrowserManager, CDPStatus
+    from browser.manager import CDPBrowserManager, CDPStatus
     CDP_MANAGER_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"CDPBrowserManager not available: {e}")
@@ -47,7 +47,7 @@ except ImportError as e:
 
 # Legacy fallback (deprecated - kept for compatibility)
 try:
-    from browser_automation.rugs_browser import RugsBrowserManager, BrowserStatus
+    from browser.cdp.launcher import RugsBrowserManager, BrowserStatus
     LEGACY_MANAGER_AVAILABLE = True
 except ImportError:
     RugsBrowserManager = None
@@ -76,8 +76,8 @@ class BrowserExecutor:
     Phase 1 Refactoring:
     - Selectors moved to browser_selectors.py
     - Timing classes moved to browser_timing.py
-    - Action methods documented in browser_actions.py (reference)
-    - State reader methods documented in browser_state_reader.py (reference)
+    - Action methods implemented inline (click_buy, click_sell, click_sidebet)
+    - State reader methods implemented inline (read_balance, read_position)
     """
 
     # Note: Selectors moved to browser_selectors.py (Phase 1 refactoring)
