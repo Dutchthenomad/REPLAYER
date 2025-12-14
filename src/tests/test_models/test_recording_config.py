@@ -28,77 +28,45 @@ from models.recording_config import (
 )
 
 
-class TestCaptureMode:
-    """Tests for CaptureMode enum"""
+class TestEnums:
+    """Tests for recording config enums"""
 
-    def test_game_state_only_value(self):
-        """Test game_state_only enum value"""
-        assert CaptureMode.GAME_STATE_ONLY.value == "game_state_only"
+    @pytest.mark.parametrize("enum_val,expected", [
+        (CaptureMode.GAME_STATE_ONLY, "game_state_only"),
+        (CaptureMode.GAME_AND_PLAYER, "game_and_player"),
+        (MonitorThresholdType.TICKS, "ticks"),
+        (MonitorThresholdType.GAMES, "games"),
+    ])
+    def test_enum_values(self, enum_val, expected):
+        """Test all enum values are correct"""
+        assert enum_val.value == expected
 
-    def test_game_and_player_value(self):
-        """Test game_and_player enum value"""
-        assert CaptureMode.GAME_AND_PLAYER.value == "game_and_player"
-
-    def test_from_string(self):
-        """Test creating enum from string value"""
-        assert CaptureMode("game_state_only") == CaptureMode.GAME_STATE_ONLY
-        assert CaptureMode("game_and_player") == CaptureMode.GAME_AND_PLAYER
-
-
-class TestMonitorThresholdType:
-    """Tests for MonitorThresholdType enum"""
-
-    def test_ticks_value(self):
-        """Test ticks enum value"""
-        assert MonitorThresholdType.TICKS.value == "ticks"
-
-    def test_games_value(self):
-        """Test games enum value"""
-        assert MonitorThresholdType.GAMES.value == "games"
+    @pytest.mark.parametrize("str_val,expected_enum", [
+        ("game_state_only", CaptureMode.GAME_STATE_ONLY),
+        ("game_and_player", CaptureMode.GAME_AND_PLAYER),
+    ])
+    def test_capture_mode_from_string(self, str_val, expected_enum):
+        """Test creating CaptureMode from string value"""
+        assert CaptureMode(str_val) == expected_enum
 
 
 class TestRecordingConfigDefaults:
     """Tests for RecordingConfig default values"""
 
-    def test_default_capture_mode(self):
-        """Test default capture mode is game_state_only"""
+    @pytest.mark.parametrize("attr,expected", [
+        ("capture_mode", CaptureMode.GAME_STATE_ONLY),
+        ("game_count", None),
+        ("time_limit_minutes", None),
+        ("monitor_threshold_type", MonitorThresholdType.TICKS),
+        ("monitor_threshold_value", 20),
+        ("audio_cues", True),
+        ("auto_start_on_launch", False),
+        ("last_modified", None),
+    ])
+    def test_default_values(self, attr, expected):
+        """Test all default values are correct"""
         config = RecordingConfig()
-        assert config.capture_mode == CaptureMode.GAME_STATE_ONLY
-
-    def test_default_game_count(self):
-        """Test default game count is infinite (None)"""
-        config = RecordingConfig()
-        assert config.game_count is None  # None = infinite
-
-    def test_default_time_limit(self):
-        """Test default time limit is off (None)"""
-        config = RecordingConfig()
-        assert config.time_limit_minutes is None
-
-    def test_default_monitor_threshold_type(self):
-        """Test default monitor threshold type is ticks"""
-        config = RecordingConfig()
-        assert config.monitor_threshold_type == MonitorThresholdType.TICKS
-
-    def test_default_monitor_threshold_value(self):
-        """Test default monitor threshold value is 20"""
-        config = RecordingConfig()
-        assert config.monitor_threshold_value == 20
-
-    def test_default_audio_cues(self):
-        """Test default audio cues is True"""
-        config = RecordingConfig()
-        assert config.audio_cues is True
-
-    def test_default_auto_start_on_launch(self):
-        """Test default auto_start_on_launch is False"""
-        config = RecordingConfig()
-        assert config.auto_start_on_launch is False
-
-    def test_default_last_modified_is_none(self):
-        """Test default last_modified is None"""
-        config = RecordingConfig()
-        assert config.last_modified is None
+        assert getattr(config, attr) == expected
 
 
 class TestRecordingConfigCreation:

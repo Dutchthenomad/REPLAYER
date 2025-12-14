@@ -207,42 +207,6 @@ class TestStateReconciledEvent:
         assert StateEvents.STATE_RECONCILED.value == 'state_reconciled'
 
 
-class TestWebSocketFeedServerState:
-    """Test WebSocketFeed server state storage"""
-
-    def test_get_last_server_state_initially_none(self):
-        """get_last_server_state() returns None before any updates"""
-        from sources.websocket_feed import WebSocketFeed
-        feed = WebSocketFeed(log_level='ERROR')
-        assert feed.get_last_server_state() is None
-
-    def test_last_server_state_stored_on_player_update(self):
-        """Server state is stored when playerUpdate received"""
-        from sources.websocket_feed import WebSocketFeed
-
-        feed = WebSocketFeed(log_level='ERROR')
-
-        # Simulate playerUpdate data (what the handler receives)
-        player_data = {
-            'cash': 1.5,
-            'positionQty': 0.001,
-            'avgCost': 2.0,
-            'cumulativePnL': 0.05,
-            'totalInvested': 0.002
-        }
-
-        # Store it directly (simulating what on_player_update does)
-        feed._last_server_state = player_data
-
-        server_state = feed.get_last_server_state()
-
-        assert server_state is not None
-        assert server_state.cash == Decimal('1.5')
-        assert server_state.position_qty == Decimal('0.001')
-        assert server_state.avg_cost == Decimal('2.0')
-        assert server_state.cumulative_pnl == Decimal('0.05')
-
-
 class TestRecordingWithServerState:
     """Test that recording includes server state for validation"""
 

@@ -37,75 +37,48 @@ from sources.data_integrity_monitor import (
 from models.recording_config import MonitorThresholdType
 
 
-class TestThresholdType:
-    """Tests for ThresholdType enum (alias for MonitorThresholdType)"""
+class TestEnumValues:
+    """Tests for enum values"""
 
-    def test_ticks_value(self):
-        """Test TICKS threshold type"""
-        assert ThresholdType.TICKS.value == "ticks"
-
-    def test_games_value(self):
-        """Test GAMES threshold type"""
-        assert ThresholdType.GAMES.value == "games"
-
-
-class TestIntegrityIssue:
-    """Tests for IntegrityIssue enum"""
-
-    def test_tick_gap_value(self):
-        """Test TICK_GAP issue type"""
-        assert IntegrityIssue.TICK_GAP.value == "tick_gap"
-
-    def test_connection_lost_value(self):
-        """Test CONNECTION_LOST issue type"""
-        assert IntegrityIssue.CONNECTION_LOST.value == "connection_lost"
-
-    def test_abnormal_game_end_value(self):
-        """Test ABNORMAL_GAME_END issue type"""
-        assert IntegrityIssue.ABNORMAL_GAME_END.value == "abnormal_game_end"
+    @pytest.mark.parametrize("enum_val,expected", [
+        (ThresholdType.TICKS, "ticks"),
+        (ThresholdType.GAMES, "games"),
+        (IntegrityIssue.TICK_GAP, "tick_gap"),
+        (IntegrityIssue.CONNECTION_LOST, "connection_lost"),
+        (IntegrityIssue.ABNORMAL_GAME_END, "abnormal_game_end"),
+    ])
+    def test_enum_values(self, enum_val, expected):
+        """Test all enum values are correct"""
+        assert enum_val.value == expected
 
 
 class TestDataIntegrityMonitorInitialization:
     """Tests for DataIntegrityMonitor initialization"""
 
-    def test_default_threshold_type_is_ticks(self):
-        """Test default threshold type is TICKS"""
+    @pytest.mark.parametrize("attr,expected", [
+        ("threshold_type", ThresholdType.TICKS),
+        ("threshold_value", 20),
+        ("consecutive_tick_gaps", 0),
+        ("consecutive_bad_games", 0),
+        ("is_triggered", False),
+    ])
+    def test_default_values(self, attr, expected):
+        """Test all default values are correct"""
         monitor = DataIntegrityMonitor()
-        assert monitor.threshold_type == ThresholdType.TICKS
+        assert getattr(monitor, attr) == expected
 
-    def test_default_threshold_value_is_20(self):
-        """Test default threshold value is 20"""
-        monitor = DataIntegrityMonitor()
-        assert monitor.threshold_value == 20
-
-    def test_custom_threshold_ticks(self):
-        """Test custom tick threshold"""
+    @pytest.mark.parametrize("threshold_type,threshold_value", [
+        (ThresholdType.TICKS, 45),
+        (ThresholdType.GAMES, 3),
+    ])
+    def test_custom_threshold(self, threshold_type, threshold_value):
+        """Test custom threshold configuration"""
         monitor = DataIntegrityMonitor(
-            threshold_type=ThresholdType.TICKS,
-            threshold_value=45
+            threshold_type=threshold_type,
+            threshold_value=threshold_value
         )
-        assert monitor.threshold_type == ThresholdType.TICKS
-        assert monitor.threshold_value == 45
-
-    def test_custom_threshold_games(self):
-        """Test custom game threshold"""
-        monitor = DataIntegrityMonitor(
-            threshold_type=ThresholdType.GAMES,
-            threshold_value=3
-        )
-        assert monitor.threshold_type == ThresholdType.GAMES
-        assert monitor.threshold_value == 3
-
-    def test_consecutive_issues_starts_at_zero(self):
-        """Test consecutive issue counter starts at 0"""
-        monitor = DataIntegrityMonitor()
-        assert monitor.consecutive_tick_gaps == 0
-        assert monitor.consecutive_bad_games == 0
-
-    def test_is_triggered_starts_false(self):
-        """Test is_triggered flag starts False"""
-        monitor = DataIntegrityMonitor()
-        assert monitor.is_triggered is False
+        assert monitor.threshold_type == threshold_type
+        assert monitor.threshold_value == threshold_value
 
 
 class TestDataIntegrityMonitorTickTracking:

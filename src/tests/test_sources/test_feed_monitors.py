@@ -101,21 +101,16 @@ class TestLatencySpikeDetector:
 class TestConnectionHealth:
     """Tests for ConnectionHealth enum-like class"""
 
-    def test_health_states_exist(self):
-        """Test all health states are defined"""
-        assert hasattr(ConnectionHealth, 'HEALTHY')
-        assert hasattr(ConnectionHealth, 'DEGRADED')
-        assert hasattr(ConnectionHealth, 'STALE')
-        assert hasattr(ConnectionHealth, 'DISCONNECTED')
-        assert hasattr(ConnectionHealth, 'UNKNOWN')
-
-    def test_health_state_values(self):
-        """Test health state values are strings"""
-        assert ConnectionHealth.HEALTHY == "HEALTHY"
-        assert ConnectionHealth.DEGRADED == "DEGRADED"
-        assert ConnectionHealth.STALE == "STALE"
-        assert ConnectionHealth.DISCONNECTED == "DISCONNECTED"
-        assert ConnectionHealth.UNKNOWN == "UNKNOWN"
+    @pytest.mark.parametrize("state,expected", [
+        (ConnectionHealth.HEALTHY, "HEALTHY"),
+        (ConnectionHealth.DEGRADED, "DEGRADED"),
+        (ConnectionHealth.STALE, "STALE"),
+        (ConnectionHealth.DISCONNECTED, "DISCONNECTED"),
+        (ConnectionHealth.UNKNOWN, "UNKNOWN"),
+    ])
+    def test_health_state_values(self, state, expected):
+        """Test all health state values are correct strings"""
+        assert state == expected
 
 
 class TestConnectionHealthMonitor:
