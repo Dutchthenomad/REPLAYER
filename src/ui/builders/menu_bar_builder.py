@@ -299,6 +299,11 @@ class MenuBarBuilder:
             label="Show Capture Status",
             command=self._get_callback('show_capture_status')
         )
+        dev_menu.add_separator()
+        dev_menu.add_command(
+            label="Open Debug Terminal",
+            command=self._get_callback('open_debug_terminal')
+        )
 
         indices = {
             'capture': 0,  # Index of "Start/Stop Raw Capture"

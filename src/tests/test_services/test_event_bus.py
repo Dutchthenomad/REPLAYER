@@ -213,3 +213,25 @@ class TestEventBusShutdown:
         local_bus.stop()
 
         assert local_bus._processing is False
+
+
+class TestWebSocketEvents:
+    """Test WebSocket event types."""
+
+    def test_ws_raw_event_exists(self):
+        """WS_RAW_EVENT constant exists."""
+        from services.event_bus import Events
+        assert hasattr(Events, 'WS_RAW_EVENT')
+        assert Events.WS_RAW_EVENT.value == "ws.raw_event"
+
+    def test_ws_auth_event_exists(self):
+        """WS_AUTH_EVENT constant exists."""
+        from services.event_bus import Events
+        assert hasattr(Events, 'WS_AUTH_EVENT')
+        assert Events.WS_AUTH_EVENT.value == "ws.auth_event"
+
+    def test_ws_source_changed_exists(self):
+        """WS_SOURCE_CHANGED constant exists."""
+        from services.event_bus import Events
+        assert hasattr(Events, 'WS_SOURCE_CHANGED')
+        assert Events.WS_SOURCE_CHANGED.value == "ws.source_changed"

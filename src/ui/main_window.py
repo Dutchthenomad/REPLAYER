@@ -188,6 +188,7 @@ class MainWindow:
             'analyze_capture': self._analyze_last_capture,
             'open_captures_folder': self._open_captures_folder,
             'show_capture_status': self._show_capture_status,
+            'open_debug_terminal': self._open_debug_terminal,
             'show_about': self._show_about,
         }
 
@@ -228,6 +229,7 @@ class MainWindow:
         self.phase_label = status_widgets['phase_label']
         self.player_profile_label = status_widgets['player_profile_label']
         self.browser_status_label = status_widgets['browser_status_label']
+        self.source_label = status_widgets['source_label']
 
         # ========== ROW 2: CHART AREA (Phase Issue-4: Using builder) ==========
         chart_widgets = ChartBuilder(self.root).build()
@@ -1616,6 +1618,43 @@ Captures Directory: {self.raw_capture_recorder.capture_dir}
         except Exception as e:
             logger.error(f"Failed to get capture status: {e}")
             messagebox.showerror("Error", f"Failed to get status: {e}")
+
+    def _open_debug_terminal(self):
+        """Open WebSocket debug terminal window."""
+        from ui.debug_terminal import DebugTerminal
+        from services.event_bus import Events, event_bus
+
+        if not hasattr(self, '_debug_terminal') or self._debug_terminal is None:
+            self._debug_terminal = DebugTerminal(self.root)
+
+            # Subscribe to raw WebSocket events
+            event_bus.subscribe(
+                Events.WS_RAW_EVENT,
+                lambda e: self.ui_dispatcher.submit(
+                    lambda: self._debug_terminal.log_event(e.get('data', {}))
+                )
+            )
+        else:
+            self._debug_terminal.show()
+
+    def _update_source_indicator(self, source):
+        """Update event source indicator."""
+        from services.event_source_manager import EventSource
+
+        if source == EventSource.CDP:
+            text = "\U0001F7E2 CDP: Authenticated"  # 🟢
+            color = '#00ff88'
+        elif source == EventSource.FALLBACK:
+            text = "\U0001F7E1 Fallback: Public"  # 🟡
+            color = '#ffcc00'
+        else:
+            text = "\U0001F534 No Source"  # 🔴
+            color = '#ff4444'
+
+        def update():
+            self.source_label.config(text=text, foreground=color)
+
+        self.ui_dispatcher.submit(update)
 
     def shutdown(self):
         """Cleanup dispatcher resources during application shutdown."""

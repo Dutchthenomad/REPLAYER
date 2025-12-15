@@ -61,6 +61,11 @@ class Events(Enum):
     PLAYER_IDENTITY = "player.identity"  # Player ID and username from usernameStatus
     PLAYER_UPDATE = "player.update"      # Server state from playerUpdate
 
+    # WebSocket interception events (Phase 11)
+    WS_RAW_EVENT = "ws.raw_event"           # Every frame, unfiltered
+    WS_AUTH_EVENT = "ws.auth_event"         # Auth-only events
+    WS_SOURCE_CHANGED = "ws.source_changed"  # Source switching ("cdp" or "fallback")
+
 class EventBus:
     """
     Thread-safe event bus with deadlock prevention

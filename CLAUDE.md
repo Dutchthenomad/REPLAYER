@@ -1,5 +1,5 @@
 # REPLAYER - Production Documentation
-**Version**: 0.10.7 | **Date**: December 12, 2025 | **Status**: Phase 10.7 Complete (Raw Capture + Auth Workaround)
+**Version**: 0.11.0 | **Date**: December 14, 2025 | **Status**: Phase 11 In Progress (CDP WebSocket Interception)
 
 ---
 
@@ -35,22 +35,26 @@ cd src && python3 -m pytest tests/ -v --tb=short
 
 ## Production State
 
-### What's Working (Phase 10.7 Complete)
+### What's Working (Phase 11 In Progress)
 - CDP Browser Connection to system Chrome
 - Phantom wallet persistence via Chrome profile
 - Button selectors (BUY, SELL, percentages, sidebets)
 - Multi-strategy selector system (text -> class -> structural -> ARIA)
 - Incremental button clicking (human-like behavior)
-- **Raw WebSocket Capture Tool** (Developer Tools menu)
-- **Hardcoded credentials workaround** for auth-gated events
-- 737 tests passing
+- Raw WebSocket Capture Tool (Developer Tools menu)
+- Hardcoded credentials workaround for auth-gated events
+- **CDP WebSocket Interception** - Captures authenticated events from browser
+- **EventSourceManager** - Auto-switches between CDP and fallback sources
+- **RAGIngester** - Catalogs events for rugs-expert agent
+- **DebugTerminal** - Real-time event viewer (separate window)
+- 780+ tests passing
 - Modern UI with theme-aware charts
 
-### What's Next (Phase 11)
+### What's Next (Phase 12)
 - RL model integration for live trading
 - Browser automation for real trades
 - Portfolio management dashboard
-- **Bug fixes from Phase 10.7 testing**
+- Player profile UI integration (balance, PnL, positions)
 
 ### Phase 10: Human Demo Recording System (Complete)
 **Goal**: Record human gameplay to train RL bot with realistic behavior patterns.
@@ -101,6 +105,11 @@ cd src && python3 -m pytest tests/ -v --tb=short
 | `src/ui/main_window.py` | Main UI | 1730 |
 | `src/services/event_bus.py` | Pub/sub | ~200 |
 | `src/debug/raw_capture_recorder.py` | Raw WebSocket capture | 280 |
+| `src/sources/cdp_websocket_interceptor.py` | CDP frame interception | 205 |
+| `src/sources/socketio_parser.py` | Socket.IO frame parsing | 151 |
+| `src/services/event_source_manager.py` | Source auto-switching | 86 |
+| `src/services/rag_ingester.py` | Event RAG cataloging | 181 |
+| `src/ui/debug_terminal.py` | Real-time event viewer | 247 |
 
 ### Thread Safety Rules
 1. UI updates from workers -> `TkDispatcher.submit()`
@@ -281,6 +290,7 @@ Symlink: `src/rugs_recordings` -> `/home/nomad/rugs_recordings/`
 | 10.5 | Complete | Unified recording configuration system |
 | 10.6 | Complete | Unified recording integration with dual-state validation |
 | 10.7 | Complete | Raw Capture Tool + Hardcoded credentials workaround |
+| 11 | In Progress | CDP WebSocket Interception + RAG event cataloging |
 
 ---
 
@@ -382,4 +392,150 @@ Phase 10.7 implementation needs live testing. Potential issues to investigate:
 
 ---
 
-*Phase 10.7 Complete | December 12, 2025*
+## Phase 11: CDP WebSocket Interception (In Progress)
+
+**Goal**: Capture ALL WebSocket events (including authenticated) via Chrome CDP to enable proper player state tracking.
+
+### Problem Statement
+
+Two separate WebSocket connections existed:
+1. **WebSocketFeed** - Unauthenticated, only receives public events
+2. **CDP Browser Bridge** - Authenticated via Phantom wallet, receives all events
+
+The server only sends `usernameStatus` and `playerUpdate` events to authenticated clients. Without intercepting the browser's authenticated WebSocket, we cannot properly track player balance, positions, and PnL.
+
+### Solution Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    CDP WEBSOCKET INTERCEPTION                           │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────┐    ┌─────────────────────┐    ┌─────────────────────┐   │
+│  │   Chrome    │───▶│ CDPWebSocketIntercep│───▶│ SocketIOParser      │   │
+│  │  (rugs.fun) │    │     tor             │    │ (frame parsing)     │   │
+│  └─────────────┘    └─────────────────────┘    └─────────────────────┘   │
+│        │                     │                         │                 │
+│        │              Network.webSocketFrameReceived   │                 │
+│        │                     │                         │                 │
+│        │                     ▼                         ▼                 │
+│        │              ┌──────────────────────────────────────┐          │
+│        │              │           EventBus                   │          │
+│        │              │  WS_RAW_EVENT | WS_AUTH_EVENT        │          │
+│        │              └──────────────────────────────────────┘          │
+│        │                     │              │                           │
+│        │                     ▼              ▼                           │
+│        │              ┌─────────────┐ ┌─────────────┐                   │
+│        │              │ RAGIngester │ │DebugTerminal│                   │
+│        │              │ (catalog)   │ │ (display)   │                   │
+│        │              └─────────────┘ └─────────────┘                   │
+│        │                                                                │
+│        ▼                                                                │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    EventSourceManager                           │   │
+│  │  CDP (authenticated) ←→ Fallback (public WebSocketFeed)         │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `SocketIOParser` | `src/sources/socketio_parser.py` | Parse Socket.IO/Engine.IO frames |
+| `CDPWebSocketInterceptor` | `src/sources/cdp_websocket_interceptor.py` | Intercept browser WebSocket via CDP |
+| `EventSourceManager` | `src/services/event_source_manager.py` | Auto-switch between CDP and fallback |
+| `RAGIngester` | `src/services/rag_ingester.py` | Catalog events for rugs-expert agent |
+| `DebugTerminal` | `src/ui/debug_terminal.py` | Real-time event viewer (separate window) |
+
+### EventBus Extensions
+
+New event types added to `src/services/event_bus.py`:
+
+```python
+# WebSocket event types
+WS_RAW_EVENT = "ws.raw_event"       # All raw WebSocket events
+WS_AUTH_EVENT = "ws.auth_event"     # Auth-specific events (usernameStatus, playerUpdate)
+WS_SOURCE_CHANGED = "ws.source_changed"  # Source switch notifications
+```
+
+### Debug Terminal
+
+**Access**: `Developer Tools` → `Open Debug Terminal`
+
+**Features**:
+- Opens in **separate window** (tk.Toplevel)
+- Color-coded event display by type
+- Event filtering (all/auth/trades/game)
+- Pause/resume, clear, export to JSON
+- Ring buffer (1000 events max)
+
+**Color Coding**:
+| Event Type | Color |
+|------------|-------|
+| gameStateUpdate | Gray |
+| usernameStatus | Green |
+| playerUpdate | Cyan |
+| standard/newTrade | Yellow |
+| Novel/unknown | Red |
+
+### RAG Integration
+
+Events are automatically cataloged to `/home/nomad/rugs_recordings/rag_events/` in JSONL format:
+
+```json
+{"timestamp": "2025-12-14T10:30:45.123", "event_name": "playerUpdate", "data": {...}, "source": "cdp", "game_id": "..."}
+```
+
+**Novel Event Detection**: Unknown events are flagged and logged for documentation.
+
+### Status Bar Indicator
+
+The status bar shows current event source:
+- 🟢 **CDP** - Connected to authenticated browser
+- 🟡 **Fallback** - Using public WebSocketFeed
+- 🔴 **No Source** - Neither connected
+
+### Usage
+
+1. **Start Chrome with CDP**:
+   ```bash
+   google-chrome --remote-debugging-port=9222
+   ```
+
+2. **Launch REPLAYER**:
+   ```bash
+   ./run.sh
+   ```
+
+3. **Connect to browser** via `Browser` menu
+
+4. **Open Debug Terminal**: `Developer Tools` → `Open Debug Terminal`
+
+5. **View status**: Check status bar for current source (CDP/Fallback)
+
+### Files Created
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src/sources/socketio_parser.py` | 151 | Socket.IO frame parsing |
+| `src/sources/cdp_websocket_interceptor.py` | 205 | CDP interception |
+| `src/services/event_source_manager.py` | 86 | Source switching |
+| `src/services/rag_ingester.py` | 181 | Event cataloging |
+| `src/ui/debug_terminal.py` | 247 | Debug UI |
+| `src/tests/test_sources/test_socketio_parser.py` | 8 tests | Parser tests |
+| `src/tests/test_sources/test_cdp_websocket_interceptor.py` | 12 tests | Interceptor tests |
+| `src/tests/test_services/test_event_source_manager.py` | 7 tests | Manager tests |
+| `src/tests/test_services/test_rag_ingester.py` | 8 tests | Ingester tests |
+| `src/tests/test_ui/test_debug_terminal.py` | 6 tests | UI tests |
+| `src/tests/test_integration/test_cdp_event_flow.py` | 3 tests | Integration tests |
+
+### References
+
+- Design document: `docs/plans/2025-12-14-cdp-websocket-interception-design.md`
+- Implementation plan: `docs/plans/2025-12-14-cdp-websocket-interception-impl.md`
+- GitHub Issue: #13
+
+---
+
+*Phase 11 In Progress | December 14, 2025*
