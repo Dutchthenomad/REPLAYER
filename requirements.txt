@@ -1,23 +1,42 @@
-# REPLAYER Dependencies
-# Updated: 2025-11-28 (Phase 1 Audit Remediation)
+# REPLAYER Core Dependencies
+# Generated during venv migration (Issue #19)
 
-# Core UI
-ttkbootstrap>=1.10.0
+# UI
+ttkbootstrap>=1.10.1
+Pillow>=10.0.0
 
-# WebSocket / Real-time feed
-python-socketio[client]>=5.10.0
+# WebSocket & Networking
+python-socketio>=5.10.0
 websocket-client>=1.6.0
 
 # Browser Automation
 playwright>=1.40.0
 
 # Data Processing
-typing_extensions>=4.0.0
+numpy>=1.26.0
+
+# ML/Sidebet Predictor
+scikit-learn>=1.3.0
+joblib>=1.3.0
 
 # Testing
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+pytest-metadata>=3.0.0
+pytest-json-report>=1.5.0
 
-# Optional: ML Integration (comment out if not using ML features)
-# numpy>=1.24.0
-# scikit-learn>=1.3.0
+# Type Checking & Linting (dev)
+mypy>=1.8.0
+pylint>=3.0.0
+
+# Code Analysis (dev)
+vulture>=2.10
+radon>=6.0.0
+
+# Async
+anyio>=4.0.0
+
+# Utilities
+colorama>=0.4.6
+toml>=0.10.2
