@@ -553,6 +553,9 @@ class MainWindow:
         # Phase 10.6: Wire RecordingController to LiveFeedController for auto-start/stop
         self.live_feed_controller.set_recording_controller(self.recording_controller)
 
+        # Issue #18 Fix: Wire RecordingController to ReplayController for state consistency
+        self.replay_controller.recording_controller = self.recording_controller
+
         # Create menu bar now (after controllers are initialized, before BrowserBridgeController needs it)
         self._create_menu_bar()
 
