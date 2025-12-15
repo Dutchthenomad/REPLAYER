@@ -1,176 +1,152 @@
 # REPLAYER Session Scratchpad
 
-Last Updated: 2025-12-13 22:00
+Last Updated: 2025-12-14 21:00
 
 ---
 
 ## Quick Start for Fresh Sessions
 
-### Option 1: Issue #8 - WebSocket Server State Fix
-```bash
-# View issue details
-gh issue view 8
+### PRIMARY: Technical Debt Audit (Parallel Track)
 
-# Create worktree and start development
-git worktree add .worktrees/issue-8 -b fix/issue-8-websocket-server-state
-cd .worktrees/issue-8
-
-# Run tests to verify clean baseline
-cd src && python3 -m pytest tests/ -v --tb=short
 ```
+Read the following files to understand the current project state:
+1. /home/nomad/Desktop/REPLAYER/docs/plans/2025-12-14-technical-debt-audit-design.md
+2. /home/nomad/Desktop/REPLAYER/CLAUDE.md
 
-### Option 2: Issue #9 - Socket Event RAG Pipeline
-```bash
-# View issue details
-gh issue view 9
+Then check current issues:
+gh issue list --repo Dutchthenomad/REPLAYER --milestone "Tech Debt Audit - Phase 1: Mapping"
 
-# Create worktree and start development
-git worktree add .worktrees/issue-9 -b feat/issue-9-socket-event-rag
-cd .worktrees/issue-9
+I'm working on the Technical Debt Audit using the parallel track approach.
+Methodology: "Working Effectively with Legacy Code" (Michael Feathers)
 
-# Run tests to verify clean baseline
-cd src && python3 -m pytest tests/ -v --tb=short
-```
+Current phase: Phase 1 - Mapping
+- Create repair/technical-debt-audit branch
+- Run automated analysis (vulture, pydeps, radon)
+- Write characterization tests
+- Create issues from findings
 
-### Session Bootstrap Prompt (Copy/Paste)
-```
-Read /home/nomad/Desktop/REPLAYER/docs/plans/2025-12-13-websocket-server-state-design.md
+Key tracking issues:
+- #17: Master tracking issue
+- #18: Recording state mismatch (P0-critical) - logs "disabled", UI shows "enabled"
+- #19: Venv migration from rugs-rl-bot to REPLAYER (P1-high)
 
-I'm working on REPLAYER. Key context:
-- Issue #8: WebSocket fix using hardcoded credentials (Dutch's privy ID)
-- Issue #9: RAG pipeline for socket event recording
-- Design doc: docs/plans/2025-12-13-websocket-server-state-design.md
-- Test cmd: cd src && python3 -m pytest tests/ -v --tb=short
-
-Let's continue development on Issue #[8 or 9].
+Test command: /home/nomad/Desktop/rugs-rl-bot/.venv/bin/python -m pytest src/tests/ -v --tb=short
 ```
 
 ---
 
-## Active Issues
+## Technical Debt Audit Status
 
-| Issue | Branch | Purpose |
-|-------|--------|---------|
-| #8 | `fix/issue-8-websocket-server-state` | WebSocket auth fix with hardcoded credentials |
-| #9 | `feat/issue-9-socket-event-rag` | RAG pipeline for rugs.fun expert agent |
+**Approach:** Parallel Track (repair branch alongside main, cherry-pick urgent fixes)
 
-## Current SDLC Phase
-Ready for parallel development on Issues #8 and #9
+**GitHub Infrastructure:** COMPLETE
+- Labels: `tech-debt/*`, `P0-P3`, `component/*`
+- Milestones: Phases 1-4
+- Tracking issues: #17, #18, #19
 
-## Key Decisions (Issue #8 Design - 2025-12-13)
+### Phase 1: Mapping (CURRENT)
+- [x] Design document: `docs/plans/2025-12-14-technical-debt-audit-design.md`
+- [x] GitHub labels created
+- [x] Milestones created
+- [x] Tracking issues created
+- [ ] Create `repair/technical-debt-audit` branch
+- [ ] Run automated analysis (vulture, pydeps, radon)
+- [ ] Write characterization tests for event flow
+- [ ] Write characterization tests for UI state
+- [ ] Write characterization tests for recording
+- [ ] Generate findings report
+- [ ] Create individual issues from findings
 
-### Authentication Approach
-- **Hardcoded credentials** (server only sends auth events to authenticated clients)
+### Phase 2: Foundation (PENDING)
+- [ ] Fix WebSocket → EventBus → UI state conflicts
+- [ ] Consolidate event handling
+
+### Phase 3: Recording (PENDING)
+- [ ] Fix recording state mismatch (#18)
+- [ ] Consolidate recording services
+
+### Phase 4: Infrastructure (PENDING)
+- [ ] Migrate venv to REPLAYER (#19)
+- [ ] Set up pre-commit hooks
+- [ ] Set up GitHub Actions CI
+- [ ] Enable branch protection
+
+---
+
+## Known Bugs
+
+### Recording State Mismatch (#18) - P0-CRITICAL
+- **Symptom:** Log shows `recording disabled` but UI shows enabled
+- **Location:** `core/replay_engine.py:352`
+- **Root cause:** Multiple sources of truth:
+  - `replay_engine.auto_recording` (from config)
+  - `main_window.recording_var` (UI checkbox)
+  - `recorder_sink.is_recording()` (actual state)
+  - `recording_controller` state
+
+### External venv Dependency (#19) - P1-HIGH
+- **Current:** `/home/nomad/Desktop/rugs-rl-bot/.venv`
+- **Target:** `/home/nomad/Desktop/REPLAYER/.venv`
+
+---
+
+## Commands
+
+```bash
+# View audit issues
+gh issue list --milestone "Tech Debt Audit - Phase 1: Mapping"
+
+# Run tests (using rugs-rl-bot venv until #19 complete)
+/home/nomad/Desktop/rugs-rl-bot/.venv/bin/python -m pytest src/tests/ -v --tb=short
+
+# Start repair branch (when ready)
+git checkout -b repair/technical-debt-audit
+
+# Run dead code analysis
+pip install vulture pydeps radon
+vulture src/ --min-confidence 80 > reports/dead_code.txt
+pydeps src/ --max-bacon 3 -o reports/dependency_graph.svg
+radon cc src/ -a -s > reports/complexity.txt
+
+# View milestones
+gh api repos/Dutchthenomad/REPLAYER/milestones
+```
+
+---
+
+## Key Files for Audit
+
+| File | Purpose | Issue |
+|------|---------|-------|
+| `docs/plans/2025-12-14-technical-debt-audit-design.md` | Full audit methodology | #17 |
+| `src/core/replay_engine.py:352` | Recording state bug location | #18 |
+| `src/ui/main_window.py:221` | recording_var initialization | #18 |
+| `src/sources/websocket_feed.py` | Event flow entry point | Phase 2 |
+
+---
+
+## Previous Work (Reference)
+
+### Issue #8 - WebSocket Server State Fix
+- Hardcoded credentials approach implemented
 - `HARDCODED_PLAYER_ID = "did:privy:cmaibr7rt0094jp0mc2mbpfu4"`
 - `HARDCODED_USERNAME = "Dutch"`
 
-### Data Extraction
-- Parse `gameStatePlayerUpdate` leaderboard entries for Dutch's player ID
-- Extract ALL trading fields: `cash`, `pnl`, `pnlPercent`, `positionQty`, `avgCost`, `totalInvested`, `hasActiveTrades`, `sidebet`
+### Phase 11 - CDP WebSocket Interception
+- Complete and merged to main
+- Debug Terminal wired to WebSocketFeed
+- Events publishing to EventBus via `WS_RAW_EVENT`
 
-### State Reconciliation
-- Server state is ultimate truth
-- Update local state silently (no UI notifications)
-- Persist state across sessions
+### Raw Capture Tool
+- Location: Developer Tools menu
+- Output: `/home/nomad/rugs_recordings/raw_captures/`
+- 554 events captured in test session
 
-### Testing Strategy
-- Delete 10 failing tests (designed for different architecture)
-- Write new tests for hardcoded credential approach
-
-### Files to Modify (Issue #8)
-| File | Changes |
-|------|---------|
-| `src/sources/websocket_feed.py` | Leaderboard parsing, emit `player_state_update` |
-| `src/ui/controllers/live_feed_controller.py` | Subscribe to `player_state_update` |
-| `src/core/game_state.py` | Ensure `reconcile_with_server()` handles all fields |
-| `src/ui/main_window.py` | Verify balance/position displays update |
-| `src/tests/test_sources/test_websocket_feed.py` | Delete/rewrite tests |
-
-### RAG Pipeline (Issue #9)
-- Full RAG framework integration with `/home/nomad/Desktop/claude-flow/rag-pipeline/`
-- Event categories: game_state, trade, player, social, system, battle
-- Storage: `/home/nomad/rugs_recordings/raw_events/{date}/{session}.jsonl`
-
-## Previous Implementation (Reference)
-- Phase 11 State Reconciliation COMPLETE (all 9 repairs)
-- WebSocket Raw Capture Tool **IMPLEMENTED** (737 tests passing)
-- Design implemented exactly as specified in design document
-
-## Implementation Summary
-
-### Raw Capture Tool Files Created
-1. `src/debug/__init__.py` - Debug module init
-2. `src/debug/raw_capture_recorder.py` - RawCaptureRecorder class (280 lines)
-3. `scripts/analyze_raw_capture.py` - Analysis CLI tool (200 lines)
-4. `src/tests/test_debug/__init__.py` - Test module init
-5. `src/tests/test_debug/test_raw_capture_recorder.py` - 19 unit tests
-
-### Hardcoded Credentials Workaround (websocket_feed.py)
-- Added `HARDCODED_PLAYER_ID = "did:privy:cmaibr7rt0094jp0mc2mbpfu4"`
-- Added `HARDCODED_USERNAME = "Dutch"`
-- Modified connect handler to auto-confirm identity on connection
-- Added `gameStatePlayerUpdate` event handler that:
-  - Filters for Dutch's player ID only
-  - Extracts PnL, position, avgCost, totalInvested, hasActiveTrades, sidebet data
-  - Updates `_last_server_state` for Phase 11 reconciliation
-  - Emits `player_state_update` event for UI/recording
-
-### Developer Tools Menu Structure
-```
-Developer Tools
-├── Start Raw Capture (toggles to "⏺ Stop Raw Capture")
-├── ─────────────────
-├── Analyze Last Capture
-├── Open Captures Folder
-├── ─────────────────
-└── Show Capture Status
-```
-
-### Output Location
-`/home/nomad/rugs_recordings/raw_captures/`
-
-## Test Results
-- 737 tests passing
-- All existing tests still pass
-- No regressions
-
-## Raw Capture Analysis Results (554 events captured)
-| Event Type | Count | Percentage |
-|------------|-------|------------|
-| gameStateUpdate | 510 | 92.1% |
-| standard/newTrade | 31 | 5.6% |
-| newChatMessage | 11 | 2.0% |
-| connect | 1 | 0.2% |
-| battleEventUpdate | 1 | 0.2% |
-
-**Key Finding**: No `usernameStatus` or `playerUpdate` events - confirms server only sends these to authenticated clients.
-
-## Completed Steps
-1. [x] Create `src/debug/raw_capture_recorder.py` - DONE
-2. [x] Create `scripts/analyze_raw_capture.py` - DONE
-3. [x] Add "Developer Tools" menu to MainWindow - DONE
-4. [x] Wire menu actions to RawCaptureRecorder - DONE
-5. [x] Run unit tests - DONE (19 tests pass)
-6. [x] Run live capture session - DONE (554 events)
-7. [x] Analyze capture results - DONE
-8. [x] Fix UI freeze on stop capture - DONE (background thread for disconnect)
-9. [x] Implement hardcoded credentials workaround - DONE
-10. [x] Verify tests pass - DONE (737 tests)
-11. [ ] User live testing with hardcoded credentials
-
-## Context to Preserve
-- 737 tests passing
-- Test command: `cd src && python3 -m pytest tests/ -v`
-- Run command: `./run.sh`
-- Location: `/home/nomad/Desktop/REPLAYER/`
-- Capture location: `/home/nomad/rugs_recordings/raw_captures/`
+---
 
 ## Session History
-- 2025-12-12: Hardcoded credentials workaround implemented (737 tests)
-- 2025-12-12: Raw capture analysis complete - discovered auth events not sent to anonymous clients
-- 2025-12-12: Fixed UI freeze on stop capture (background disconnect)
-- 2025-12-10: Raw Capture Tool implementation complete (737 tests)
-- 2025-12-10: Phase 11 complete, GitHub #6 closed, Raw Capture Tool designed
-- 2025-12-05: Unified Framework implemented
-- 2025-11-15: Phase 7A complete, RecorderSink fixes
-- 2025-11-14: Phase 6 complete, WebSocket live feed
+- 2025-12-14: Technical Debt Audit design complete, GitHub infrastructure created
+- 2025-12-14: Phase 11 merged, Debug Terminal wired to WebSocketFeed
+- 2025-12-13: Issues #8, #9 design documents created
+- 2025-12-12: Hardcoded credentials workaround implemented
+- 2025-12-10: Raw Capture Tool implementation complete
