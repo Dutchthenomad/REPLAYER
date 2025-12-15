@@ -13,13 +13,18 @@ Usage:
     # -> Creates JSONL file in raw_captures/
 """
 
-import socketio
 import json
 import logging
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
+
+# Optional dependency: python-socketio only required for live capture
+try:  # pragma: no cover
+    import socketio  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    socketio = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +51,7 @@ class RawCaptureRecorder:
         self.capture_dir.mkdir(parents=True, exist_ok=True)
 
         # Socket.IO client (created fresh for each capture)
-        self.sio: Optional[socketio.Client] = None
+        self.sio: Optional[Any] = None  # socketio.Client when available
 
         # Capture state
         self.is_capturing = False
@@ -94,16 +99,6 @@ class RawCaptureRecorder:
                 # Open file for writing
                 self.file_handle = open(self.capture_file, 'w', encoding='utf-8')
 
-                # Create fresh Socket.IO client
-                self.sio = socketio.Client(
-                    logger=False,
-                    engineio_logger=False,
-                    reconnection=False,  # Don't auto-reconnect for raw capture
-                )
-
-                # Setup catch-all handler BEFORE connecting
-                self._setup_handlers()
-
                 # Connect
                 logger.info(f"Starting raw capture to: {self.capture_file}")
                 self.is_capturing = True
@@ -112,12 +107,27 @@ class RawCaptureRecorder:
                 if self.on_capture_started:
                     self.on_capture_started(self.capture_file)
 
-                # Connect in background thread to not block UI
-                connect_thread = threading.Thread(
-                    target=self._connect_async,
-                    daemon=True
-                )
-                connect_thread.start()
+                if socketio is None:
+                    logger.error("python-socketio not installed - raw capture will not connect")
+                    if self.on_connection_status:
+                        self.on_connection_status(False, "python-socketio not installed")
+                else:
+                    # Create fresh Socket.IO client
+                    self.sio = socketio.Client(
+                        logger=False,
+                        engineio_logger=False,
+                        reconnection=False,  # Don't auto-reconnect for raw capture
+                    )
+
+                    # Setup catch-all handler BEFORE connecting
+                    self._setup_handlers()
+
+                    # Connect in background thread to not block UI
+                    connect_thread = threading.Thread(
+                        target=self._connect_async,
+                        daemon=True
+                    )
+                    connect_thread.start()
 
                 return self.capture_file
 

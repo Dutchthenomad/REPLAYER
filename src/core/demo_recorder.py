@@ -53,6 +53,7 @@ class DemoRecorderSink:
     # Class-level lock for managing multiple instances
     _instances_lock = threading.Lock()
     _active_instances: List['DemoRecorderSink'] = []
+    _shutting_down = False
 
     def __init__(self, base_dir: Path, buffer_size: int = 100):
         """
@@ -106,13 +107,18 @@ class DemoRecorderSink:
     @classmethod
     def _cleanup_all_instances(cls):
         """Clean up all active recorder instances on exit"""
+        # Avoid deadlock: `instance.close()` also acquires `_instances_lock`.
+        cls._shutting_down = True
         with cls._instances_lock:
-            for instance in cls._active_instances:
-                try:
-                    instance.close()
-                except Exception as e:
-                    logger.error(f"Error cleaning up demo recorder: {e}")
+            instances = list(cls._active_instances)
             cls._active_instances.clear()
+
+        for instance in instances:
+            try:
+                instance.close()
+            except Exception:
+                # Avoid noisy/logging failures during interpreter shutdown.
+                pass
 
     # -------------------------------------------------------------------------
     # Session Management
@@ -512,8 +518,17 @@ class DemoRecorderSink:
                 return
 
             # End active session (which ends active game)
-            if self._session_id is not None:
+            if self._session_id is not None and not self.__class__._shutting_down:
                 self.end_session()
+            elif self.__class__._shutting_down:
+                try:
+                    if self._file_handle:
+                        self._file_handle.close()
+                except Exception:
+                    pass
+                self._file_handle = None
+                self._buffer = []
+                self._pending_actions.clear()
 
             self._closed = True
 
@@ -522,7 +537,8 @@ class DemoRecorderSink:
                 if self in self._active_instances:
                     self._active_instances.remove(self)
 
-            logger.info("DemoRecorderSink closed")
+            if not self.__class__._shutting_down:
+                logger.info("DemoRecorderSink closed")
 
     def __enter__(self):
         """Context manager support"""

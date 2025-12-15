@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from datetime import datetime
 from typing import Optional, Dict, Any
 import json
+import os
 
 # Try to import colorlog for colored console output (optional)
 try:
@@ -35,8 +36,15 @@ class LoggerService:
         self.handlers = {}
         
         # Create log directory
-        self.log_dir = Path(self.config.get('log_dir', './logs'))
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir = Path(self.config.get("log_dir", "./logs"))
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            if not os.access(self.log_dir, os.W_OK):
+                raise PermissionError(f"Log directory not writable: {self.log_dir}")
+        except Exception:
+            # Fall back to a local writable directory to avoid crashing tests/app
+            self.log_dir = Path("./logs")
+            self.log_dir.mkdir(parents=True, exist_ok=True)
         
         # Setup root logger
         self._setup_root_logger()
@@ -114,12 +122,16 @@ class LoggerService:
                             level: Optional[int] = None) -> logging.Handler:
         """Create rotating file handler"""
         file_path = self.log_dir / filename
-        
-        handler = RotatingFileHandler(
-            file_path,
-            maxBytes=self.config.get('max_bytes'),
-            backupCount=self.config.get('backup_count')
-        )
+
+        try:
+            handler: logging.Handler = RotatingFileHandler(
+                file_path,
+                maxBytes=self.config.get("max_bytes"),
+                backupCount=self.config.get("backup_count"),
+            )
+        except OSError:
+            # Don't fail hard if filesystem isn't writable (common in CI/sandboxes).
+            handler = logging.StreamHandler(sys.stderr)
         
         handler.setLevel(
             level or getattr(logging, self.config.get('file_level', 'DEBUG'))
@@ -139,13 +151,16 @@ class LoggerService:
     def _create_performance_handler(self) -> logging.Handler:
         """Create handler for performance metrics"""
         perf_path = self.log_dir / 'performance.log'
-        
-        handler = TimedRotatingFileHandler(
-            perf_path,
-            when='midnight',
-            interval=1,
-            backupCount=7
-        )
+
+        try:
+            handler: logging.Handler = TimedRotatingFileHandler(
+                perf_path,
+                when="midnight",
+                interval=1,
+                backupCount=7,
+            )
+        except OSError:
+            handler = logging.StreamHandler(sys.stderr)
         
         handler.setLevel(logging.INFO)
         handler.setFormatter(JsonFormatter())

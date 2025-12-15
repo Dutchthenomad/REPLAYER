@@ -1,4 +1,5 @@
 """Tests for CDP WebSocket Interceptor."""
+import asyncio
 import pytest
 from unittest.mock import Mock, MagicMock, patch, AsyncMock
 from sources.cdp_websocket_interceptor import CDPWebSocketInterceptor
@@ -75,6 +76,43 @@ class TestCDPWebSocketInterceptor:
         assert event['event'] == 'gameStateUpdate'
         assert event['data']['price'] == 1.5
         assert event['direction'] == 'received'
+        assert "timestamp" in event
+
+    def test_handle_frame_received_maps_monotonic_timestamp_to_wall_clock(self):
+        """
+        CDP `timestamp` values are monotonic, not epoch.
+
+        For monotonic timestamps, interceptor should map them to a reasonable
+        wall-clock epoch using a captured base offset.
+        """
+        interceptor = CDPWebSocketInterceptor()
+        interceptor.rugs_websocket_id = "ws-123"
+        callback = Mock()
+        interceptor.on_event = callback
+
+        with patch("sources.cdp_websocket_interceptor.time.time", return_value=1700000000.0):
+            interceptor._handle_frame_received(
+                {
+                    "requestId": "ws-123",
+                    "timestamp": 100.0,
+                    "response": {"payloadData": '42["gameStateUpdate",{"price":1.5}]'},
+                }
+            )
+            interceptor._handle_frame_received(
+                {
+                    "requestId": "ws-123",
+                    "timestamp": 101.5,
+                    "response": {"payloadData": '42["gameStateUpdate",{"price":1.6}]'},
+                }
+            )
+
+        assert callback.call_count == 2
+        first = callback.call_args_list[0][0][0]
+        second = callback.call_args_list[1][0][0]
+
+        assert first["timestamp"].startswith("2023") or first["timestamp"].startswith("2024")
+        assert second["timestamp"].startswith("2023") or second["timestamp"].startswith("2024")
+        assert first["timestamp"] != second["timestamp"]
 
     def test_handle_frame_received_ignores_other_websocket(self):
         """Ignores frames from other WebSocket connections."""
@@ -127,14 +165,15 @@ class TestCDPWebSocketInterceptor:
         interceptor.is_connected = True
         interceptor.rugs_websocket_id = 'ws-123'
         mock_client = Mock()
+        mock_client.send = AsyncMock()
         interceptor._cdp_client = mock_client
 
-        interceptor.disconnect()
+        asyncio.run(interceptor.disconnect())
 
         assert interceptor.is_connected is False
         assert interceptor.rugs_websocket_id is None
         assert interceptor._cdp_client is None
-        mock_client.execute.assert_called_with('Network.disable')
+        mock_client.send.assert_called_with('Network.disable')
 
     def test_disconnect_handles_missing_client(self):
         """Disconnect handles case where client is None."""
@@ -143,7 +182,7 @@ class TestCDPWebSocketInterceptor:
         interceptor._cdp_client = None
 
         # Should not raise exception
-        interceptor.disconnect()
+        asyncio.run(interceptor.disconnect())
 
         assert interceptor.is_connected is False
 
@@ -152,11 +191,11 @@ class TestCDPWebSocketInterceptor:
         interceptor = CDPWebSocketInterceptor()
         interceptor.is_connected = True
         mock_client = Mock()
-        mock_client.execute.side_effect = Exception("CDP error")
+        mock_client.send = AsyncMock(side_effect=Exception("CDP error"))
         interceptor._cdp_client = mock_client
 
         # Should not raise exception
-        interceptor.disconnect()
+        asyncio.run(interceptor.disconnect())
 
         assert interceptor.is_connected is False
         assert interceptor._cdp_client is None

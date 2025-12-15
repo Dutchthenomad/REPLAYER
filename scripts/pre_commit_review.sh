@@ -31,6 +31,11 @@ MCP_CODE_CHECKER="${VENV_PATH}/bin/mcp-code-checker"
 # Report file
 REPORT_FILE="${PROJECT_ROOT}/review_report_$(date +%Y%m%d_%H%M%S).txt"
 
+# Tool caches (avoid writing to $HOME/.cache in restricted environments)
+export PYLINTHOME="${PROJECT_ROOT}/.cache/pylint"
+export MYPY_CACHE_DIR="${PROJECT_ROOT}/.cache/mypy"
+mkdir -p "${PYLINTHOME}" "${MYPY_CACHE_DIR}"
+
 ###############################################################################
 # Helper Functions
 ###############################################################################

@@ -511,8 +511,8 @@ class BrowserBridge:
                 self.cdp_manager.page
             )
 
-            # Connect the interceptor
-            if self._cdp_interceptor.connect(cdp_session):
+            # Connect the interceptor (async)
+            if await self._cdp_interceptor.connect(cdp_session):
                 self._event_source_manager.set_cdp_available(True)
                 self._event_source_manager.switch_to_best_source()
                 self._rag_ingester.start_session()
@@ -530,7 +530,7 @@ class BrowserBridge:
         Disconnects the interceptor and updates event source manager.
         """
         try:
-            self._cdp_interceptor.disconnect()
+            await self._cdp_interceptor.disconnect()
             self._event_source_manager.set_cdp_available(False)
             self._event_source_manager.switch_to_best_source()
             self._rag_ingester.stop_session()

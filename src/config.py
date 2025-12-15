@@ -202,13 +202,19 @@ class Config:
         }
     }
     
-    def __init__(self, config_file: Optional[str] = None, validate: bool = True):
+    def __init__(
+        self,
+        config_file: Optional[str] = None,
+        validate: bool = True,
+        ensure_directories: bool = True,
+    ):
         """
         Initialize configuration with optional validation
         
         Args:
             config_file: Optional path to JSON config file
             validate: Whether to validate configuration on init
+            ensure_directories: Create required directories on init
         """
         self._lock = threading.RLock()
         self._files_config: Optional[dict] = None
@@ -217,7 +223,8 @@ class Config:
         self._logger = None  # Will be set after logger initialization
         
         # Create directories if they don't exist
-        self._ensure_directories()
+        if ensure_directories:
+            self.ensure_directories()
         
         # Load custom configuration if provided
         if config_file:
@@ -235,9 +242,10 @@ class Config:
                 self._files_config = self.get_files_config()
             return self._files_config
     
-    def _ensure_directories(self) -> Dict[str, bool]:
-        """Ensure all required directories exist, track success"""
+    def ensure_directories(self) -> Dict[str, bool]:
+        """Ensure all required directories exist, track success."""
         status: Dict[str, bool] = {}
+        logger_local = self._logger or logging.getLogger(__name__)
         try:
             files_config = self.FILES
             for key in ['recordings_dir', 'config_dir', 'log_dir']:
@@ -246,10 +254,10 @@ class Config:
                     path.mkdir(parents=True, exist_ok=True)
                     status[key] = path.exists() and path.is_dir()
                 except Exception as e:
-                    print(f"Warning: Could not create {key}: {e}")
+                    logger_local.warning(f"Could not create {key}: {e}")
                     status[key] = False
         except Exception as e:
-            print(f"Warning: Could not create directories: {e}")
+            logger_local.warning(f"Could not create directories: {e}")
         self._directory_status = status
         return status
     
@@ -513,25 +521,9 @@ class Config:
         }
 
 
-# Create global configuration instance
-config = Config(validate=False)  # Skip validation on initial import
-
-# Set up logging after config is created
-logging.basicConfig(
-    level=getattr(logging, config.LOGGING['level']),
-    format=config.LOGGING['format'],
-    datefmt=config.LOGGING['date_format']
-)
-
-# Now set the logger
-logger = logging.getLogger(__name__)
-config.set_logger(logger)
-
-# Validate configuration after logger is set
-try:
-    config.validate()
-    logger.info("Configuration validated successfully")
-except ConfigError as e:
-    logger.critical(f"FATAL: Configuration validation failed: {e}")
-    print(f"FATAL: Configuration validation failed: {e}", file=sys.stderr)
-    sys.exit(1)
+# Create global configuration instance.
+#
+# IMPORTANT: Keep this import side-effect free. Runtime initialization (logging
+# configuration, directory creation, validation) must happen in an explicit app
+# startup path (see `src/main.py`).
+config = Config(validate=False, ensure_directories=False)

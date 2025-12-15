@@ -36,6 +36,7 @@ class RecorderSink:
     # Class-level lock for managing multiple instances
     _instances_lock = threading.Lock()
     _active_instances = []
+    _shutting_down = False
 
     def __init__(self, recordings_dir: Path, buffer_size: int = 100, max_buffer_size: int = 1000):
         """
@@ -95,13 +96,18 @@ class RecorderSink:
     @classmethod
     def _cleanup_all_instances(cls):
         """Clean up all active recorder instances on exit"""
+        cls._shutting_down = True
+        # Avoid deadlock: `instance.close()` also acquires `_instances_lock`.
         with cls._instances_lock:
-            for instance in cls._active_instances:
-                try:
-                    instance.close()
-                except Exception as e:
-                    logger.error(f"Error cleaning up recorder: {e}")
+            instances = list(cls._active_instances)
             cls._active_instances.clear()
+
+        for instance in instances:
+            try:
+                instance.close()
+            except Exception:
+                # Avoid noisy/logging failures during interpreter shutdown.
+                pass
 
     @contextmanager
     def _safe_file_operation(self):
@@ -497,7 +503,16 @@ class RecorderSink:
                 
             # Stop any active recording
             if self.file_handle:
-                self.stop_recording()
+                if self.__class__._shutting_down:
+                    try:
+                        self.file_handle.close()
+                    except Exception:
+                        pass
+                    self.file_handle = None
+                    self.current_file = None
+                    self.buffer = []
+                else:
+                    self.stop_recording()
             
             self._closed = True
             
@@ -506,7 +521,8 @@ class RecorderSink:
                 if self in self._active_instances:
                     self._active_instances.remove(self)
             
-            logger.info("RecorderSink closed")
+            if not self.__class__._shutting_down:
+                logger.info("RecorderSink closed")
 
     def __enter__(self):
         """Context manager support"""

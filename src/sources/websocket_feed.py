@@ -18,7 +18,6 @@ Usage:
         print(f"Tick {signal['tickCount']}: {signal['price']:.4f}x")
 """
 
-import socketio
 import time
 import threading
 from typing import Dict, Any, Optional, Callable
@@ -31,6 +30,17 @@ from collections import deque  # AUDIT FIX: For efficient latency tracking
 from models import GameTick
 
 logger = logging.getLogger(__name__)
+
+# Optional dependency: python-socketio is only required for live connections.
+# Tests patch `sources.websocket_feed.socketio.Client`, so we must expose a
+# `socketio` symbol even when the dependency isn't installed.
+try:  # pragma: no cover
+    import socketio  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    class _SocketIOShim:
+        Client = None
+
+    socketio = _SocketIOShim()  # type: ignore
 
 # Phase 3 refactoring: Import extracted classes from modular components
 from sources.feed_monitors import (
@@ -47,6 +57,7 @@ from sources.feed_rate_limiter import (
     PriorityRateLimiter
 )
 from sources.game_state_machine import GameSignal, GameStateMachine
+from services.event_bus import event_bus, Events
 
 
 class WebSocketFeed:
@@ -60,6 +71,12 @@ class WebSocketFeed:
             log_level: Logging level (DEBUG, INFO, WARN, ERROR)
             rate_limit: Max signals per second (PHASE 3.1 AUDIT FIX)
         """
+        if getattr(socketio, "Client", None) is None:
+            raise ModuleNotFoundError(
+                "python-socketio is required for WebSocketFeed. "
+                "Install with `pip install python-socketio[client]`."
+            )
+
         self.server_url = 'https://backend.rugs.fun?frontend-version=1.0'
 
         # AUDIT FIX: Configure Socket.IO with heartbeat and reconnection
@@ -257,11 +274,23 @@ class WebSocketFeed:
                 self.logger.error(f"Error handling game state update: {e}", exc_info=True)
                 self.metrics['errors'] += 1
 
-        # Catch-all for noise tracking
+        # Catch-all for noise tracking + Debug Terminal publishing
         @self.sio.on('*')
         def catch_all(event, *args):
             # AUDIT FIX: Error boundary for catch-all handler
             try:
+                # Publish ALL events to EventBus for Debug Terminal display
+                # Format matches CDP bridge: {'data': event_dict}
+                event_bus.publish(Events.WS_RAW_EVENT, {
+                    'data': {
+                        'event': event,
+                        'data': args[0] if args else None,
+                        'timestamp': datetime.now().isoformat(),
+                        'source': 'websocket_feed',
+                        'direction': 'received'
+                    }
+                })
+
                 if event != 'gameStateUpdate':
                     self.metrics['noise_filtered'] += 1
                     self.logger.debug(f'❌ NOISE filtered: {event}')

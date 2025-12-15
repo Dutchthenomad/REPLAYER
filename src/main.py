@@ -65,6 +65,10 @@ class Application:
             # Phase 8.5: Store live mode flag
             self.live_mode = live_mode
 
+            # Configure config runtime behavior at startup (avoid import-time side effects)
+            config.set_logger(self.logger)
+            config.ensure_directories()
+
             # Validate configuration at startup
             try:
                 config.validate()

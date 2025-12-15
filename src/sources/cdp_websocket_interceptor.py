@@ -6,7 +6,8 @@ Captures ALL events the browser receives, including authenticated events.
 """
 import logging
 import threading
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 from sources.socketio_parser import parse_socketio_frame
@@ -38,6 +39,11 @@ class CDPWebSocketInterceptor:
 
         # Event callback
         self.on_event: Optional[Callable[[Dict[str, Any]], None]] = None
+
+        # CDP timestamps are monotonic (not UNIX epoch). Capture a base mapping
+        # so we can emit reasonable wall-clock timestamps for downstream consumers.
+        self._cdp_timestamp_base: Optional[float] = None
+        self._wall_epoch_base: Optional[float] = None
 
         # Statistics
         self.events_received: int = 0
@@ -114,11 +120,13 @@ class CDPWebSocketInterceptor:
         if frame.type != 'event' or not frame.event_name:
             return
 
+        event_epoch = self._to_epoch_seconds(timestamp)
+
         # Build event dict
         event = {
             'event': frame.event_name,
             'data': frame.data,
-            'timestamp': datetime.fromtimestamp(timestamp).isoformat() if timestamp else datetime.now().isoformat(),
+            'timestamp': datetime.fromtimestamp(event_epoch, tz=timezone.utc).isoformat(),
             'direction': direction,
             'raw': frame.raw
         }
@@ -137,6 +145,28 @@ class CDPWebSocketInterceptor:
             except Exception as e:
                 logger.error(f"Error in event callback: {e}")
 
+    def _to_epoch_seconds(self, cdp_timestamp: float) -> float:
+        """
+        Convert a CDP timestamp to UNIX epoch seconds.
+
+        Chrome DevTools Protocol uses monotonic timestamps for many events.
+        If the value doesn't look like epoch seconds, map it to wall-clock time
+        using a captured base offset.
+        """
+        if not cdp_timestamp:
+            return time.time()
+
+        # If it looks like epoch seconds already, pass through.
+        if cdp_timestamp >= 1_000_000_000:
+            return float(cdp_timestamp)
+
+        with self._lock:
+            if self._cdp_timestamp_base is None or self._wall_epoch_base is None:
+                self._cdp_timestamp_base = float(cdp_timestamp)
+                self._wall_epoch_base = time.time()
+
+            return self._wall_epoch_base + (float(cdp_timestamp) - self._cdp_timestamp_base)
+
     def _handle_websocket_closed(self, params: Dict[str, Any]):
         """
         Handle Network.webSocketClosed event.
@@ -150,12 +180,12 @@ class CDPWebSocketInterceptor:
                 self.rugs_websocket_id = None
                 logger.info("Rugs.fun WebSocket closed")
 
-    def connect(self, cdp_client) -> bool:
+    async def connect(self, cdp_client) -> bool:
         """
         Connect to CDP and start intercepting.
 
         Args:
-            cdp_client: CDP client with execute() method
+            cdp_client: Playwright CDPSession with send() method
 
         Returns:
             True if connected successfully
@@ -163,8 +193,8 @@ class CDPWebSocketInterceptor:
         try:
             self._cdp_client = cdp_client
 
-            # Enable Network domain
-            cdp_client.execute('Network.enable')
+            # Enable Network domain (Playwright uses async send())
+            await cdp_client.send('Network.enable')
 
             # Subscribe to WebSocket events
             cdp_client.on('Network.webSocketCreated', self._handle_websocket_created)
@@ -180,18 +210,21 @@ class CDPWebSocketInterceptor:
             logger.error(f"Failed to connect CDP interceptor: {e}")
             return False
 
-    def disconnect(self):
+    async def disconnect(self):
         """Stop intercepting and disconnect."""
         if self._cdp_client:
             try:
                 # Disable Network domain to stop receiving events
-                self._cdp_client.execute('Network.disable')
+                await self._cdp_client.send('Network.disable')
             except Exception as e:
                 logger.warning(f"Error disabling Network domain: {e}")
 
         self.is_connected = False
         self.rugs_websocket_id = None
         self._cdp_client = None
+        with self._lock:
+            self._cdp_timestamp_base = None
+            self._wall_epoch_base = None
         logger.info("CDP WebSocket interception stopped")
 
     def get_stats(self) -> Dict[str, Any]:
