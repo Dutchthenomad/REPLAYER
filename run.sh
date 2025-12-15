@@ -4,15 +4,19 @@
 echo "🚀 Starting Rugs Replay Viewer"
 echo "=============================="
 
-# Use rugs-rl-bot venv for ML dependencies compatibility
-VENV_PYTHON="/home/nomad/Desktop/rugs-rl-bot/.venv/bin/python3"
+# Get script directory (robust method)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-cd "$(dirname "$0")/src"
+# Use local REPLAYER venv
+VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+
+cd "$SCRIPT_DIR/src"
 
 if [ -x "$VENV_PYTHON" ]; then
-    echo "Using rugs-rl-bot venv Python"
+    echo "Using REPLAYER venv Python"
     $VENV_PYTHON main.py
 else
-    echo "⚠️  rugs-rl-bot venv not found, using system python3"
-    python3 main.py
+    echo "⚠️  .venv not found at: $SCRIPT_DIR/.venv"
+    echo "Run: cd $SCRIPT_DIR && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+    exit 1
 fi

@@ -79,7 +79,6 @@ class ChartWidget(Canvas):
         """
         try:
             import ttkbootstrap as ttk
-            from tkinter import ttk as tkttk
 
             # Get current theme name
             style = ttk.Style()

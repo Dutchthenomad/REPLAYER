@@ -29,7 +29,6 @@ from pathlib import Path
 from datetime import datetime
 from decimal import Decimal
 import tkinter as tk
-from PIL import ImageGrab  # Requires: pip install pillow
 
 # Add parent directory to Python path to allow imports
 sys.path.append(str(Path(__file__).resolve().parent.parent))

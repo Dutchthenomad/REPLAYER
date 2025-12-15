@@ -1,7 +1,6 @@
 import tkinter as tk
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-from tkinter import PhotoImage
 
 class ModernReplayerUI(ttk.Window):
     def __init__(self):

@@ -23,7 +23,7 @@
 
 ### Project Test Command
 ```bash
-cd src && python3 -m pytest tests/ -v --tb=short
+cd /home/nomad/Desktop/REPLAYER/src && ../.venv/bin/python -m pytest tests/ -v --tb=short
 ```
 
 ### Supporting Documentation
@@ -47,7 +47,7 @@ cd src && python3 -m pytest tests/ -v --tb=short
 - **EventSourceManager** - Auto-switches between CDP and fallback sources
 - **RAGIngester** - Catalogs events for rugs-expert agent
 - **DebugTerminal** - Real-time event viewer (separate window)
-- 780+ tests passing
+- 796 tests passing
 - Modern UI with theme-aware charts
 
 ### What's Next (Phase 12)

@@ -211,32 +211,6 @@ class AudioCuePlayer:
                 import subprocess
                 wav_path = self._get_or_create_wav(sound_type)
                 subprocess.run([self._backend, wav_path], capture_output=True, timeout=2)
-                return
-
-                # Fallback: try common system sound paths
-                sound_files = {
-                    "start": [
-                        "/usr/share/sounds/freedesktop/stereo/message.oga",
-                        "/usr/share/sounds/ubuntu/stereo/message.ogg",
-                    ],
-                    "warning": [
-                        "/usr/share/sounds/freedesktop/stereo/dialog-warning.oga",
-                        "/usr/share/sounds/ubuntu/stereo/dialog-warning.ogg",
-                    ],
-                    "stop": [
-                        "/usr/share/sounds/freedesktop/stereo/complete.oga",
-                        "/usr/share/sounds/ubuntu/stereo/dialog-information.ogg",
-                    ],
-                }
-
-                for sound_path in sound_files.get(sound_type, []):
-                    if os.path.exists(sound_path):
-                        cmd = [self._backend, sound_path]
-                        subprocess.run(cmd, capture_output=True, timeout=2)
-                        return
-
-                # Fallback to bell
-                print("\a", end="", flush=True)
 
             else:
                 # Terminal bell fallback

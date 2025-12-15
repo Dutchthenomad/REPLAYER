@@ -184,13 +184,15 @@ class LiveFeedController:
                     if hasattr(self.parent, 'phase_label'):
                         self.parent.phase_label.config(text="PHASE: LIVE FEED", fg='#00ff88')
 
-                    # Phase 10.6: Auto-start recording
-                    if self._recording_controller:
-                        try:
-                            self._recording_controller.start_session()
-                            self.log("📹 Recording started automatically")
-                        except Exception as rec_e:
-                            logger.error(f"Failed to auto-start recording: {rec_e}")
+                    # Phase 10.6: Auto-start recording DISABLED
+                    # Recording is now controlled via UI toggle, not auto-started
+                    # If you want to re-enable, uncomment below:
+                    # if self._recording_controller:
+                    #     try:
+                    #         self._recording_controller.start_session()
+                    #         self.log("📹 Recording started automatically")
+                    #     except Exception as rec_e:
+                    #         logger.error(f"Failed to auto-start recording: {rec_e}")
 
                 self.root.after(0, handle_connected)
 

@@ -2,7 +2,7 @@
 Enumerations for game states and statuses
 """
 
-from enum import Enum, auto
+from enum import Enum
 
 
 class Phase(str, Enum):

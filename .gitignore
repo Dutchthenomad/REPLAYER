@@ -92,3 +92,4 @@ extracted_selectors.py
 # Config backups
 bot_config.json.bak
 *.json.bak
+.cache/
