@@ -111,14 +111,6 @@ class MenuBarBuilder:
             command=self._get_callback('stop_recording')
         )
         recording_menu.add_separator()
-
-        # Recording toggle
-        recording_menu.add_checkbutton(
-            label="Enable Auto-Recording (Legacy)",
-            variable=self.variables.get('recording_var'),
-            command=self._get_callback('toggle_recording')
-        )
-        recording_menu.add_separator()
         recording_menu.add_command(
             label="Open Recordings Folder",
             command=self._get_callback('open_recordings_folder')
@@ -127,17 +119,6 @@ class MenuBarBuilder:
             label="Show Recording Status",
             command=self._get_callback('show_recording_status')
         )
-
-        # Demo Recording submenu (legacy)
-        demo_menu = tk.Menu(recording_menu, tearoff=0)
-        recording_menu.add_cascade(label="Demo Recording (Legacy)", menu=demo_menu)
-        demo_menu.add_command(label="Start Session", command=self._get_callback('start_demo_session'))
-        demo_menu.add_command(label="End Session", command=self._get_callback('end_demo_session'))
-        demo_menu.add_separator()
-        demo_menu.add_command(label="Start Game", command=self._get_callback('start_demo_game'))
-        demo_menu.add_command(label="End Game", command=self._get_callback('end_demo_game'))
-        demo_menu.add_separator()
-        demo_menu.add_command(label="Show Status", command=self._get_callback('show_demo_status'))
 
     def _build_bot_menu(self, menubar: tk.Menu):
         """Build Bot menu"""

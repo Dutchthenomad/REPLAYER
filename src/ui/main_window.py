@@ -223,13 +223,17 @@ class MainWindow:
         self.timing_overlay_var = tk.BooleanVar(value=False)  # Hidden by default
 
         # ========== ROW 1: STATUS BAR (Phase Issue-4: Using builder) ==========
-        status_widgets = StatusBarBuilder(self.root).build()
+        status_widgets = StatusBarBuilder(
+            self.root,
+            toggle_recording=self._toggle_recording_from_button
+        ).build()
         self.tick_label = status_widgets['tick_label']
         self.price_label = status_widgets['price_label']
         self.phase_label = status_widgets['phase_label']
         self.player_profile_label = status_widgets['player_profile_label']
         self.browser_status_label = status_widgets['browser_status_label']
         self.source_label = status_widgets['source_label']
+        self.recording_toggle = status_widgets['recording_toggle']
 
         # ========== ROW 2: CHART AREA (Phase Issue-4: Using builder) ==========
         chart_widgets = ChartBuilder(self.root).build()
@@ -1491,6 +1495,44 @@ Recordings Directory: {self.recording_controller.recordings_path}
         except Exception as e:
             logger.error(f"Failed to get recording status: {e}")
             messagebox.showerror("Error", f"Failed to get status: {e}")
+
+    def _toggle_recording_from_button(self):
+        """Toggle recording on/off from the status bar button."""
+        try:
+            if not hasattr(self, 'recording_controller'):
+                logger.warning("RecordingController not initialized yet")
+                return
+
+            if self.recording_controller.is_active:
+                self.recording_controller.stop_session()
+                self._update_recording_toggle_ui(False)
+                self.toast.show("Recording stopped", "info")
+            else:
+                # Start recording with default config (or show dialog)
+                if self.recording_controller.start_session():
+                    self._update_recording_toggle_ui(True)
+                    self.toast.show("Recording started", "success")
+        except Exception as e:
+            logger.error(f"Failed to toggle recording: {e}")
+            self.toast.show(f"Recording error: {e}", "error")
+
+    def _update_recording_toggle_ui(self, is_recording: bool):
+        """Update the recording toggle button appearance."""
+        if not hasattr(self, 'recording_toggle'):
+            return
+
+        if is_recording:
+            self.recording_toggle.config(
+                text="\u23FA REC ON",  # ⏺ REC ON
+                bg='#cc0000',
+                fg='white'
+            )
+        else:
+            self.recording_toggle.config(
+                text="\u23FA REC OFF",  # ⏺ REC OFF
+                bg='#333333',
+                fg='#888888'
+            )
 
     # ========================================================================
     # RAW CAPTURE HANDLERS (Developer Tools)
