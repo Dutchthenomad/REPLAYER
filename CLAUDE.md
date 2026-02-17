@@ -151,6 +151,12 @@ cd src && python3 -m pytest tests/ -v       # All tests
 cd src && python3 -m pytest tests/ --cov=.  # With coverage
 ```
 
+### Repository Management
+```bash
+./check_repos.sh                            # Check git status of all repos
+python3 scripts/check_repo_status.py        # Detailed repo status checker
+```
+
 ### CDP Browser Setup
 ```bash
 python3 scripts/test_cdp_connection.py      # Test connection

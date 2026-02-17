@@ -189,7 +189,27 @@ REPLAYER/
 
 ---
 
-## Running Tests
+## Development Tools
+
+### Check Repository Status
+
+Check git status across REPLAYER and related repositories:
+
+```bash
+# Check all active repositories
+./check_repos.sh
+
+# Or run directly
+python3 scripts/check_repo_status.py
+```
+
+This checks:
+- Uncommitted changes
+- Unpushed commits
+- Commits behind remote
+- Status of related repos (rugs-rl-bot, CV-BOILER-PLATE-FORK)
+
+### Running Tests
 
 ```bash
 cd src
